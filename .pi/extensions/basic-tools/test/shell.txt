@@ -1,0 +1,34 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "shell[1]{exitCode,durationMs,stdout,stderr}:\n  0,8,\"hello\\n\",\"\""
+    }
+  ],
+  "isError": false,
+  "details": {
+    "cwd": "/home/rona/.pi/agent/pi-structural-tools",
+    "command": "echo hello",
+    "envResolved": "auto (no flox/direnv detected, plain nu)",
+    "configResolved": "clean (no config)",
+    "exitCode": 0,
+    "stdout": "hello\n",
+    "stderr": "",
+    "durationMs": 8,
+    "truncated": false,
+    "timedOut": false
+  }
+}
+
+── content.text ──
+shell[1]{exitCode,durationMs,stdout,stderr}:
+  0,8,"hello\n",""
+
+── collapsed ──
+exit 0 8ms hello
+
+── expanded ──
+exit 0 8ms hello
+env: auto (no flox/direnv detected, plain nu)
+hello
+

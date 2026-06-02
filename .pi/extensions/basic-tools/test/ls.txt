@@ -1,0 +1,244 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "ls:\n  \"/home/rona/.pi/agent/pi-structural-tools/src\"[24]{name,path,type,size,modified}:\n    ast-search.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts,file,1897,\"2026-05-28 19:27:56\"\n    ast-search.ts,/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,file,19007,\"2026-05-29 20:25:57\"\n    display.ts,/home/rona/.pi/agent/pi-structural-tools/src/display.ts,file,18843,\"2026-05-29 20:30:40\"\n    edit.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts,file,4788,\"2026-05-28 21:08:50\"\n    edit.ts,/home/rona/.pi/agent/pi-structural-tools/src/edit.ts,file,27181,\"2026-05-29 20:30:29\"\n    file-checkpoint.ts,/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts,file,7855,\"2026-05-30 06:35:38\"\n    find.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/find.test.ts,file,1312,\"2026-05-28 19:28:04\"\n    find.ts,/home/rona/.pi/agent/pi-structural-tools/src/find.ts,file,14545,\"2026-05-29 20:23:53\"\n    grep.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts,file,2209,\"2026-05-28 19:28:08\"\n    grep.ts,/home/rona/.pi/agent/pi-structural-tools/src/grep.ts,file,16227,\"2026-05-29 19:37:41\"\n    invoke.ts,/home/rona/.pi/agent/pi-structural-tools/src/invoke.ts,file,5802,\"2026-05-30 06:38:24\"\n    linehash.ts,/home/rona/.pi/agent/pi-structural-tools/src/linehash.ts,file,2833,\"2026-05-20 18:23:42\"\n    ls.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts,file,1699,\"2026-05-28 20:32:47\"\n    ls.ts,/home/rona/.pi/agent/pi-structural-tools/src/ls.ts,file,19249,\"2026-05-29 20:24:17\"\n    output.ts,/home/rona/.pi/agent/pi-structural-tools/src/output.ts,file,3239,\"2026-05-20 12:29:39\"\n    read.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/read.test.ts,file,2539,\"2026-05-29 08:39:31\"\n    read.ts,/home/rona/.pi/agent/pi-structural-tools/src/read.ts,file,15771,\"2026-05-29 19:57:36\"\n    settings.ts,/home/rona/.pi/agent/pi-structural-tools/src/settings.ts,file,10792,\"2026-05-28 11:54:54\"\n    shell.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,file,11451,\"2026-05-29 09:00:26\"\n    shell.ts,/home/rona/.pi/agent/pi-structural-tools/src/shell.ts,file,38043,\"2026-05-29 20:26:18\"\n    test-helpers.ts,/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,file,2358,\"2026-05-28 12:15:15\"\n    toon.ts,/home/rona/.pi/agent/pi-structural-tools/src/toon.ts,file,1937,\"2026-05-20 12:29:02\"\n    write.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/write.test.ts,file,3596,\"2026-05-28 21:12:11\"\n    write.ts,/home/rona/.pi/agent/pi-structural-tools/src/write.ts,file,16916,\"2026-05-29 08:53:59\""
+    }
+  ],
+  "details": {
+    "path": "/home/rona/.pi/agent/pi-structural-tools/src",
+    "entries": [
+      {
+        "name": "ast-search.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts",
+        "type": "file",
+        "size": 1897,
+        "modified": "2026-05-28 19:27:56"
+      },
+      {
+        "name": "ast-search.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts",
+        "type": "file",
+        "size": 19007,
+        "modified": "2026-05-29 20:25:57"
+      },
+      {
+        "name": "display.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/display.ts",
+        "type": "file",
+        "size": 18843,
+        "modified": "2026-05-29 20:30:40"
+      },
+      {
+        "name": "edit.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts",
+        "type": "file",
+        "size": 4788,
+        "modified": "2026-05-28 21:08:50"
+      },
+      {
+        "name": "edit.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "type": "file",
+        "size": 27181,
+        "modified": "2026-05-29 20:30:29"
+      },
+      {
+        "name": "file-checkpoint.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts",
+        "type": "file",
+        "size": 7855,
+        "modified": "2026-05-30 06:35:38"
+      },
+      {
+        "name": "find.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/find.test.ts",
+        "type": "file",
+        "size": 1312,
+        "modified": "2026-05-28 19:28:04"
+      },
+      {
+        "name": "find.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/find.ts",
+        "type": "file",
+        "size": 14545,
+        "modified": "2026-05-29 20:23:53"
+      },
+      {
+        "name": "grep.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts",
+        "type": "file",
+        "size": 2209,
+        "modified": "2026-05-28 19:28:08"
+      },
+      {
+        "name": "grep.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/grep.ts",
+        "type": "file",
+        "size": 16227,
+        "modified": "2026-05-29 19:37:41"
+      },
+      {
+        "name": "invoke.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/invoke.ts",
+        "type": "file",
+        "size": 5802,
+        "modified": "2026-05-30 06:38:24"
+      },
+      {
+        "name": "linehash.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/linehash.ts",
+        "type": "file",
+        "size": 2833,
+        "modified": "2026-05-20 18:23:42"
+      },
+      {
+        "name": "ls.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts",
+        "type": "file",
+        "size": 1699,
+        "modified": "2026-05-28 20:32:47"
+      },
+      {
+        "name": "ls.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ls.ts",
+        "type": "file",
+        "size": 19249,
+        "modified": "2026-05-29 20:24:17"
+      },
+      {
+        "name": "output.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/output.ts",
+        "type": "file",
+        "size": 3239,
+        "modified": "2026-05-20 12:29:39"
+      },
+      {
+        "name": "read.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/read.test.ts",
+        "type": "file",
+        "size": 2539,
+        "modified": "2026-05-29 08:39:31"
+      },
+      {
+        "name": "read.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/read.ts",
+        "type": "file",
+        "size": 15771,
+        "modified": "2026-05-29 19:57:36"
+      },
+      {
+        "name": "settings.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/settings.ts",
+        "type": "file",
+        "size": 10792,
+        "modified": "2026-05-28 11:54:54"
+      },
+      {
+        "name": "shell.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts",
+        "type": "file",
+        "size": 11451,
+        "modified": "2026-05-29 09:00:26"
+      },
+      {
+        "name": "shell.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+        "type": "file",
+        "size": 38043,
+        "modified": "2026-05-29 20:26:18"
+      },
+      {
+        "name": "test-helpers.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts",
+        "type": "file",
+        "size": 2358,
+        "modified": "2026-05-28 12:15:15"
+      },
+      {
+        "name": "toon.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/toon.ts",
+        "type": "file",
+        "size": 1937,
+        "modified": "2026-05-20 12:29:02"
+      },
+      {
+        "name": "write.test.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/write.test.ts",
+        "type": "file",
+        "size": 3596,
+        "modified": "2026-05-28 21:12:11"
+      },
+      {
+        "name": "write.ts",
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/write.ts",
+        "type": "file",
+        "size": 16916,
+        "modified": "2026-05-29 08:53:59"
+      }
+    ],
+    "totalEntries": 24,
+    "returnedEntries": 24,
+    "truncated": false,
+    "all": false,
+    "tree": false
+  }
+}
+
+── content.text ──
+ls:
+  "/home/rona/.pi/agent/pi-structural-tools/src"[24]{name,path,type,size,modified}:
+    ast-search.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts,file,1897,"2026-05-28 19:27:56"
+    ast-search.ts,/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,file,19007,"2026-05-29 20:25:57"
+    display.ts,/home/rona/.pi/agent/pi-structural-tools/src/display.ts,file,18843,"2026-05-29 20:30:40"
+    edit.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts,file,4788,"2026-05-28 21:08:50"
+    edit.ts,/home/rona/.pi/agent/pi-structural-tools/src/edit.ts,file,27181,"2026-05-29 20:30:29"
+    file-checkpoint.ts,/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts,file,7855,"2026-05-30 06:35:38"
+    find.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/find.test.ts,file,1312,"2026-05-28 19:28:04"
+    find.ts,/home/rona/.pi/agent/pi-structural-tools/src/find.ts,file,14545,"2026-05-29 20:23:53"
+    grep.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts,file,2209,"2026-05-28 19:28:08"
+    grep.ts,/home/rona/.pi/agent/pi-structural-tools/src/grep.ts,file,16227,"2026-05-29 19:37:41"
+    invoke.ts,/home/rona/.pi/agent/pi-structural-tools/src/invoke.ts,file,5802,"2026-05-30 06:38:24"
+    linehash.ts,/home/rona/.pi/agent/pi-structural-tools/src/linehash.ts,file,2833,"2026-05-20 18:23:42"
+    ls.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts,file,1699,"2026-05-28 20:32:47"
+    ls.ts,/home/rona/.pi/agent/pi-structural-tools/src/ls.ts,file,19249,"2026-05-29 20:24:17"
+    output.ts,/home/rona/.pi/agent/pi-structural-tools/src/output.ts,file,3239,"2026-05-20 12:29:39"
+    read.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/read.test.ts,file,2539,"2026-05-29 08:39:31"
+    read.ts,/home/rona/.pi/agent/pi-structural-tools/src/read.ts,file,15771,"2026-05-29 19:57:36"
+    settings.ts,/home/rona/.pi/agent/pi-structural-tools/src/settings.ts,file,10792,"2026-05-28 11:54:54"
+    shell.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,file,11451,"2026-05-29 09:00:26"
+    shell.ts,/home/rona/.pi/agent/pi-structural-tools/src/shell.ts,file,38043,"2026-05-29 20:26:18"
+    test-helpers.ts,/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,file,2358,"2026-05-28 12:15:15"
+    toon.ts,/home/rona/.pi/agent/pi-structural-tools/src/toon.ts,file,1937,"2026-05-20 12:29:02"
+    write.test.ts,/home/rona/.pi/agent/pi-structural-tools/src/write.test.ts,file,3596,"2026-05-28 21:12:11"
+    write.ts,/home/rona/.pi/agent/pi-structural-tools/src/write.ts,file,16916,"2026-05-29 08:53:59"
+
+── collapsed ──
+24 entries
+
+── expanded ──
+[36m/home/rona/.pi/agent/pi-structural-tools/[1;34msrc[0m
+[1;90m├── [33mast-search.test.ts[0m
+[1;90m├── [33mast-search.ts[0m
+[1;90m├── [33mdisplay.ts[0m
+[1;90m├── [33medit.test.ts[0m
+[1;90m├── [33medit.ts[0m
+[1;90m├── [33mfile-checkpoint.ts[0m
+[1;90m├── [33mfind.test.ts[0m
+[1;90m├── [33mfind.ts[0m
+[1;90m├── [33mgrep.test.ts[0m
+[1;90m├── [33mgrep.ts[0m
+[1;90m├── [33minvoke.ts[0m
+[1;90m├── [33mlinehash.ts[0m
+[1;90m├── [33mls.test.ts[0m
+[1;90m├── [33mls.ts[0m
+[1;90m├── [33moutput.ts[0m
+[1;90m├── [33mread.test.ts[0m
+[1;90m├── [33mread.ts[0m
+[1;90m├── [33msettings.ts[0m
+[1;90m├── [33mshell.test.ts[0m
+[1;90m├── [33mshell.ts[0m
+[1;90m├── [33mtest-helpers.ts[0m
+[1;90m├── [33mtoon.ts[0m
+[1;90m├── [33mwrite.test.ts[0m
+[1;90m└── [33mwrite.ts[0m

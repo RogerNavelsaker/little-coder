@@ -1,0 +1,196 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "grep:\n  registerTool[14]{path,line,text,anchor}:\n    /home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts,152,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,594,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,28,\"register: (pi: { registerTool(t: unknown): void }) => void,\",12bc\n    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,33,\"register({ registerTool: (t) => { capturedTool = t; } });\",664f\n    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,34,\"if (!capturedTool) throw new Error(\\\"registerTool not called\\\");\",2f90\n    /home/rona/.pi/agent/pi-structural-tools/src/find.ts,203,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,600,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/read.ts,338,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,284,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/grep.ts,238,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,378,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,284,\"pi.registerTool({\",\"20e4\"\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,24,\"const schemaPi = { registerTool: (t: any) => { registeredSchema = t.parameters; } };\",80d3\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,31,\"registerTool: (t: any) => {\",69a5"
+    }
+  ],
+  "details": {
+    "query": "registerTool",
+    "cwd": "/home/rona/.pi/agent/pi-structural-tools",
+    "patternMode": "regex",
+    "searchedPaths": [
+      "/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/find.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/read.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/grep.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/write.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/ls.ts",
+      "/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts"
+    ],
+    "truncated": false,
+    "totalMatches": 14,
+    "returnedMatches": 14,
+    "matches": [
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts",
+        "line": 152,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 594,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts",
+        "line": 28,
+        "anchor": "12bc",
+        "text": "register: (pi: { registerTool(t: unknown): void }) => void,"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts",
+        "line": 33,
+        "anchor": "664f",
+        "text": "register({ registerTool: (t) => { capturedTool = t; } });"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts",
+        "line": 34,
+        "anchor": "2f90",
+        "text": "if (!capturedTool) throw new Error(\"registerTool not called\");"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/find.ts",
+        "line": 203,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+        "line": 600,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/read.ts",
+        "line": 338,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts",
+        "line": 284,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/grep.ts",
+        "line": 238,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/write.ts",
+        "line": 378,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ls.ts",
+        "line": 284,
+        "anchor": "20e4",
+        "text": "pi.registerTool({"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts",
+        "line": 24,
+        "anchor": "80d3",
+        "text": "const schemaPi = { registerTool: (t: any) => { registeredSchema = t.parameters; } };"
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts",
+        "line": 31,
+        "anchor": "69a5",
+        "text": "registerTool: (t: any) => {"
+      }
+    ]
+  }
+}
+
+── content.text ──
+grep:
+  registerTool[14]{path,line,text,anchor}:
+    /home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts,152,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,594,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,28,"register: (pi: { registerTool(t: unknown): void }) => void,",12bc
+    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,33,"register({ registerTool: (t) => { capturedTool = t; } });",664f
+    /home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts,34,"if (!capturedTool) throw new Error(\"registerTool not called\");",2f90
+    /home/rona/.pi/agent/pi-structural-tools/src/find.ts,203,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,600,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/read.ts,338,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,284,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/grep.ts,238,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,378,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,284,"pi.registerTool({","20e4"
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,24,"const schemaPi = { registerTool: (t: any) => { registeredSchema = t.parameters; } };",80d3
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,31,"registerTool: (t: any) => {",69a5
+
+── collapsed ──
+14 matches for "registerTool"
+
+── expanded ──
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/file-checkpoint.ts[
+     0m
+[38;2;131;148;150m 151[0m 
+[38;2;131;148;150m 152[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 153[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mrevert_file[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/edit.ts[0m
+[38;2;131;148;150m 593[0m 
+[38;2;131;148;150m 594[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 595[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116medit[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/test-helpers.ts[0m
+[38;2;131;148;150m  27[0m [38;2;249;38;114mexport[0m[38;2;248;248;242m [0m[38;2;249;38;114masync[0m[38;2;248;248;242m [0m[38;2;102;217;239mfunction[0m[38;2;248;248;242m [0m[38;2;166;226;46minvokeTool[0m[38;2;248;248;242m<[0m[38;2;166;226;46mP[0m[38;2;248;248;242m>[0m[38;2;248;248;242m([0m
+[38;2;131;148;150m  28[0m [38;2;248;248;242m  [0m[38;2;166;226;46mregister[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;248;248;242m([0m[38;2;253;151;31mpi[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;248;248;242m([0m[38;2;253;151;31mt[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46munknown[0m[38;2;248;248;242m)[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mvoid[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;248;248;242m)[0m[38;2;248;248;242m [0m[38;2;102;217;239m=>[0m[38;2;248;248;242m [0m[38;2;166;226;46mvoid[0m[38;2;248;248;242m,[0m
+[38;2;131;148;150m  29[0m [38;2;248;248;242m  [0m[38;2;253;151;31mparams[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mP[0m[38;2;248;248;242m,[0m
+[38;2;131;148;150m  30[0m [38;2;248;248;242m  [0m[38;2;253;151;31mcwd[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mstring[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;255;255;255mCWD[0m[38;2;248;248;242m,[0m
+[38;2;131;148;150m  31[0m [38;2;248;248;242m)[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mPromise[0m[38;2;248;248;242m<[0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;248;248;242mresult[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m;[0m[38;2;248;248;242m [0m[38;2;248;248;242mtool[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;248;248;242m>[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m  32[0m [38;2;248;248;242m  [0m[38;2;102;217;239mlet[0m[38;2;248;248;242m [0m[38;2;255;255;255mcapturedTool[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;190;132;255mnull[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  33[0m [38;2;248;248;242m  [0m[38;2;166;226;46mregister[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;248;248;242m([0m[38;2;253;151;31mt[0m[38;2;248;248;242m)[0m[38;2;248;248;242m [0m[38;2;102;217;239m=>[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;255;255;255mcapturedTool[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;255;255;255mt[0m[38;2;248;248;242m;[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;255;255;255m)[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  34[0m [38;2;248;248;242m  [0m[38;2;249;38;114mif[0m[38;2;248;248;242m [0m[38;2;255;255;255m([0m[38;2;249;38;114m![0m[38;2;255;255;255mcapturedTool[0m[38;2;255;255;255m)[0m[38;2;248;248;242m [0m[38;2;249;38;114mthrow[0m[38;2;248;248;242m [0m[38;2;249;38;114mnew[0m[38;2;248;248;242m [0m[38;2;166;226;46mError[0m[38;2;255;255;255m([0m[38;2;230;219;116m"[0m[38;2;230;219;116m[48;2;90;70;15mregisterTool[49m not called[0m[38;2;230;219;116m"[0m[38;2;255;255;255m)[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  35[0m [38;2;248;248;242m  [0m[38;2;102;217;239mconst[0m[38;2;248;248;242m [0m[38;2;255;255;255mresult[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;249;38;114mawait[0m[38;2;248;248;242m [0m[38;2;255;255;255mcapturedTool[0m[38;2;248;248;242m.[0m[38;2;166;226;46mexecute[0m[38;2;255;255;255m([0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/find.ts[0m
+[38;2;131;148;150m 202[0m 
+[38;2;131;148;150m 203[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 204[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mfind[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/shell.ts[0m
+[38;2;131;148;150m 599[0m 
+[38;2;131;148;150m 600[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 601[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mshell[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/read.ts[0m
+[38;2;131;148;150m 337[0m 
+[38;2;131;148;150m 338[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 339[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mread[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts[0m
+[38;2;131;148;150m 283[0m 
+[38;2;131;148;150m 284[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 285[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mast_search[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/grep.ts[0m
+[38;2;131;148;150m 237[0m 
+[38;2;131;148;150m 238[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 239[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mgrep[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/write.ts[0m
+[38;2;131;148;150m 377[0m 
+[38;2;131;148;150m 378[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 379[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mwrite[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/ls.ts[0m
+[38;2;131;148;150m 283[0m 
+[38;2;131;148;150m 284[0m [38;2;248;248;242m  [0m[38;2;255;255;255mpi[0m[38;2;248;248;242m.[0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;255;255;255m([0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m 285[0m [38;2;248;248;242m    [0m[38;2;248;248;242mname[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;230;219;116m'[0m[38;2;230;219;116mls[0m[38;2;230;219;116m'[0m[38;2;248;248;242m,[0m
+     File: [1m/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts[0m
+[38;2;131;148;150m  23[0m [38;2;102;217;239mlet[0m[38;2;248;248;242m [0m[38;2;255;255;255mregisteredSchema[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;190;132;255mnull[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  24[0m [38;2;102;217;239mconst[0m[38;2;248;248;242m [0m[38;2;255;255;255mschemaPi[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;248;248;242m([0m[38;2;253;151;31mt[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m)[0m[38;2;248;248;242m [0m[38;2;102;217;239m=>[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m[38;2;248;248;242m [0m[38;2;255;255;255mregisteredSchema[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;255;255;255mt[0m[38;2;248;248;242m.[0m[38;2;255;255;255mparameters[0m[38;2;248;248;242m;[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;248;248;242m [0m[38;2;248;248;242m}[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  25[0m [38;2;166;226;46mregisterShellTool[0m[38;2;255;255;255m([0m[38;2;255;255;255mschemaPi[0m[38;2;255;255;255m)[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  26[0m 
+[38;2;131;148;150m  27[0m [38;2;117;113;94m//[0m[38;2;117;113;94m --- Prompt metadata capture ---[0m
+[38;2;131;148;150m  28[0m [38;2;102;217;239mlet[0m[38;2;248;248;242m [0m[38;2;255;255;255mpromptSnippet[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;230;219;116m"[0m[38;2;230;219;116m"[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  29[0m [38;2;102;217;239mlet[0m[38;2;248;248;242m [0m[38;2;255;255;255mpromptGuidelines[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mstring[0m[38;2;248;248;242m[[0m[38;2;248;248;242m][0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;248;248;242m[[0m[38;2;248;248;242m][0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m  30[0m [38;2;102;217;239mconst[0m[38;2;248;248;242m [0m[38;2;255;255;255mmetaPi[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m  31[0m [38;2;248;248;242m  [0m[38;2;166;226;46m[48;2;90;70;15mregisterTool[49m[0m[38;2;248;248;242m:[0m[38;2;248;248;242m [0m[38;2;248;248;242m([0m[38;2;253;151;31mt[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46many[0m[38;2;248;248;242m)[0m[38;2;248;248;242m [0m[38;2;102;217;239m=>[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m  32[0m [38;2;248;248;242m    [0m[38;2;255;255;255mpromptSnippet[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;255;255;255mt[0m[38;2;248;248;242m.[0m[38;2;255;255;255mpromptSnippet[0m[38;2;248;248;242m [0m[38;2;249;38;114m??[0m[38;2;248;248;242m [0m[38;2;230;219;116m"[0m[38;2;230;219;116m"[0m[38;2;248;248;242m;[0m

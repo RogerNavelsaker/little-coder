@@ -1,0 +1,89 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "find:\n  \"*.test.ts\"[8]{path,type,size,depth}:\n    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts,file,1897,7\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts,file,4788,7\n    /home/rona/.pi/agent/pi-structural-tools/src/find.test.ts,file,1312,7\n    /home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts,file,2209,7\n    /home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts,file,1699,7\n    /home/rona/.pi/agent/pi-structural-tools/src/read.test.ts,file,2539,7\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,file,11451,7\n    /home/rona/.pi/agent/pi-structural-tools/src/write.test.ts,file,3596,7"
+    }
+  ],
+  "details": {
+    "pattern": "*.test.ts",
+    "totalEntries": 8,
+    "returnedEntries": 8,
+    "truncated": false,
+    "entries": [
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts",
+        "type": "file",
+        "size": 1897,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts",
+        "type": "file",
+        "size": 4788,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/find.test.ts",
+        "type": "file",
+        "size": 1312,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts",
+        "type": "file",
+        "size": 2209,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts",
+        "type": "file",
+        "size": 1699,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/read.test.ts",
+        "type": "file",
+        "size": 2539,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts",
+        "type": "file",
+        "size": 11451,
+        "depth": 7
+      },
+      {
+        "path": "/home/rona/.pi/agent/pi-structural-tools/src/write.test.ts",
+        "type": "file",
+        "size": 3596,
+        "depth": 7
+      }
+    ]
+  }
+}
+
+── content.text ──
+find:
+  "*.test.ts"[8]{path,type,size,depth}:
+    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.test.ts,file,1897,7
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.test.ts,file,4788,7
+    /home/rona/.pi/agent/pi-structural-tools/src/find.test.ts,file,1312,7
+    /home/rona/.pi/agent/pi-structural-tools/src/grep.test.ts,file,2209,7
+    /home/rona/.pi/agent/pi-structural-tools/src/ls.test.ts,file,1699,7
+    /home/rona/.pi/agent/pi-structural-tools/src/read.test.ts,file,2539,7
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.test.ts,file,11451,7
+    /home/rona/.pi/agent/pi-structural-tools/src/write.test.ts,file,3596,7
+
+── collapsed ──
+8 files
+
+── expanded ──
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mast-search.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33medit.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mfind.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mgrep.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mls.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mread.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mshell.test.ts[0m
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mwrite.test.ts[0m

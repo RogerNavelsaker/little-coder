@@ -9,11 +9,11 @@ import { spawn, spawnSync } from 'child_process';
 import { resolve } from 'path';
 import { existsSync, readFileSync, writeFileSync, statSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { parseLineHash, extractText, type LineHashRecord } from '../../_shared/linehash.js';
+import { parseLineHash, type LineHashRecord } from './linehash.js';
 import { Text } from '@earendil-works/pi-tui';
-import { formatDiffForTui } from '../../_shared/display.js';
-import { error } from '../../_shared/output.js';
-import { type DisplayMode, formatEditCompact } from '../../_shared/display.js';
+import { error } from './output.js';
+import { type DisplayMode } from './display.js';
+import { encodeToon } from './toon.js';
 
 // Lazy-load diff package (ESM CJS bridge)
 let diffModule: typeof import('/home/rona/.pi/agent/pi-structural-tools/node_modules/diff/libcjs/index.js') | null = null;
@@ -66,7 +66,7 @@ const DELTA_BIN = resolveDeltaBin();
 
 /**
  * Pipe plain diff text through delta for enriched human display.
- * Strips ANSI codes for stable output.
+ * Returns ANSI-colored output (for renderResult) or null on failure.
  */
 function runDelta(diffText: string): string | null {
   try {
@@ -83,9 +83,8 @@ function runDelta(diffText: string): string | null {
       maxBuffer: 1024 * 1024,
     });
     if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return null;
-    // Strip ANSI escape codes for stable output
-    const raw = result.stdout.toString();
-    return raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+    // Return ANSI-colored output as-is
+    return result.stdout.toString();
   } catch {
     return null;
   }
@@ -96,16 +95,19 @@ export interface EditToolOptions {
   priorAnchors?: Map<string, number>;
 }
 
-export interface EditToolParams {
+export interface EditItem {
   path: string;
-  old_text?: string;
+  old_text: string;
   new_text: string;
   mode?: string;
   anchor?: string;
   occurrence?: string;
-  dry_run?: boolean | string;
-  verify_hash?: boolean | string;
   all_occurrences?: boolean | string;
+}
+
+export interface EditToolParams {
+  edits: EditItem[];
+  dry_run?: boolean | string;
   display?: DisplayMode;
 }
 
@@ -147,58 +149,13 @@ function linehashRead(filePath: string): Promise<{ stdout: string; stderr: strin
 }
 
 /**
- * Compute unified diff between two strings.
+ * Compute unified diff between two strings with ±3 lines of context.
  */
-function computeDiff(oldContent: string, newContent: string): string {
+function computeDiff(oldContent: string, newContent: string, filePath = ''): string {
   const mod = getDiffModule();
-  if (!mod || !mod.diffLines) return '';
-  const diffResult = mod.diffLines(oldContent, newContent);
-  // Convert to unified diff format
-  const hunks: string[] = [];
-  let oldLine = 1;
-  let newLine = 1;
-  let inHunk = false;
-
-  for (const part of diffResult) {
-    const lines = part.value.split('\n');
-    // Remove trailing empty string from split
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-
-    if (part.added) {
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(`+${line}`);
-        newLine++;
-      }
-    } else if (part.removed) {
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(`-${line}`);
-        oldLine++;
-      }
-    } else {
-      // Context
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(` ${line}`);
-        oldLine++;
-        newLine++;
-      }
-    }
-  }
-
-  return hunks.join('\n');
+  if (!mod?.createPatch) return '';
+  // Keep --- / +++ header lines so delta can detect language from the filename extension.
+  return mod.createPatch(filePath, oldContent, newContent, '', '', { context: 2 }).trim();
 }
 
 /**
@@ -349,26 +306,8 @@ async function executeReplaceByAnchor(
   // Check if the line actually changed
   if (newLine === currentLine) {
     return {
-      content: [{
-        type: 'text',
-        text: `No changes: line ${match.line} (anchor "${anchor}") is already "${newLine}"`,
-      }],
-      details: {
-        path: absolutePath,
-        applied: false,
-        dry_run: dryRun,
-        unchanged: true,
-        linesChanged: 0,
-        diff: '',
-        beforeAnchors,
-        afterAnchors: null,
-        changedAnchors: [],
-        source: 'linehash',
-        backend: 'linehash+nu',
-        mode: 'replace_by_anchor',
-        anchor,
-        line: match.line,
-      },
+      content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged: 0, diff: null }] } }).text }],
+      details: { path: absolutePath, applied: false, dry_run: dryRun, unchanged: true, linesChanged: 0, diff: null, anchor, line: match.line },
     };
   }
 
@@ -377,60 +316,33 @@ async function executeReplaceByAnchor(
   const newContent = fileLines.join('\n');
 
   // Compute diff
-  const diffText = computeDiff(oldContent, newContent);
+  const diffText = computeDiff(oldContent, newContent, absolutePath);
   const linesChanged = countLines(diffText.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).join('\n'));
 
-  // Try delta rendering
-  const deltaOutput = runDelta(diffText);
-  const backendLabel = deltaOutput ? 'linehash+delta+nu' : 'linehash+nu';
-
-  // Build user-facing text (Phase 21: display-aware)
-  const linesRemoved = diffText.split('\n').filter(l => l.startsWith('-') && !l.startsWith('---')).length;
-  const linesAdded = diffText.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).length;
-  const editCompactResult = {
-    applied: !dryRun,
-    linesChanged,
-    unchanged: false,
-    beforeAnchors,
-    afterAnchors: null,
-  };
-  let userText: string;
-
-  if (display === 'compact' || display === 'auto') {
-    userText = formatEditCompact(editCompactResult);
-  } else {
-    // Table/Full: rich content only (diff if available)
-    if (diffText) {
-      userText = diffText;
-    } else {
-      userText = formatEditCompact(editCompactResult);
-    }
+  if (dryRun) {
+    return {
+      content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: diffText }] } }).text }],
+      details: { path: absolutePath, applied: false, dry_run: true, unchanged: false, linesChanged, diff: diffText, anchor, line: match.line },
+    };
   }
 
   // Stable machine details
   const details: Record<string, unknown> = {
     path: absolutePath,
-    applied: !dryRun,
-    dry_run: dryRun,
+    applied: true,
+    dry_run: false,
     unchanged: false,
     linesChanged,
     diff: diffText,
     beforeAnchors,
     afterAnchors: null,
     changedAnchors: [{ line: match.line, beforeAnchor: anchor, afterAnchor: null }],
-    source: 'linehash',
-    backend: backendLabel,
-    mode: 'replace_by_anchor',
     anchor,
     line: match.line,
   };
 
-  if (dryRun) {
-    return {
-      content: [{ type: 'text', text: userText }],
-      details,
-    };
-  }
+  const anchorToon = (d: typeof details) =>
+    encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } }).text;
 
   // Write new content
   try {
@@ -451,10 +363,7 @@ async function executeReplaceByAnchor(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     details.warning = `linehash post-edit failed: ${msg}`;
-    return {
-      content: [{ type: 'text', text: userText + `\n\n⚠ linehash post-edit failed: ${msg}` }],
-      details,
-    };
+    return { content: [{ type: 'text', text: anchorToon(details) }], details };
   }
 
   const afterParsed = parseLineHash(afterResult.stdout);
@@ -463,357 +372,356 @@ async function executeReplaceByAnchor(
   details.afterAnchors = afterAnchors;
   details.changedAnchors = [{ line: match.line, beforeAnchor: anchor, afterAnchor: changedAfterAnchor }];
 
-  return {
-    content: [{ type: 'text', text: userText }],
-    details,
+  return { content: [{ type: 'text', text: anchorToon(details) }], details };
+}
+
+/**
+ * Apply one or more edits to a single file. Groups by old_text search (or anchor).
+ * Returns a result record compatible with pi AgentToolResult shape.
+ */
+async function executeSingleFileEdits(
+  absolutePath: string,
+  fileEdits: EditItem[],
+  dryRun: boolean,
+  options: EditToolOptions,
+  _ctx: unknown
+): Promise<Record<string, unknown>> {
+  // Validate file exists
+  if (!existsSync(absolutePath)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `File not found: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'not-found', path: absolutePath },
+    };
+  }
+
+  try {
+    const stats = statSync(absolutePath);
+    if (stats.isDirectory()) {
+      return {
+        content: [{ type: 'text', text: error('invalid-params', `Path is a directory: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
+        isError: true,
+        details: { errorType: 'invalid-params', path: absolutePath },
+      };
+    }
+  } catch {
+    return {
+      content: [{ type: 'text', text: error('permission-denied', `Cannot read file: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'permission-denied', path: absolutePath },
+    };
+  }
+
+  let oldContent: string;
+  try {
+    oldContent = readFileSync(absolutePath, 'utf-8');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `Failed to read file: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
+    };
+  }
+
+  let beforeResult: { stdout: string; stderr: string; exitCode: number };
+  try {
+    beforeResult = await linehashRead(absolutePath);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `linehash read failed: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
+    };
+  }
+
+  if (beforeResult.exitCode !== 0) {
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `linehash exited ${beforeResult.exitCode}: ${beforeResult.stderr.trim()}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: absolutePath, exitCode: beforeResult.exitCode, stderr: beforeResult.stderr.trim() },
+    };
+  }
+
+  const beforeParsed = parseLineHash(beforeResult.stdout);
+  const beforeAnchors = beforeParsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
+
+  // replace_by_anchor mode (single edit only)
+  if (fileEdits.length === 1 && (fileEdits[0].mode ?? 'replace') === 'replace_by_anchor') {
+    const item = fileEdits[0];
+    const occurrence = (item.occurrence ?? 'first') as 'first' | 'all';
+    return executeReplaceByAnchor(
+      absolutePath,
+      item.anchor ?? null,
+      item.old_text,
+      item.new_text,
+      occurrence,
+      dryRun,
+      beforeParsed.records,
+      beforeAnchors,
+      oldContent,
+      'compact',
+    ) as unknown as Record<string, unknown>;
+  }
+
+  // Text replacement: apply all edits sequentially in memory
+  let content = oldContent;
+  const editResults: Array<{ old_text: string; applied: boolean; index: number }> = [];
+
+  for (let i = 0; i < fileEdits.length; i++) {
+    const { old_text, new_text, all_occurrences } = fileEdits[i];
+    const replaceAll = all_occurrences === true || all_occurrences === 'true';
+
+    if (replaceAll) {
+      const escaped = old_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'g');
+      if (regex.test(content)) {
+        content = content.replace(new RegExp(escaped, 'g'), new_text);
+        editResults.push({ old_text, applied: true, index: i });
+      } else {
+        editResults.push({ old_text, applied: false, index: i });
+      }
+    } else {
+      const idx = content.indexOf(old_text);
+      if (idx === -1) {
+        editResults.push({ old_text, applied: false, index: i });
+      } else {
+        content = content.slice(0, idx) + new_text + content.slice(idx + old_text.length);
+        editResults.push({ old_text, applied: true, index: i });
+      }
+    }
+  }
+
+  const unchanged = editResults.every(r => !r.applied);
+  const diffText = computeDiff(oldContent, content, absolutePath);
+  const linesChanged = unchanged ? 0 : countLines(diffText.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).join('\n'));
+  const isBatch = fileEdits.length > 1;
+
+  if (dryRun) {
+    const dryDetails: Record<string, unknown> = {
+      path: absolutePath,
+      applied: false,
+      dry_run: true,
+      unchanged,
+      linesChanged,
+      diff: unchanged ? null : diffText,
+      ...(isBatch ? { editResults } : {}),
+    };
+    return {
+      content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: unchanged ? null : diffText }] } }).text }],
+      details: dryDetails,
+    };
+  }
+
+  const details: Record<string, unknown> = {
+    path: absolutePath,
+    applied: !unchanged,
+    dry_run: false,
+    unchanged,
+    linesChanged,
+    diff: diffText,
+    ...(isBatch ? { editResults } : {}),
+    beforeAnchors,
+    afterAnchors: null as Array<{ line: number; anchor: string }> | null,
   };
+
+  const editToon = (d: typeof details) =>
+    encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } }).text;
+
+  if (unchanged) {
+    return { content: [{ type: 'text', text: editToon(details) }], details };
+  }
+
+  try {
+    writeFileSync(absolutePath, content, 'utf-8');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `Failed to write file: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
+    };
+  }
+
+  try {
+    const afterResult = await linehashRead(absolutePath);
+    const afterParsed = parseLineHash(afterResult.stdout);
+    details.afterAnchors = afterParsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
+  } catch { /* non-fatal */ }
+
+  return { content: [{ type: 'text', text: editToon(details) }], details };
 }
 
 /**
  * Register the edit tool with pi.
  */
 export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}) {
-  const editSchema = Type.Object({
+  const editItemSchema = Type.Object({
     path: Type.String({ description: 'File path to edit (relative or absolute)' }),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal('replace', { description: 'Default: find and replace exact text in the file' }),
-        Type.Literal('replace_by_anchor', { description: 'Replace by linehash anchor: locate line by anchor, replace old_text within that line (or replace whole line if old_text omitted)' }),
-      ], { description: 'Edit mode: "replace" for exact text matching, "replace_by_anchor" for anchor-based line replacement' })
-    ),
-    anchor: Type.Optional(Type.String({ description: 'Linehash anchor to locate the target line (required when mode is "replace_by_anchor")' })),
-    old_text: Type.Optional(Type.String({ description: 'Exact text to find and replace within the anchored line (omit to replace the whole line)' })),
+    old_text: Type.String({ description: 'Exact text to find' }),
     new_text: Type.String({ description: 'Replacement text' }),
-    occurrence: Type.Optional(
-      Type.Union([
-        Type.Literal('first', { description: 'Replace only the first occurrence of old_text within the anchored line' }),
-        Type.Literal('all', { description: 'Replace all occurrences of old_text within the anchored line' }),
-      ], { description: 'When old_text is provided, how many occurrences to replace (default: "first")' })
-    ),
-    dry_run: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Show diff only, do not apply' }),
-        Type.String({ description: 'Show diff only, do not apply' }),
-      ], { description: 'If true, compute and show the diff without writing to disk' })
-    ),
-    verify_hash: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Verify file has not changed since last read' }),
-        Type.String({ description: 'Verify file has not changed since last read' }),
-      ], { description: 'If true, verify linehash anchors match a prior read before editing' })
-    ),
-    all_occurrences: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Replace all occurrences of old_text' }),
-        Type.String({ description: 'Replace all occurrences of old_text' }),
-      ], { description: 'If true, replace all occurrences instead of just the first' })
-    ),
-    display: Type.Optional(
-      Type.Union([
-        Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
-        Type.Literal('table', { description: 'Markdown table via renderResult' }),
-        Type.Literal('full', { description: 'Compact summary + diff sections' }),
-      ], { description: 'Display mode for visible output: compact (default), table, or full' })
-    ),
+    mode: Type.Optional(Type.Union([
+      Type.Literal('replace', { description: 'Default: find and replace exact text' }),
+      Type.Literal('replace_by_anchor', { description: 'Locate line by anchor, replace old_text within it' }),
+    ])),
+    anchor: Type.Optional(Type.String({ description: 'Linehash anchor (required for replace_by_anchor mode)' })),
+    occurrence: Type.Optional(Type.Union([
+      Type.Literal('first', { description: 'Replace first occurrence (default)' }),
+      Type.Literal('all', { description: 'Replace all occurrences' }),
+    ])),
+    all_occurrences: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Replace all occurrences' }),
+      Type.String({ description: 'Replace all occurrences' }),
+    ])),
+  });
+
+  const editSchema = Type.Object({
+    edits: Type.Array(editItemSchema, {
+      description: 'Edits to apply. Single edit: [{path, old_text, new_text}]. Multi-file: [{path: "a.ts", ...}, {path: "b.ts", ...}]. Same-file batch: multiple items with the same path.',
+    }),
+    dry_run: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Preview only, do not write' }),
+      Type.String({ description: 'Preview only, do not write' }),
+    ], { description: 'Show diff without applying changes' })),
+    display: Type.Optional(Type.Union([
+      Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
+      Type.Literal('table', { description: 'Markdown table via renderResult' }),
+      Type.Literal('full', { description: 'Compact summary + diff sections' }),
+    ], { description: 'Display mode for visible output' })),
   });
 
   pi.registerTool({
     name: 'edit',
     label: 'Edit',
     description:
-      'Make surgical replacements in existing files. '
-      + 'Finds exact text and replaces it. Returns structured diff and line anchors. '
-      + 'Supports dry_run (preview only) and verify_hash (stale-context detection).',
-    promptSnippet: 'Edit file contents with surgical replacements',
+      'Make surgical text replacements in files. Always pass edits[]. '
+      + 'Single edit: edits: [{path, old_text, new_text}]. '
+      + 'Multi-file or same-file batch: edits: [{path, ...}, {path, ...}].',
+    promptSnippet: 'Edit files with surgical text replacements',
     promptGuidelines: [
-      'Use edit for precise changes (old_text must match exactly).',
+      'Always pass edits: [{path, old_text, new_text}].',
+      'old_text must match exactly (including whitespace and indentation).',
+      'Same-file batch: multiple items with the same path applied sequentially.',
+      'Multi-file: items with different paths, each applied independently.',
       'Use dry_run: true to preview changes before applying.',
-      'Use verify_hash: true to ensure file has not changed since last read.',
-      'Use all_occurrences: true to replace every instance of old_text.',
-      'Use anchor-targeted mode for linehash-safe replacements when available.',
     ],
     parameters: editSchema,
     async execute(_toolCallId, params: EditToolParams, _signal, _onUpdate, ctx) {
-      const requestedPath = params.path.startsWith('@') ? params.path.slice(1) : params.path;
-      const absolutePath = resolve(ctx.cwd, requestedPath);
+      if (!params.edits || params.edits.length === 0) {
+        return {
+          content: [{ type: 'text', text: error('invalid-params', 'edits[] is required (e.g. edits: [{path, old_text, new_text}])', { tool: 'edit' }).message }],
+          isError: true,
+          details: { errorType: 'invalid-params' },
+        };
+      }
+
       const dryRun = params.dry_run === true || params.dry_run === 'true';
-      const verifyHash = params.verify_hash === true || params.verify_hash === 'true';
-      const allOccurrences = params.all_occurrences === true || params.all_occurrences === 'true';
-      const mode = (params.mode ?? 'replace') as 'replace' | 'replace_by_anchor';
-      const occurrence = (params.occurrence ?? 'first') as 'first' | 'all';
-      const anchor = params.anchor ?? null;
 
-      // Validate file exists
-      if (!existsSync(absolutePath)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `File not found: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'not-found', path: absolutePath },
-        };
-      }
-
-      // Validate file is not a directory
-      try {
-        const stats = statSync(absolutePath);
-        if (stats.isDirectory()) {
-          return {
-            content: [{ type: 'text', text: error('invalid-params', `Path is a directory: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
-            isError: true,
-            details: { errorType: 'invalid-params', path: absolutePath },
-          };
+      // Group edits by path (preserving order), then process each group
+      const groups = new Map<string, EditItem[]>();
+      const groupOrder: string[] = [];
+      for (const item of params.edits) {
+        const requestedPath = item.path.startsWith('@') ? item.path.slice(1) : item.path;
+        const absolutePath = resolve(ctx.cwd, requestedPath);
+        if (!groups.has(absolutePath)) {
+          groups.set(absolutePath, []);
+          groupOrder.push(absolutePath);
         }
-      } catch {
-        return {
-          content: [{ type: 'text', text: error('permission-denied', `Cannot read file: ${absolutePath}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'permission-denied', path: absolutePath },
-        };
+        groups.get(absolutePath)!.push({ ...item, path: absolutePath });
       }
 
-      // Step 1: Read file content
-      let oldContent: string;
-      try {
-        oldContent = readFileSync(absolutePath, 'utf-8');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `Failed to read file: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
-        };
+      // Single-path shortcut: existing single-file logic
+      if (groupOrder.length === 1) {
+        const absolutePath = groupOrder[0];
+        const fileEdits = groups.get(absolutePath)!;
+        return executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, ctx) as any;
       }
 
-      // Step 2: Get before-state anchors via linehash
-      let beforeResult: { stdout: string; stderr: string; exitCode: number };
-      try {
-        beforeResult = await linehashRead(absolutePath);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `linehash read failed: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
-        };
+      // Multi-file: apply each group, collect results
+      const results: Array<{ path: string; result: Record<string, unknown> }> = [];
+      for (const absolutePath of groupOrder) {
+        const fileEdits = groups.get(absolutePath)!;
+        const r = await executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, ctx);
+        results.push({ path: absolutePath, result: r as Record<string, unknown> });
       }
 
-      if (beforeResult.exitCode !== 0) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `linehash exited ${beforeResult.exitCode}: ${beforeResult.stderr.trim()}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: absolutePath, exitCode: beforeResult.exitCode, stderr: beforeResult.stderr.trim() },
-        };
+      const allApplied = results.every(r => (r.result as any).details?.applied !== false);
+      const totalChanged = results.reduce((sum, r) => sum + ((r.result as any).details?.linesChanged ?? 0), 0);
+
+      const editMap: Record<string, unknown> = {};
+      for (const r of results) {
+        const d = (r.result as any).details ?? {};
+        editMap[r.path] = [{ applied: d.applied, linesChanged: d.linesChanged, diff: d.diff ?? '' }];
       }
-
-      const beforeParsed = parseLineHash(beforeResult.stdout);
-      const beforeAnchors = beforeParsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
-
-      // Step 3: Handle replace_by_anchor mode
-      if (mode === 'replace_by_anchor') {
-        const display = (params.display ?? 'compact') as DisplayMode;
-        return executeReplaceByAnchor(
-          absolutePath,
-          anchor,
-          params.old_text ?? null,
-          params.new_text,
-          occurrence,
-          dryRun,
-          beforeParsed.records,
-          beforeAnchors,
-          oldContent,
-          display,
-        );
-      }
-
-      // Step 4: Verify hash if requested (only for replace mode)
-      if (verifyHash && options.priorAnchors) {
-        const currentAnchors = new Map(beforeParsed.records.map(r => [r.anchor, r.line]));
-        let mismatchCount = 0;
-        for (const [anchor, line] of options.priorAnchors) {
-          const currentLine = currentAnchors.get(anchor);
-          if (currentLine !== line) {
-            mismatchCount++;
-          }
-        }
-        if (mismatchCount > 0) {
-          return {
-            content: [{
-              type: 'text',
-              text: error('invalid-params',
-                `File changed since last read: ${mismatchCount}/${options.priorAnchors.size} anchors mismatched. `
-                + 'Read the file again before editing.',
-                { tool: 'edit', path: absolutePath }
-              ).message,
-            }],
-            isError: true,
-            details: { errorType: 'invalid-params', path: absolutePath, mismatchedAnchors: mismatchCount },
-          };
-        }
-      }
-
-      // Step 5: Find and replace old_text with new_text (replace mode)
-      // In replace mode, old_text is required
-      if (!params.old_text) {
-        return {
-          content: [{
-            type: 'text',
-            text: error('invalid-params', `old_text is required in "replace" mode`, { tool: 'edit', path: absolutePath }).message,
-          }],
-          isError: true,
-          details: {
-            errorType: 'invalid-params',
-            path: absolutePath,
-            mode: 'replace',
-            beforeAnchors,
-          },
-        };
-      }
-      const oldText = params.old_text;
-      const newText = params.new_text;
-      let newContent = oldContent;
-      let unchanged = false;
-
-      if (allOccurrences) {
-        const escaped = oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(escaped, 'g');
-        if (regex.test(oldContent)) {
-          newContent = oldContent.replace(regex, newText);
-        } else {
-          unchanged = true;
-        }
-      } else {
-        const idx = oldContent.indexOf(oldText);
-        if (idx === -1) {
-          unchanged = true;
-        } else {
-          newContent = oldContent.slice(0, idx) + newText + oldContent.slice(idx + oldText.length);
-        }
-      }
-
-      // Step 6: Compute diff
-      const diffText = computeDiff(oldContent, newContent);
-      const linesChanged = unchanged ? 0 : countLines(diffText.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).join('\n'));
-
-      // Step 7: Try delta rendering (display only, details keep plain diff)
-      const deltaOutput = runDelta(diffText);
-      const backendLabel = deltaOutput ? 'linehash+delta+nu' : 'linehash+nu';
-
-      // Step 8: Build user-facing text output (Phase 21: display-aware)
-      const display = (params.display ?? 'compact') as DisplayMode;
-      const linesRemoved = diffText.split('\n').filter(l => l.startsWith('-') && !l.startsWith('---')).length;
-      const linesAdded = diffText.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).length;
-      const editCompactResult = {
-        applied: !dryRun && !unchanged,
-        linesChanged,
-        unchanged,
-        beforeAnchors,
-        afterAnchors: null,
-      };
-      let userText: string;
-
-      if (display === 'compact' || display === 'auto') {
-        userText = formatEditCompact(editCompactResult);
-      } else {
-        // Table/Full: rich content only (diff if available)
-        if (!unchanged && diffText) {
-          userText = diffText;
-        } else {
-          userText = formatEditCompact(editCompactResult);
-        }
-      }
-
-      // Stable machine details (contract)
-      const details: Record<string, unknown> = {
-        path: absolutePath,
-        applied: !dryRun && !unchanged,
-        dry_run: dryRun,
-        unchanged,
-        linesChanged,
-        diff: diffText,
-        beforeAnchors,
-        afterAnchors: null as Array<{ line: number; anchor: string }> | null,
-        source: 'linehash',
-        backend: backendLabel,
-        mode,
-      };
-
-      if (dryRun || unchanged) {
-        return {
-          content: [{ type: 'text', text: userText }],
-          details,
-        };
-      }
-
-      // Step 9: Write new content
-      try {
-        writeFileSync(absolutePath, newContent, 'utf-8');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `Failed to write file: ${msg}`, { tool: 'edit', path: absolutePath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: absolutePath, stderr: msg },
-        };
-      }
-
-      // Step 10: Re-read for after-state anchors
-      let afterResult: { stdout: string; stderr: string; exitCode: number };
-      try {
-        afterResult = await linehashRead(absolutePath);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        details.warning = `linehash post-edit failed: ${msg}`;
-        return {
-          content: [{ type: 'text', text: userText + `\n\n⚠ linehash post-edit failed: ${msg}` }],
-          details,
-        };
-      }
-
-      const afterParsed = parseLineHash(afterResult.stdout);
-      details.afterAnchors = afterParsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
 
       return {
-        content: [{ type: 'text', text: userText }],
-        details,
+        content: [{ type: 'text' as const, text: encodeToon({ edit: editMap }).text }],
+        details: {
+          applied: allApplied && !dryRun,
+          dry_run: dryRun,
+          linesChanged: totalChanged,
+          files: results.map(r => ({
+            path: (r.result as any).details?.path ?? r.path,
+            applied: (r.result as any).details?.applied,
+            linesChanged: (r.result as any).details?.linesChanged ?? 0,
+            editResults: (r.result as any).details?.editResults,
+            diff: (r.result as any).details?.diff ?? null,
+          })),
+        },
       };
     },
-    renderResult(result, { expanded }, theme, _context) {
-      const details = result as { details?: { applied?: boolean; dry_run?: boolean; linesChanged?: number; diff?: string | null; beforeAnchors?: Array<{ line: number; anchor: string }>; afterAnchors?: Array<{ line: number; anchor: string }> } };
-      const d = details.details ?? {};
 
-      let text: string;
-      if (expanded) {
-        // Expanded mode: rich content only (diff if available)
-        if (d.diff) {
-          text = formatDiffForTui(d.diff, theme as { fg: (color: unknown, text: string) => string });
-        } else {
-          const statusLine = d.dry_run
-            ? 'Dry run'
-            : d.applied
-              ? 'Applied'
-              : 'No change';
-          text = `${statusLine} — ${d.linesChanged ?? 0} line(s) changed`;
-          if (d.afterAnchors) {
-            const before = d.beforeAnchors;
-            const changed = d.afterAnchors.filter((a, i) => {
-              return before && before[i] && before[i].anchor !== a.anchor;
-            });
-            if (changed.length > 0) {
-              text += `\nChanged anchors: ${changed.length}`;
-            }
+    renderResult(result, { expanded }, theme, _context) {
+      const raw = result as any;
+      const d: Record<string, any> = raw.details ?? {};
+      // diff lives in details.diff (single-file) or combined from details.files[].diff (multi-file)
+      const multiDiff = Array.isArray(d.files)
+        ? (d.files as Array<{ diff?: string | null }>).map(f => f.diff ?? '').filter(Boolean).join('\n')
+        : null;
+      const diff: string | null = (d.diff as string | null | undefined) ?? multiDiff ?? null;
+
+      if (expanded && diff) {
+        // Expanded: use delta for syntax-highlighted diff (ANSI output)
+        try {
+          const deltaResult = spawnSync(DELTA_BIN, [
+            '--no-gitconfig',
+            '--file-style=omit',
+            '--file-decoration-style=omit',
+            '--hunk-header-decoration-style=omit',
+          ], {
+            input: diff,
+            encoding: 'utf-8',
+            timeout: 5000,
+          });
+          if (deltaResult.status === 0 && deltaResult.stdout) {
+            return new Text(deltaResult.stdout, 1, 0);
           }
+        } catch {
+          // delta not available, fall through
         }
+        // Fallback: plain diff
+        return new Text(diff ?? '', 1, 0);
+      }
+
+      // Collapsed: heavily condensed summary
+      const applied = d.applied;
+      const dryRun = d.dry_run;
+      const unchanged = !applied && !dryRun;
+      const editResults = d.editResults as Array<{ applied: boolean }> | undefined;
+      const batchCount = editResults?.length;
+      const batchApplied = editResults?.filter((r: { applied: boolean }) => r.applied).length ?? 0;
+      let text: string;
+      if (unchanged) {
+        text = batchCount ? `no changes — 0/${batchCount} edits matched` : 'no changes — old_text not found';
+      } else if (dryRun) {
+        text = batchCount
+          ? `dry_run — ${batchApplied}/${batchCount} edits, ${d.linesChanged ?? 0} line(s) would change`
+          : `dry_run — ${d.linesChanged ?? 0} line(s) would change`;
       } else {
-        // Collapsed mode: compact summary
-        const applied = d.applied;
-        const dryRun = d.dry_run;
-        const unchanged = !applied && !dryRun;
-        if (unchanged) {
-          text = 'no changes — old_text not found';
-        } else if (dryRun) {
-          text = `dry_run — ${d.linesChanged ?? 0} line(s) would change`;
-        } else {
-          text = `edited — ${d.linesChanged ?? 0} line(s) changed`;
-        }
+        text = batchCount
+          ? `edited — ${batchApplied}/${batchCount} edits applied, ${d.linesChanged ?? 0} line(s) changed`
+          : `edited — ${d.linesChanged ?? 0} line(s) changed`;
       }
       return new Text(text, 0, 0);
     },

@@ -13,11 +13,12 @@ import { resolve } from 'path';
 import { existsSync, statSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Component, Text } from '@earendil-works/pi-tui';
-import { encodeToon, type ToonMode } from '../../_shared/toon.js';
-import { parseLineHash, type LineHashRecord } from '../../_shared/linehash.js';
-import { error } from '../../_shared/output.js';
-import { loadSettings, type Settings } from '../../_shared/settings.js';
-import { type DisplayMode, formatGrepCompact, formatGrepTableMarkdown, renderMarkdown } from '../../_shared/display.js';
+import { encodeToon, type ToonMode } from './toon.js';
+import { parseLineHash, type LineHashRecord } from './linehash.js';
+import { error } from './output.js';
+import { loadSettings, type Settings } from './settings.js';
+import { type DisplayMode, formatGrepCompact, makeThrottle, batContextHighlight } from './display.js';
+import type { ChildProcess } from 'child_process';
 
 /** Resolve rg binary path. */
 function resolveRgBin(): string {
@@ -54,107 +55,86 @@ export interface GrepMatch {
   anchor_error: string | null;
 }
 
-export interface GrepResult {
-  query: string;
-  cwd: string;
-  mode: 'regex' | 'literal';
-  matches: GrepMatch[];
-  searchedPaths: string[];
-  truncated: boolean;
-  totalMatches: number;
-  returnedMatches: number;
-  patternMode?: 'regex' | 'literal';
-  command: string[];
-  backend: 'rg+nu';
-  visibleBudget: { maxLines: number; maxBytes: number };
-  visibleLines: number;
-  visibleBytes: number;
-  excludedPatterns: string[];
-  recoveryHint: string;
-  settingsWarning?: string;
-}
 
 /**
- * Execute rg with --json output.
+ * Stream rg --json output: call onMatch for each newline-delimited JSON line.
+ * Returns { proc, kill } so the caller can abort when the limit is reached.
  */
-function runRg(
+function runRgStream(
   pattern: string,
   searchPath: string,
-  options: { literal?: boolean; ignoreCase?: boolean; excludes?: string[] }
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const args = ['--json', '--no-filename', '--line-number', pattern, searchPath];
-    if (options.literal) args.unshift('-F');
-    if (options.ignoreCase) args.push('-i');
-    if (options.excludes) {
-      for (const ex of options.excludes) {
-        args.push('--glob', `!${ex}`);
-      }
-    }
-
-    const proc = spawn(RG_BIN, args, {
-      cwd: process.cwd(),
-      env: { ...process.env },
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on('close', (exitCode) => { resolve({ stdout, stderr, exitCode: exitCode ?? 1 }); });
-    proc.on('error', (err) => { reject(err); });
-  });
-}
-
-/**
- * Parse rg --json output into structured matches.
- */
-function parseRgOutput(jsonl: string): { matches: GrepMatch[]; searchedPaths: string[]; stats: Record<string, unknown> } {
-  const lines = jsonl.split('\n').filter(l => l.trim() !== '');
-  const matches: GrepMatch[] = [];
-  const searchedPaths = new Set<string>();
-  let stats: Record<string, unknown> = {};
-
-  for (const line of lines) {
-    let parsed: { type: string; data: unknown };
-    try {
-      parsed = JSON.parse(line);
-    } catch { continue; }
-
-    if (parsed.type === 'begin') {
-      const path = (parsed.data as { path?: { text?: string } }).path?.text;
-      if (path) searchedPaths.add(path);
-    } else if (parsed.type === 'match') {
-      const data = (parsed.data as {
-        path?: { text?: string };
-        line_number?: number;
-        submatches?: Array<{ match?: { text?: string; start?: number; end?: number } }>;
-        lines?: { text?: string };
-      });
-      const match: GrepMatch = {
-        path: data.path?.text ?? '',
-        line: data.line_number ?? 0,
-        column: 0,
-        text: data.lines?.text?.trim() ?? '',
-        submatches: (data.submatches ?? []).map(s => ({
-          text: s.match?.text ?? '',
-          start: s.match?.start ?? 0,
-          end: s.match?.end ?? 0,
-        })),
-        anchor: null,
-        anchor_error: null,
-      };
-      // Compute column from first submatch start
-      if (match.submatches.length > 0) {
-        match.column = match.submatches[0].start;
-      }
-      matches.push(match);
-    } else if (parsed.type === 'end') {
-      stats = (parsed.data as { stats?: Record<string, unknown> })?.stats ?? stats;
+  options: { literal?: boolean; ignoreCase?: boolean; excludes?: string[] },
+  onMatch: (line: string) => void,
+): { proc: ChildProcess; kill: () => void } {
+  const args = ['--json', '--no-filename', '--line-number', pattern, searchPath];
+  if (options.literal) args.unshift('-F');
+  if (options.ignoreCase) args.push('-i');
+  if (options.excludes) {
+    for (const ex of options.excludes) {
+      args.push('--glob', `!${ex}`);
     }
   }
 
-  return { matches, searchedPaths: [...searchedPaths], stats };
+  const proc = spawn(RG_BIN, args, {
+    cwd: process.cwd(),
+    env: { ...process.env },
+  });
+
+  let buffer = '';
+  let stderr = '';
+
+  proc.stdout.on('data', (chunk: Buffer) => {
+    buffer += chunk.toString();
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.trim()) onMatch(line);
+    }
+  });
+
+  proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+  return { proc, kill: () => proc.kill() };
+}
+
+/**
+ * Parse a single rg --json match line into a GrepMatch.
+ */
+function parseRgMatchLine(line: string): GrepMatch | null {
+  let parsed: { type: string; data: unknown };
+  try {
+    parsed = JSON.parse(line);
+  } catch { return null; }
+
+  if (parsed.type !== 'match') return null;
+
+  const data = (parsed.data as {
+    path?: { text?: string };
+    line_number?: number;
+    submatches?: Array<{ match?: { text?: string; start?: number; end?: number } }>;
+    lines?: { text?: string };
+  });
+
+  const match: GrepMatch = {
+    path: data.path?.text ?? '',
+    line: data.line_number ?? 0,
+    column: 0,
+    text: data.lines?.text?.trim() ?? '',
+    submatches: (data.submatches ?? []).map(s => ({
+      text: s.match?.text ?? '',
+      start: s.match?.start ?? 0,
+      end: s.match?.end ?? 0,
+    })),
+    anchor: null,
+    anchor_error: null,
+  };
+
+  if (match.submatches.length > 0) {
+    match.column = match.submatches[0].start;
+  }
+
+  return match;
 }
 
 /**
@@ -218,22 +198,6 @@ const LINEHASH_BIN = resolveLinehashBin();
 /**
  * Build a narrowing hint for truncated grep results.
  */
-function buildGrepRecoveryHint(
-  searchPath: string,
-  pattern: string,
-  totalMatches: number,
-  returnedMatches: number,
-  truncated: boolean,
-): string {
-  const parts: string[] = [];
-  if (truncated) {
-    if (totalMatches > returnedMatches) {
-      parts.push(`Limit: ${returnedMatches} matches returned out of ${totalMatches} total.`);
-    }
-    parts.push('Narrow the search: specify a subdirectory, use literal: true, or add a more specific pattern.');
-  }
-  return parts.join(' ');
-}
 
 /**
  * Register the grep tool with pi.
@@ -260,12 +224,7 @@ export function registerGrepTool(pi: ExtensionAPI) {
         Type.String({ description: 'Maximum number of matches to return' }),
       ], { description: 'Limit the number of matches returned' })
     ),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal('toon', { description: 'TOON format for LLM' }),
-        Type.Literal('json', { description: 'JSON format for LLM' }),
-      ], { description: 'Output format for LLM (defaults to toon)' })
-    ),
+
     display: Type.Optional(
       Type.Union([
         Type.Literal('auto', { description: 'Auto: compact by default, fuller when expanded (default)' }),
@@ -320,76 +279,65 @@ export function registerGrepTool(pi: ExtensionAPI) {
         };
       }
 
-      // Execute rg with excludes
-      let rgResult: { stdout: string; stderr: string; exitCode: number };
-      try {
-        rgResult = await runRg(pattern, searchPath, { literal, ignoreCase, excludes });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `rg execution failed: ${msg}`, { tool: 'grep', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, stderr: msg },
-        };
-      }
+      // Stream rg output with throttled onUpdate
+      const throttle = makeThrottle(500);
+      const matches: GrepMatch[] = [];
+      const searchedPathsSet = new Set<string>();
+      let killedEarly = false;
+      let rgStderr = '';
 
-      if (rgResult.exitCode > 1) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `rg exited ${rgResult.exitCode}: ${rgResult.stderr.trim()}`, { tool: 'grep', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode: rgResult.exitCode, stderr: rgResult.stderr.trim() },
-        };
-      }
+      const { proc, kill } = runRgStream(pattern, searchPath, { literal, ignoreCase, excludes }, (line) => {
+        let parsed: { type: string; data: unknown };
+        try {
+          parsed = JSON.parse(line);
+        } catch { return; }
 
-      // Parse rg output
-      const { matches: allMatches, searchedPaths, stats } = parseRgOutput(rgResult.stdout);
+        if (parsed.type === 'begin') {
+          const path = (parsed.data as { path?: { text?: string } }).path?.text;
+          if (path) searchedPathsSet.add(path);
+        } else if (parsed.type === 'match') {
+          const m = parseRgMatchLine(line);
+          if (m) {
+            matches.push(m);
 
-      // Apply global limit in JS (not via rg -n, which means "line number")
-      const totalMatches = allMatches.length;
-      const returnedMatches = limit !== undefined ? Math.min(totalMatches, limit) : totalMatches;
-      const truncated = limit !== undefined && totalMatches > limit;
-      const rgMatches = limit !== undefined ? allMatches.slice(0, limit) : allMatches;
+            // Kill when limit reached
+            if (limit !== undefined && matches.length >= limit) {
+              killedEarly = true;
+              kill();
+            }
 
-      // Phase 20: Visible budgets — truncate content.text if it exceeds budget
-      const maxLines = settings.grepMaxVisibleLines;
-      const maxBytes = settings.grepMaxVisibleBytes;
-
-      // Estimate content size
-      let visibleLines = 0;
-      let visibleBytes = 0;
-      for (const m of rgMatches) {
-        visibleLines++;
-        visibleBytes += m.path.length + m.text.length + 20; // path:line:anchor|text
-        if (visibleBytes > maxBytes * 2) break; // allow 2x headroom
-      }
-
-      // Determine if we need to truncate for budget
-      const budgetTruncated = visibleBytes > maxBytes || visibleLines > maxLines;
-      const effectiveTruncated = truncated || budgetTruncated;
-
-      // If budget-truncated, limit displayed matches
-      let displayedMatches = rgMatches;
-      if (budgetTruncated && !truncated) {
-        // Budget exceeded but no explicit limit — truncate to fit
-        let linesCount = 0;
-        let bytesCount = 0;
-        for (let i = 0; i < rgMatches.length; i++) {
-          linesCount++;
-          bytesCount += rgMatches[i].path.length + rgMatches[i].text.length + 20;
-          if (bytesCount > maxBytes) {
-            displayedMatches = rgMatches.slice(0, i + 1);
-            break;
-          }
-          if (i === rgMatches.length - 1) {
-            displayedMatches = rgMatches;
+            // Throttled progress update
+            throttle(() => {
+              _onUpdate?.({
+                content: [],
+                details: { totalMatches: matches.length, truncated: false },
+              });
+            });
           }
         }
+      });
+
+      // Wait for process to close
+      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+        proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
+        proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
+      });
+      rgStderr = stderr;
+
+      if (exitCode > 1) {
+        return {
+          content: [{ type: 'text', text: error('binary-failed', `rg exited ${exitCode}: ${rgStderr.trim()}`, { tool: 'grep', path: searchPath }).message }],
+          isError: true,
+          details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: rgStderr.trim() },
+        };
       }
 
-      // Build narrowing hint
-      const recoveryHint = buildGrepRecoveryHint(searchPath, pattern, totalMatches, returnedMatches, effectiveTruncated);
+      const totalMatches = matches.length;
+      const returnedMatches = limit !== undefined ? Math.min(totalMatches, limit) : totalMatches;
+      const truncated = killedEarly || (limit !== undefined && totalMatches > limit);
+      const displayedMatches = truncated ? matches.slice(0, limit) : matches;
 
-      // Enrich displayed matches with anchors (only for returned matches)
+      // Enrich displayed matches with anchors (batch on final set)
       const matchesByFile = new Map<string, GrepMatch[]>();
       const fileLines = new Map<string, Set<number>>();
 
@@ -402,13 +350,11 @@ export function registerGrepTool(pi: ExtensionAPI) {
         fileLines.get(m.path)!.add(m.line);
       }
 
-      // Get anchors for matched lines
       const fileAnchors = new Map<string, Map<number, string>>();
       for (const [filePath, lineSet] of fileLines) {
         fileAnchors.set(filePath, await getAnchorsForLines(filePath, lineSet));
       }
 
-      // Enrich displayed matches with anchors
       for (const m of displayedMatches) {
         const anchors = fileAnchors.get(m.path);
         if (anchors) {
@@ -423,87 +369,22 @@ export function registerGrepTool(pi: ExtensionAPI) {
         }
       }
 
-
-
-      // --- User-facing text output (Phase 21: display-aware) ---
-      // auto/compact both use compact for content.text; renderResult handles expansion
-      const display = (params.display ?? 'auto') as DisplayMode;
-      const modeLabel = literal ? 'literal' : 'regex';
-      let userText: string;
-
-      const grepCompactResult = {
-        query: pattern,
-        totalMatches,
-        returnedMatches,
-        truncated: effectiveTruncated,
-        filesSearched: searchedPaths.length,
-        mode: modeLabel,
-        matches: displayedMatches.slice(0, settings.grepMaxVisibleLines),
-      };
-
-      if (display === 'compact' || display === 'auto') {
-        userText = formatGrepCompact(grepCompactResult);
-      } else if (display === 'table') {
-        // Table: table-only (no compact summary)
-        const tableLines: string[] = [];
-        tableLines.push('| Path | Line | Anchor | Text |');
-        tableLines.push('|------|------|--------|------|');
-        for (const m of displayedMatches) {
-          const anchorStr = m.anchor ?? '—';
-          const escapedText = m.text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-          tableLines.push(`| ${m.path} | ${m.line} | ${anchorStr} | ${escapedText} |`);
-        }
-        userText = tableLines.join('\n');
-      } else {
-        // Full: table-only (no compact summary) — expanded view should focus on table
-        const tableLines: string[] = [];
-        tableLines.push('| Path | Line | Anchor | Text |');
-        tableLines.push('|------|------|--------|------|');
-        for (const m of displayedMatches) {
-          const anchorStr = m.anchor ?? '—';
-          const escapedText = m.text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
-          tableLines.push(`| ${m.path} | ${m.line} | ${anchorStr} | ${escapedText} |`);
-        }
-        userText = tableLines.join('\n');
-      }
-
-      // --- LLM-facing JSON/TOON in details ---
-      const llmResult: GrepResult = {
-        query: pattern,
-        cwd: ctx.cwd,
-        mode: literal ? 'literal' : 'regex',
-        patternMode: literal ? 'literal' : 'regex',
-        matches: displayedMatches.map(m => ({
-          path: m.path,
-          line: m.line,
-          column: m.column,
-          text: m.text,
-          submatches: m.submatches,
-          anchor: m.anchor ?? null,
-          anchor_error: m.anchor_error ?? null,
-        })),
-        searchedPaths,
-        truncated: effectiveTruncated,
-        totalMatches,
-        returnedMatches,
-        command: [RG_BIN, '--json', ...(literal ? ['-F'] : []), ...(ignoreCase ? ['-i'] : []), pattern, searchPath],
-        backend: 'rg+nu',
-        visibleBudget: { maxLines, maxBytes },
-        visibleLines: displayedMatches.length,
-        visibleBytes,
-        excludedPatterns: excludes,
-        recoveryHint,
-        ...(settingsWarning ? { settingsWarning } : {}),
-      };
-      const llmEncoded = encodeToon(llmResult, { mode });
+      // --- content.text: matches JSON → TOON ---
+      const contentMatches = displayedMatches.map(m => ({ path: m.path, line: m.line, text: m.text, anchor: m.anchor ?? null }));
+      const contentToon = encodeToon({ grep: { [pattern]: contentMatches } });
 
       return {
-        content: [{ type: 'text', text: userText }],
+        content: [{ type: 'text', text: contentToon.text }],
         details: {
-          ...llmResult,
-          mode,
-          tokenSavings: llmEncoded.tokenSavings,
-          source: 'rg',
+          query: pattern,
+          cwd: ctx.cwd,
+          patternMode: literal ? 'literal' : 'regex',
+          searchedPaths: [...searchedPathsSet],
+          truncated,
+          totalMatches,
+          returnedMatches,
+          matches: displayedMatches.map(m => ({ path: m.path, line: m.line, anchor: m.anchor ?? null, text: m.text })),
+          ...(settingsWarning ? { settingsWarning } : {}),
         },
       };
     },
@@ -516,6 +397,7 @@ export function registerGrepTool(pi: ExtensionAPI) {
           returnedMatches?: number;
           truncated?: boolean;
           query?: string;
+          patternMode?: string;
           matches?: Array<{ line: number; anchor: string; path: string; text: string }>;
         };
       };
@@ -524,22 +406,38 @@ export function registerGrepTool(pi: ExtensionAPI) {
       const truncated = details.details?.truncated ?? false;
       const query = details.details?.query ?? '';
 
-      // Phase 21: expanded mode is table-only for all modes except compact
-      const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-      const isCompact = displayParam === 'compact';
-      const showFull = expanded && !isCompact;
+      if (expanded && details.details?.matches && details.details.matches.length > 0) {
+        // bat ±1 context per file, muted amber background on matched text only
+        const patternMode = details.details?.patternMode ?? 'regex';
+        let highlightRe: RegExp | null = null;
+        try {
+          const src = patternMode === 'literal'
+            ? query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            : query;
+          highlightRe = new RegExp(src, 'g');
+        } catch { /* invalid regex — no highlight */ }
 
-      let text: string;
-      if (showFull && details.details?.matches) {
-        // Expanded mode (auto/full/table): table-only, no redundant compact summary
-        text = formatGrepTableMarkdown(details.details.matches);
-      } else {
-        // Collapsed or compact mode: compact summary
-        text = `${totalMatches} match${totalMatches !== 1 ? 'es' : ''} for "${query}"`;
-        if (truncated) text += ' (truncated)';
+        const byFile = new Map<string, number[]>();
+        for (const m of details.details.matches) {
+          if (!byFile.has(m.path)) byFile.set(m.path, []);
+          byFile.get(m.path)!.push(m.line);
+        }
+        const blocks: string[] = [];
+        for (const [filePath, lines] of byFile) {
+          const block = batContextHighlight(filePath, lines, highlightRe, 1);
+          if (block) blocks.push(block);
+        }
+        if (truncated) blocks.push(theme.fg('muted', `… ${totalMatches - returnedMatches} more`));
+        if (blocks.length > 0) return new Text(blocks.join('\n'), 1, 0);
       }
 
-      return renderMarkdown(text, theme as { fg: (color: unknown, text: string) => string; bold: (text: string) => string; italic: (text: string) => string; strikethrough: (text: string) => string; underline: (text: string) => string; }) as unknown as Component;
+      // Collapsed: compact summary
+      const countLabel = totalMatches === 0
+        ? theme.fg('muted', '0 matches')
+        : truncated
+          ? theme.fg('success', `${returnedMatches} of ${totalMatches} matches`)
+          : theme.fg('success', `${totalMatches} match${totalMatches !== 1 ? 'es' : ''}`);
+      return new Text(`${countLabel} for "${query}"`, 0, 0);
     },
   });
 }

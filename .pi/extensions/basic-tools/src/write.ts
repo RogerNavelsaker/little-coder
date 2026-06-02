@@ -16,9 +16,10 @@ import {
   appendFileSync,
 } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { parseLineHash, type LineHashRecord } from '../../_shared/linehash.js';
-import { error } from '../../_shared/output.js';
-import { type DisplayMode, formatWriteCompact, type WriteCompactResult, formatDiffForTui } from '../../_shared/display.js';
+import { parseLineHash, type LineHashRecord } from './linehash.js';
+import { error } from './output.js';
+import { type DisplayMode, formatWriteCompact, type WriteCompactResult } from './display.js';
+import { encodeToon } from './toon.js';
 import { Text } from '@earendil-works/pi-tui';
 
 // Lazy-load diff package (ESM CJS bridge)
@@ -55,12 +56,28 @@ function resolveLinehashBin(): string {
 
 const LINEHASH_BIN = resolveLinehashBin();
 
-export interface WriteToolParams {
+/** Resolve bat binary path. */
+function resolveBatBin(): string {
+  if (process.env.BAT_BIN) return process.env.BAT_BIN;
+  try {
+    const { execSync } = require('child_process');
+    const p = execSync('which bat 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (p) return p;
+  } catch { /* continue */ }
+  return 'bat';
+}
+
+const BAT_BIN = resolveBatBin();
+
+export interface WriteFileSpec {
   path: string;
   content: string;
   if_exists?: 'overwrite' | 'error' | 'append';
   create_dirs?: boolean | string;
-  mode?: 'json' | 'toon';
+}
+
+export interface WriteToolParams {
+  files: WriteFileSpec[];
   display?: DisplayMode;
 }
 
@@ -83,12 +100,6 @@ export interface WriteToolResult {
   afterAnchors: Array<{ line: number; anchor: string }>;
   /** Plain unified diff (null for new files or append) */
   diff: string | null;
-  /** Source of anchoring */
-  source: 'linehash';
-  /** Backend label */
-  backend: 'linehash+nu';
-  /** Output mode used */
-  mode: string;
 }
 
 /**
@@ -206,385 +217,261 @@ function runToon(text: string): { encoded: string; tokenSavings: number } {
 }
 
 /**
+ * Write a single file spec. Returns a result record compatible with pi AgentToolResult shape.
+ */
+async function executeSingleFileWrite(
+  spec: WriteFileSpec,
+  ctx: { cwd: string }
+): Promise<Record<string, unknown>> {
+  const ifExists = (spec.if_exists ?? 'overwrite') as 'overwrite' | 'error' | 'append';
+  const createDirs = spec.create_dirs === true || spec.create_dirs === 'true';
+
+  const requestedPath = spec.path.startsWith('@') ? spec.path.slice(1) : spec.path;
+  const absolutePath = resolve(ctx.cwd, requestedPath);
+
+  const fileExists = existsSync(absolutePath);
+  const parentDir = dirname(absolutePath);
+  const parentExists = existsSync(parentDir);
+
+  if (!parentExists) {
+    if (createDirs) {
+      try {
+        mkdirSync(parentDir, { recursive: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text', text: error('permission-denied', `Cannot create parent directory: ${parentDir} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
+          isError: true,
+          details: { errorType: 'permission-denied', path: absolutePath, parentDir },
+        };
+      }
+    } else {
+      return {
+        content: [{ type: 'text', text: error('not-found', `Parent directory does not exist: ${parentDir}. Set create_dirs: true to create it.`, { tool: 'write', path: absolutePath }).message }],
+        isError: true,
+        details: { errorType: 'not-found', path: absolutePath, parentDir },
+      };
+    }
+  }
+
+  if (fileExists) {
+    try {
+      const stats = statSync(absolutePath);
+      if (stats.isDirectory()) {
+        return {
+          content: [{ type: 'text', text: error('invalid-params', `Path is a directory: ${absolutePath}`, { tool: 'write', path: absolutePath }).message }],
+          isError: true,
+          details: { errorType: 'invalid-params', path: absolutePath },
+        };
+      }
+    } catch { /* fall through */ }
+
+    if (ifExists === 'error') {
+      return {
+        content: [{ type: 'text', text: error('invalid-params', `File already exists: ${absolutePath}. Set if_exists: "overwrite" or "append".`, { tool: 'write', path: absolutePath }).message }],
+        isError: true,
+        details: { errorType: 'invalid-params', path: absolutePath },
+      };
+    }
+  }
+
+  // Get before-state anchors and content for overwrite diff
+  let beforeAnchors: Array<{ line: number; anchor: string }> | null = null;
+  let beforeContent: string | null = null;
+  if (fileExists && ifExists === 'overwrite') {
+    try {
+      beforeContent = readFileSync(absolutePath, 'utf-8');
+      const beforeResult = await linehashRead(absolutePath);
+      if (beforeResult.exitCode === 0) {
+        const parsed = parseLineHash(beforeResult.stdout);
+        beforeAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Write
+  try {
+    if (ifExists === 'append' && fileExists) {
+      appendFileSync(absolutePath, spec.content, 'utf-8');
+    } else {
+      writeFileSync(absolutePath, spec.content, 'utf-8');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('permission-denied', `Failed to write file: ${msg}`, { tool: 'write', path: absolutePath }).message }],
+      isError: true,
+      details: { errorType: 'permission-denied', path: absolutePath, stderr: msg },
+    };
+  }
+
+  // Get after-state anchors
+  let afterAnchors: Array<{ line: number; anchor: string }> = [];
+  try {
+    const afterResult = await linehashRead(absolutePath);
+    if (afterResult.exitCode === 0) {
+      const parsed = parseLineHash(afterResult.stdout);
+      afterAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
+    }
+  } catch { /* non-fatal */ }
+
+  const bytesWritten = Buffer.byteLength(spec.content, 'utf-8');
+  const linesWritten = spec.content.split('\n').length;
+  const appended = ifExists === 'append' && fileExists;
+  const created = !fileExists;
+  const overwritten = fileExists && !appended;
+
+  // Compute diff for overwrite
+  let diff: string | null = null;
+  if (overwritten && beforeContent !== null) {
+    diff = computeDiff(beforeContent, spec.content);
+  }
+
+  const result: WriteToolResult = {
+    path: absolutePath,
+    created,
+    overwritten,
+    appended,
+    bytesWritten,
+    linesWritten,
+    beforeAnchors,
+    afterAnchors,
+    diff,
+  };
+
+  const writeToon = encodeToon({ write: { [absolutePath]: [{ created, overwritten, appended, bytesWritten, linesWritten, diff }] } }).text;
+  return {
+    content: [{ type: 'text', text: writeToon }],
+    details: result,
+  };
+}
+
+/**
  * Register the write tool with pi.
  */
 export function registerWriteTool(pi: ExtensionAPI) {
-  const writeSchema = Type.Object({
+  const writeFileSpecSchema = Type.Object({
     path: Type.String({ description: 'File path to write (relative or absolute)' }),
-    content: Type.String({ description: 'Content to write to the file' }),
-    if_exists: Type.Optional(
-      Type.Union([
-        Type.Literal('overwrite', { description: 'Overwrite existing file' }),
-        Type.Literal('error', { description: 'Fail if file exists' }),
-        Type.Literal('append', { description: 'Append to existing file' }),
-      ], { description: 'Behavior when file exists: overwrite (default), error, or append' })
-    ),
-    create_dirs: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Create parent directories if they do not exist' }),
-        Type.String({ description: 'Create parent directories if they do not exist' }),
-      ], { description: 'If true, create parent directories before writing' })
-    ),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal('json', { description: 'JSON output' }),
-        Type.Literal('toon', { description: 'TOON output via tru' }),
-      ], { description: 'Output mode: json or toon' })
-    ),
-    display: Type.Optional(
-      Type.Union([
-        Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
-        Type.Literal('table', { description: 'Markdown table via renderResult' }),
-        Type.Literal('full', { description: 'Compact summary + diff sections' }),
-      ], { description: 'Display mode for visible output: compact (default), table, or full' })
-    ),
+    content: Type.String({ description: 'Content to write' }),
+    if_exists: Type.Optional(Type.Union([
+      Type.Literal('overwrite', { description: 'Overwrite existing file (default)' }),
+      Type.Literal('error', { description: 'Fail if file exists' }),
+      Type.Literal('append', { description: 'Append to existing file' }),
+    ])),
+    create_dirs: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Create parent directories if missing' }),
+      Type.String({ description: 'Create parent directories if missing' }),
+    ])),
+  });
+
+  const writeSchema = Type.Object({
+    files: Type.Array(writeFileSpecSchema, {
+      description: 'Files to write. Single: files: [{path, content}]. Multi: files: [{path, content}, {path, content}].',
+    }),
+    display: Type.Optional(Type.Union([
+      Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
+      Type.Literal('table', { description: 'Markdown table via renderResult' }),
+      Type.Literal('full', { description: 'Compact summary + diff sections' }),
+    ], { description: 'Display mode for visible output' })),
   });
 
   pi.registerTool({
     name: 'write',
     label: 'Write',
     description:
-      'Create or overwrite files with anchoring and diff output. '
-      + 'Supports create, overwrite, and append modes. Returns structured anchors.',
-    promptSnippet: 'Write file contents (create, overwrite, append)',
+      'Create or overwrite files. Always pass files[]. '
+      + 'Single: files: [{path, content}]. Multi: files: [{path, content}, ...].',
+    promptSnippet: 'Write files (create, overwrite, append)',
     promptGuidelines: [
       'Prefer edit for small changes to existing files.',
-      'Use write when creating new files, overwriting intentionally, or appending.',
-      'Use if_exists: "error" to fail if file already exists.',
-      'Use if_exists: "append" to append content to existing files.',
-      'Use create_dirs: true to create parent directories.',
+      'Always pass files: [{path, content, if_exists?, create_dirs?}].',
+      'Single write: files: [{path: "src/foo.ts", content: "..."}].',
+      'Multi-write: files: [{path: "a.ts", content: "..."}, {path: "b.ts", content: "..."}].',
+      'Use if_exists: "append" to append; if_exists: "error" to guard.',
     ],
     parameters: writeSchema,
     async execute(_toolCallId, params: WriteToolParams, _signal, _onUpdate, ctx) {
-      const mode = params.mode ?? 'json';
-      const ifExists = (params.if_exists ?? 'overwrite') as 'overwrite' | 'error' | 'append';
-      const createDirs = params.create_dirs === true || params.create_dirs === 'true';
-
-      // Resolve path
-      const requestedPath = params.path.startsWith('@') ? params.path.slice(1) : params.path;
-      const absolutePath = resolve(ctx.cwd, requestedPath);
-
-      // Check if file exists
-      const fileExists = existsSync(absolutePath);
-
-      // Check parent directory
-      const parentDir = dirname(absolutePath);
-      const parentExists = existsSync(parentDir);
-
-      if (!parentExists) {
-        if (createDirs) {
-          try {
-            mkdirSync(parentDir, { recursive: true });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: 'text', text: error('permission-denied', `Cannot create parent directory: ${parentDir} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
-              isError: true,
-              details: { errorType: 'permission-denied', path: absolutePath, parentDir },
-            };
-          }
-        } else {
-          return {
-            content: [{ type: 'text', text: error('not-found', `Parent directory does not exist: ${parentDir}. Set create_dirs: true to create it.`, { tool: 'write', path: absolutePath }).message }],
-            isError: true,
-            details: { errorType: 'not-found', path: absolutePath, parentDir },
-          };
-        }
-      }
-
-      // Handle existing file
-      if (fileExists) {
-        // Check if it's a directory
-        try {
-          const stats = statSync(absolutePath);
-          if (stats.isDirectory()) {
-            return {
-              content: [{ type: 'text', text: error('invalid-params', `Path is a directory, not a file: ${absolutePath}`, { tool: 'write', path: absolutePath }).message }],
-              isError: true,
-              details: { errorType: 'invalid-params', path: absolutePath },
-            };
-          }
-        } catch {
-          return {
-            content: [{ type: 'text', text: error('permission-denied', `Cannot access file: ${absolutePath}`, { tool: 'write', path: absolutePath }).message }],
-            isError: true,
-            details: { errorType: 'permission-denied', path: absolutePath },
-          };
-        }
-
-        if (ifExists === 'error') {
-          return {
-            content: [{ type: 'text', text: error('not-found', `File already exists: ${absolutePath}. Use if_exists: "overwrite" or "append".`, { tool: 'write', path: absolutePath }).message }],
-            isError: true,
-            details: { errorType: 'not-found', path: absolutePath },
-          };
-        }
-
-        // Read existing content for before anchors and diff
-        let oldContent: string;
-        try {
-          oldContent = readFileSync(absolutePath, 'utf-8');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return {
-            content: [{ type: 'text', text: error('permission-denied', `Cannot read existing file: ${absolutePath} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
-            isError: true,
-            details: { errorType: 'permission-denied', path: absolutePath },
-          };
-        }
-
-        // Get before anchors
-        let beforeAnchors: Array<{ line: number; anchor: string }> | null = [];
-        try {
-          const lhResult = await linehashRead(absolutePath);
-          if (lhResult.exitCode === 0) {
-            const parsed = parseLineHash(lhResult.stdout);
-            beforeAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
-          } else {
-            beforeAnchors = null;
-          }
-        } catch {
-          beforeAnchors = null;
-        }
-
-        if (ifExists === 'overwrite') {
-          // Compute diff
-          const diff = computeDiff(oldContent, params.content);
-
-          // Write file
-          let bytesWritten: number;
-          try {
-            writeFileSync(absolutePath, params.content, 'utf-8');
-            bytesWritten = Buffer.byteLength(params.content, 'utf-8');
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: 'text', text: error('permission-denied', `Cannot write file: ${absolutePath} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
-              isError: true,
-              details: { errorType: 'permission-denied', path: absolutePath },
-            };
-          }
-
-          // Get after anchors
-          let afterAnchors: Array<{ line: number; anchor: string }> = [];
-          try {
-            const lhResult = await linehashRead(absolutePath);
-            if (lhResult.exitCode === 0) {
-              const parsed = parseLineHash(lhResult.stdout);
-              afterAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
-            }
-          } catch {
-            // If linehash fails after write, still return success with empty anchors
-          }
-
-          const result: WriteToolResult = {
-            path: absolutePath,
-            created: false,
-            overwritten: true,
-            appended: false,
-            bytesWritten,
-            linesWritten: countLines(params.content),
-            beforeAnchors: beforeAnchors && beforeAnchors.length > 0 ? beforeAnchors : null,
-            afterAnchors,
-            diff: diff || null,
-            source: 'linehash',
-            backend: 'linehash+nu',
-            mode,
-          };
-
-          // Format output based on display mode
-          const display = (params.display ?? 'compact') as DisplayMode;
-          const compactResult: WriteCompactResult = {
-            path: absolutePath,
-            created: false,
-            overwritten: true,
-            appended: false,
-            bytesWritten,
-            linesWritten: result.linesWritten,
-          };
-          let userText: string;
-          let tokenSavings: number | undefined;
-
-          if (display === 'compact' || display === 'auto') {
-            userText = formatWriteCompact(compactResult);
-          } else {
-            // Table/Full: rich content only (diff if available, or summary)
-            if (diff) {
-              userText = diff;
-            } else {
-              userText = formatWriteCompact(compactResult);
-            }
-          }
-
-          return {
-            content: [{ type: 'text', text: userText }],
-            details: { ...result, tokenSavings },
-          };
-        } else if (ifExists === 'append') {
-          // Append content
-          let bytesWritten: number;
-          try {
-            appendFileSync(absolutePath, params.content, 'utf-8');
-            bytesWritten = Buffer.byteLength(params.content, 'utf-8');
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: 'text', text: error('permission-denied', `Cannot append to file: ${absolutePath} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
-              isError: true,
-              details: { errorType: 'permission-denied', path: absolutePath },
-            };
-          }
-
-          // Get after anchors (full file after append)
-          let afterAnchors: Array<{ line: number; anchor: string }> = [];
-          try {
-            const lhResult = await linehashRead(absolutePath);
-            if (lhResult.exitCode === 0) {
-              const parsed = parseLineHash(lhResult.stdout);
-              afterAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
-            }
-          } catch {
-            // If linehash fails after write, still return success with empty anchors
-          }
-
-          const result: WriteToolResult = {
-            path: absolutePath,
-            created: false,
-            overwritten: false,
-            appended: true,
-            bytesWritten,
-            linesWritten: countLines(params.content),
-            beforeAnchors: beforeAnchors && beforeAnchors.length > 0 ? beforeAnchors : null,
-            afterAnchors,
-            diff: null,
-            source: 'linehash',
-            backend: 'linehash+nu',
-            mode,
-          };
-
-          // Format output based on display mode
-          const display = (params.display ?? 'compact') as DisplayMode;
-          const compactResult: WriteCompactResult = {
-            path: absolutePath,
-            created: false,
-            overwritten: false,
-            appended: true,
-            bytesWritten,
-            linesWritten: result.linesWritten,
-          };
-          let userText: string;
-          let tokenSavings: number | undefined;
-
-          if (display === 'compact' || display === 'auto') {
-            userText = formatWriteCompact(compactResult);
-          } else {
-            // Table/Full: rich content only (summary)
-            userText = formatWriteCompact(compactResult);
-          }
-
-          return {
-            content: [{ type: 'text', text: userText }],
-            details: { ...result, tokenSavings },
-          };
-        }
-      }
-
-      // File does not exist — create it
-      let bytesWritten: number;
-      try {
-        writeFileSync(absolutePath, params.content, 'utf-8');
-        bytesWritten = Buffer.byteLength(params.content, 'utf-8');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+      if (!params.files || params.files.length === 0) {
         return {
-          content: [{ type: 'text', text: error('permission-denied', `Cannot create file: ${absolutePath} — ${msg}`, { tool: 'write', path: absolutePath }).message }],
+          content: [{ type: 'text', text: error('invalid-params', 'files[] is required (e.g. files: [{path, content}])', { tool: 'write' }).message }],
           isError: true,
-          details: { errorType: 'permission-denied', path: absolutePath },
+          details: { errorType: 'invalid-params' },
         };
       }
 
-      // Get after anchors
-      let afterAnchors: Array<{ line: number; anchor: string }> = [];
-      try {
-        const lhResult = await linehashRead(absolutePath);
-        if (lhResult.exitCode === 0) {
-          const parsed = parseLineHash(lhResult.stdout);
-          afterAnchors = parsed.records.map(r => ({ line: r.line, anchor: r.anchor }));
-        }
-      } catch {
-        // If linehash fails after write, still return success with empty anchors
+      if (params.files.length === 1) {
+        return executeSingleFileWrite(params.files[0], ctx) as any;
       }
 
-      const result: WriteToolResult = {
-        path: absolutePath,
-        created: true,
-        overwritten: false,
-        appended: false,
-        bytesWritten,
-        linesWritten: countLines(params.content),
-        beforeAnchors: null,
-        afterAnchors,
-        diff: null,
-        source: 'linehash',
-        backend: 'linehash+nu',
-        mode,
-      };
-
-      // Format output based on display mode
-      const display = (params.display ?? 'compact') as DisplayMode;
-      const compactResult: WriteCompactResult = {
-        path: absolutePath,
-        created: true,
-        overwritten: false,
-        appended: false,
-        bytesWritten,
-        linesWritten: result.linesWritten,
-      };
-      let userText: string;
-      let tokenSavings: number | undefined;
-
-      if (display === 'compact' || display === 'auto') {
-        userText = formatWriteCompact(compactResult);
-      } else {
-        // Table/Full: rich content only (summary + diff if available)
-        const action = compactResult.created ? 'created' : compactResult.overwritten ? 'overwritten' : compactResult.appended ? 'appended' : 'wrote';
-        let text = `${action} — ${compactResult.bytesWritten} bytes, ${compactResult.linesWritten} ${(compactResult.linesWritten) === 1 ? 'line' : 'lines'}`;
-        userText = text;
+      // Multi-file: apply each, collect results
+      const results: Array<Record<string, unknown>> = [];
+      for (const spec of params.files) {
+        const r = await executeSingleFileWrite(spec, ctx);
+        results.push(r);
       }
 
+      const allOk = results.every(r => !(r as any).isError);
+      const writeMap: Record<string, unknown> = {};
+      for (const r of results) {
+        const d = (r as any).details ?? {};
+        writeMap[d.path ?? ''] = [{ created: d.created, overwritten: d.overwritten, appended: d.appended, bytesWritten: d.bytesWritten, linesWritten: d.linesWritten, diff: d.diff ?? '' }];
+      }
       return {
-        content: [{ type: 'text', text: userText }],
-        details: { ...result, tokenSavings },
+        content: [{ type: 'text' as const, text: encodeToon({ write: writeMap }).text }],
+        details: {
+          files: results.map(r => (r as any).details),
+        },
+        ...(allOk ? {} : { isError: true }),
       };
     },
+
     renderResult(result, { expanded }, theme, _context) {
-      const details = result as { details?: { created?: boolean; overwritten?: boolean; appended?: boolean; bytesWritten?: number; linesWritten?: number; path?: string; diff?: string | null; afterAnchors?: Array<{ line: number; anchor: string }>; beforeAnchors?: Array<{ line: number; anchor: string }> } };
+      // Multi-file mode
+      const raw = (result as any).details;
+      if (Array.isArray(raw?.files)) {
+        const count = raw.files.length;
+        if (expanded) {
+          const lines = raw.files.map((f: any) => {
+            const name = (f?.path ?? '').split('/').pop() ?? '?';
+            const op = f?.created ? 'created' : f?.appended ? 'appended' : 'overwritten';
+            return `${theme.fg('accent', name)} — ${op} ${f?.bytesWritten ?? 0}B`;
+          });
+          return new Text(lines.join('\n'), 1, 0);
+        }
+        return new Text(`${count} file${count !== 1 ? 's' : ''} written`, 0, 0);
+      }
+
+      // Single-file mode
+      const details = result as { details?: { created?: boolean; overwritten?: boolean; appended?: boolean; bytesWritten?: number; linesWritten?: number; path?: string; diff?: string | null } };
       const d = details.details ?? {};
+
+      if (expanded) {
+        // Expanded: use bat for syntax-highlighted file content
+        const filePath = d.path ?? '';
+        try {
+          const batResult = spawnSync(BAT_BIN, [
+            '--color=always',
+            '--style=numbers',
+            '--paging=never',
+            '--file-name', filePath.split('/').pop() ?? filePath,
+            filePath,
+          ], { encoding: 'utf-8', timeout: 5000 });
+          if (batResult.status === 0 && batResult.stdout) {
+            return new Text(batResult.stdout, 1, 0);
+          }
+        } catch {
+          // bat not available, fall through
+        }
+        // Fallback: summary
+        const action = d.created ? 'created' : d.overwritten ? 'overwritten' : d.appended ? 'appended' : 'wrote';
+        const lines = (d.linesWritten ?? 0) === 1 ? 'line' : 'lines';
+        return new Text(`${action} — ${d.bytesWritten ?? 0} bytes, ${d.linesWritten ?? 0} ${lines}`, 1, 0);
+      }
+
+      // Collapsed: compact summary
       const action = d.created ? 'created' : d.overwritten ? 'overwritten' : d.appended ? 'appended' : 'wrote';
       const lines = (d.linesWritten ?? 0) === 1 ? 'line' : 'lines';
-
-      let text: string;
-      if (expanded) {
-        // Expanded mode: rich content only (diff if available, or anchors/count metadata)
-        if (d.diff) {
-          text = formatDiffForTui(d.diff, theme as { fg: (color: unknown, text: string) => string });
-        } else {
-          text = `${action} — ${d.bytesWritten ?? 0} bytes, ${d.linesWritten ?? 0} ${lines}`;
-          if (d.afterAnchors) {
-            const before = d.beforeAnchors;
-            const changed = d.afterAnchors.filter((a, i) => {
-              return before && before[i] && before[i].anchor !== a.anchor;
-            });
-            if (changed.length > 0) {
-              text += `\nChanged anchors: ${changed.length}`;
-            }
-          }
-        }
-      } else {
-        // Collapsed mode: compact summary
-        text = `${action} — ${d.bytesWritten ?? 0} bytes, ${d.linesWritten ?? 0} ${lines}`;
-      }
-      return new Text(text, 0, 0);
+      return new Text(`${action} — ${d.bytesWritten ?? 0} bytes, ${d.linesWritten ?? 0} ${lines}`, 0, 0);
     },
   });
 }

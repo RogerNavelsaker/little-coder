@@ -13,10 +13,10 @@ import { resolve } from 'path';
 import { readdirSync, statSync, existsSync, type Stats } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Component, Text } from '@earendil-works/pi-tui';
-import { encodeToon, type ToonMode } from '../../_shared/toon.js';
-import { error } from '../../_shared/output.js';
-import { loadSettings } from '../../_shared/settings.js';
-import { type DisplayMode, formatLsCompact, formatLsTableMarkdown, formatFileSize, renderMarkdown } from '../../_shared/display.js';
+import { encodeToon, type ToonMode } from './toon.js';
+import { error } from './output.js';
+import { loadSettings } from './settings.js';
+import { type DisplayMode, formatLsCompact, formatFileSize } from './display.js';
 
 export interface LsToolParams {
   path?: string;
@@ -24,6 +24,8 @@ export interface LsToolParams {
   long?: boolean | string;
   dirs_first?: boolean | string;
   limit?: number | string;
+  tree?: boolean | string;
+  depth?: number | string;
   mode?: ToonMode;
   display?: DisplayMode;
 }
@@ -46,6 +48,7 @@ export interface LsResult {
   backend: 'eza+nu' | 'nu-native' | 'native-fallback';
   command: string[];
   visibleBudget: number;
+  all: boolean;
   settingsWarning?: string;
 }
 
@@ -78,6 +81,7 @@ function resolveEzaBin(): string {
 }
 
 const EZA_BIN = resolveEzaBin();
+
 
 /**
  * Run nu ls command and parse JSON output.
@@ -259,10 +263,15 @@ export function registerLsTool(pi: ExtensionAPI) {
       Type.Number({ description: 'Maximum number of entries to return' }),
       Type.String({ description: 'Maximum number of entries to return' }),
     ], { description: 'Limit results (default: 200)' })),
-    mode: Type.Optional(Type.Union([
-      Type.Literal('toon', { description: 'TOON format for LLM' }),
-      Type.Literal('json', { description: 'JSON format for LLM' }),
-    ], { description: 'Output format for LLM (defaults to toon)' })),
+    tree: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Show recursive tree view via eza --tree' }),
+      Type.String({ description: 'Show recursive tree view via eza --tree' }),
+    ], { description: 'Tree view: shows full recursive directory structure (default: false)' })),
+    depth: Type.Optional(Type.Union([
+      Type.Number({ description: 'Max depth for tree view (default: 3)' }),
+      Type.String({ description: 'Max depth for tree view (default: 3)' }),
+    ], { description: 'Max recursion depth for tree mode (default: 3)' })),
+
     display: Type.Optional(
       Type.Union([
         Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
@@ -282,11 +291,12 @@ export function registerLsTool(pi: ExtensionAPI) {
     promptSnippet: 'List directory contents with entry details',
     promptGuidelines: [
       'Use ls to list files and directories.',
+      'Use tree: true for a recursive tree view of a directory (depth defaults to 3).',
+      'Use depth to control tree recursion depth (e.g. depth: 2 for two levels).',
       'Use all: true to include hidden files (dotfiles).',
       'Use long: true to include size and modification time.',
       'Use dirs_first: true (default) to list directories before files.',
-      'Use limit to cap the number of results.',
-      'Large directories return bounded previews with truncation metadata.',
+      'Use limit to cap the number of entries returned in flat mode.',
     ],
     parameters: lsSchema,
     async execute(_toolCallId, params: LsToolParams, _signal, _onUpdate, ctx) {
@@ -295,6 +305,8 @@ export function registerLsTool(pi: ExtensionAPI) {
       const long = params.long === true || params.long === 'true';
       const dirsFirst = params.dirs_first !== false && params.dirs_first !== 'false'; // default true
       const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : (params.limit ?? 200);
+      const treeMode = params.tree === true || params.tree === 'true';
+      const treeDepth = typeof params.depth === 'string' ? parseInt(params.depth, 10) : (params.depth ?? 3);
       const mode = (params.mode ?? 'toon') as ToonMode;
 
       // Load settings
@@ -408,74 +420,46 @@ export function registerLsTool(pi: ExtensionAPI) {
       const truncated = totalEntries > effectiveLimit;
       const displayed = entries.slice(0, effectiveLimit);
 
-      // --- User-facing text output (Phase 21: display-aware) ---
-      const display = (params.display ?? 'compact') as DisplayMode;
-      let userText: string;
-
-      if (display === 'compact' || display === 'auto') {
-        // Compact: entry count + first few names
-        const compactResult = {
-          totalEntries,
-          returnedEntries: displayed.length,
-          truncated,
-          names: displayed.map(e => e.name),
-        };
-        userText = formatLsCompact(compactResult);
-        const previewNames = displayed.slice(0, 5).map(e => {
-          const prefix = e.type === 'directory' ? '/' : '';
-          return e.name + prefix;
-        });
-        if (previewNames.length > 0) {
-          userText += ': ' + previewNames.join(', ');
-        }
-      } else if (display === 'table') {
-        // Table: Markdown table
-        const tableEntries = displayed.map(e => ({
-          name: e.name,
-          type: e.type,
-          size: typeof e.size === 'bigint' ? Number(e.size) : (e.size ?? 0),
-          modified: e.modified ?? '-',
-        }));
-        userText = formatLsTableMarkdown(tableEntries);
-      } else {
-        // Full: table-only (no compact summary) — expanded view should focus on table
-        const tableEntries = displayed.map(e => ({
-          name: e.name,
-          type: e.type,
-          size: typeof e.size === 'bigint' ? Number(e.size) : (e.size ?? 0),
-          modified: e.modified ?? '-',
-        }));
-        userText = formatLsTableMarkdown(tableEntries);
-      }
-
-      // --- LLM-facing JSON/TOON in details ---
-      const llmResult: LsResult = {
+      // --- details: structured metadata for agents + renderResult ---
+      const displayedEntries = displayed.map(e => ({
+        name: e.name,
+        path: e.path,
+        type: e.type,
+        size: e.size,
+        modified: e.modified,
+      }));
+      const detailsObj = {
         path: searchPath,
-        entries: displayed.map(e => ({
-          name: e.name,
-          path: e.path,
-          type: e.type,
-          size: e.size,
-          modified: e.modified,
-          depth: e.depth,
-        })),
+        entries: displayedEntries,
         totalEntries,
         returnedEntries: displayed.length,
         truncated,
-        backend,
-        command,
-        visibleBudget: settings.lsMaxEntries,
+        all,
+        tree: treeMode,
         ...(settingsWarning ? { settingsWarning } : {}),
       };
-      const llmEncoded = encodeToon(llmResult, { mode });
+
+      // --- content.text: TOON-encoded for LLM (tree text in tree mode) ---
+      let llmContentText: string;
+      if (treeMode) {
+        const treeArgs = [
+          '--tree', '--color=never',
+          '--level', String(treeDepth),
+          '--group-directories-first',
+          ...(all ? ['--all'] : []),
+          searchPath,
+        ];
+        const treeOut = spawnSync(EZA_BIN, treeArgs, { encoding: 'utf-8', timeout: 10000 });
+        llmContentText = treeOut.status === 0 && treeOut.stdout
+          ? treeOut.stdout.trimEnd()
+          : encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
+      } else {
+        llmContentText = encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
+      }
 
       return {
-        content: [{ type: 'text', text: userText }],
-        details: {
-          ...llmResult,
-          mode,
-          tokenSavings: llmEncoded.tokenSavings,
-        },
+        content: [{ type: 'text', text: llmContentText }],
+        details: detailsObj,
       };
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
@@ -486,29 +470,53 @@ export function registerLsTool(pi: ExtensionAPI) {
           totalEntries?: number;
           returnedEntries?: number;
           truncated?: boolean;
-          entries?: Array<{ name: string; type: string; size: number; modified: string }>;
+          path?: string;
+          tree?: boolean;
+          depth?: number;
+          all?: boolean;
+          entries?: Array<{ name: string; type: string; size: number | bigint }>;
         };
       };
       const totalEntries = details.details?.totalEntries ?? 0;
       const returnedEntries = details.details?.returnedEntries ?? 0;
       const truncated = details.details?.truncated ?? false;
+      const dirPath = details.details?.path ?? '';
+      const treeView = details.details?.tree ?? false;
+      const treeDepth = details.details?.depth ?? 3;
+      const showAll = details.details?.all ?? false;
 
-      // Phase 21: expanded mode is table-only for all modes except compact
-      const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-      const isCompact = displayParam === 'compact';
-      const showFull = expanded && !isCompact;
-
-      let text: string;
-      if (showFull && details.details?.entries) {
-        // Expanded mode (auto/full/table): table-only, no redundant compact summary
-        text = formatLsTableMarkdown(details.details.entries);
-      } else {
-        // Collapsed or compact mode: compact summary
-        text = `${totalEntries} entries`;
-        if (truncated) text += ` — showing ${returnedEntries}`;
+      if (expanded) {
+        try {
+          // Always tree+icons in expanded view — shows structure at a glance
+          const ezaArgs = [
+            '--tree', '--icons', '--color=always',
+            '--level', String(treeView ? treeDepth : 2),
+            '--group-directories-first',
+            ...(showAll ? ['--all'] : []),
+            dirPath,
+          ];
+          const ezaResult = spawnSync(EZA_BIN, ezaArgs, { encoding: 'utf-8', timeout: 10000 });
+          if (ezaResult.status === 0 && ezaResult.stdout) {
+            return new Text(ezaResult.stdout.trimEnd(), 1, 0);
+          }
+        } catch {
+          // eza not available, fall through
+        }
+        // Fallback: compact entry list from details
+        const fallbackEntries = details.details?.entries ?? [];
+        const entryLines = fallbackEntries.map(e => {
+          const typeChar = e.type === 'directory' ? 'D' : (e.type === 'symlink' ? 'L' : '-');
+          const sizeNum = typeof e.size === 'bigint' ? Number(e.size) : (e.size ?? 0);
+          const sizeStr = e.size !== undefined ? formatFileSize(sizeNum) : '-';
+          return `${typeChar} ${sizeStr.padEnd(8)} ${e.name}`;
+        });
+        return new Text(entryLines.join('\n'), 1, 0);
       }
 
-      return renderMarkdown(text, theme as { fg: (color: unknown, text: string) => string; bold: (text: string) => string; italic: (text: string) => string; strikethrough: (text: string) => string; underline: (text: string) => string; }) as unknown as Component;
+      // Collapsed: compact summary
+      let text = treeView ? `tree — ${dirPath}` : `${totalEntries} entries`;
+      if (!treeView && truncated) text += ` — showing ${returnedEntries}`;
+      return new Text(text, 0, 0);
     },
   });
 }

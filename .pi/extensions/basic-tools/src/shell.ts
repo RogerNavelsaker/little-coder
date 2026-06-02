@@ -12,12 +12,14 @@
  *   ~/.config/pi/nushell/config.nu → clean/no-config.
  */
 import { Type } from '@sinclair/typebox';
-import { spawn, spawnSync } from 'child_process';
-import { resolve, join, dirname } from 'path';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { resolve, join } from 'path';
+import { existsSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
-import { error } from '../../_shared/output.js';
+import { error } from './output.js';
+import { encodeToon } from './toon.js';
+import { makeThrottle } from './display.js';
 
 // ---- Bubblewrap read-only shell helpers ----
 
@@ -120,8 +122,8 @@ function runBwrapSandbox(
     };
   }
 }
-import { loadSettings } from '../../_shared/settings.js';
-import { type DisplayMode, formatShellCompact, SHELL_GUIDANCE } from '../../_shared/display.js';
+import { loadSettings } from './settings.js';
+import { type DisplayMode, formatShellCompact, SHELL_GUIDANCE } from './display.js';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 
@@ -186,11 +188,6 @@ function oneLine(value: unknown, max = 96): string {
   const line = String(value ?? '').split('\n').find(l => l.trim().length > 0)?.trim() ?? '';
   if (line.length <= max) return line;
   return `${line.slice(0, max - 1)}…`;
-}
-
-function firstContentText(result: unknown): string {
-  const content = (result as { content?: Array<{ type?: string; text?: string }> })?.content;
-  return content?.find(item => item.type === 'text' && item.text)?.text ?? '';
 }
 
 /**
@@ -318,7 +315,7 @@ export type ShellBackend =
   | 'nu-clean';
 
 export interface ShellToolParams {
-  command: string;
+  commands: string[];
   cwd?: string;
   env?: ShellEnvMode;
   packages?: string[];
@@ -388,6 +385,59 @@ function isBinaryAvailable(bin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Stream nu execution with throttled onUpdate.
+ * Returns { stdout, stderr, exitCode, durationMs, timedOut }.
+ */
+function runNuStreaming(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  onUpdate: (update: unknown) => void,
+): Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number; timedOut: boolean }> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const proc: ChildProcess = spawn(command, args, { cwd, env });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { proc.kill(); } catch { /* already dead */ }
+    }, timeoutMs);
+
+    // Initial "started" signal
+    onUpdate({ content: [], details: undefined } as any);
+
+    const throttle = makeThrottle(500);
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      throttle(() => {
+        onUpdate({ content: [], details: { stdout } } as any);
+      });
+    });
+
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (exitCode) => {
+      clearTimeout(timer);
+      const durationMs = Date.now() - start;
+      resolve({ stdout, stderr, exitCode: exitCode ?? 1, durationMs, timedOut });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -503,7 +553,7 @@ function resolveEnvMode(
  */
 export function registerShellTool(pi: ExtensionAPI) {
   const shellSchema = Type.Object({
-    command: Type.String({ description: 'Nushell command or shell command to execute' }),
+    commands: Type.Array(Type.String(), { description: 'Nushell commands to execute. Single: ["cmd"]. Multi: ["cmd1","cmd2",...] — share cwd/env/timeout.' }),
     cwd: Type.Optional(Type.String({ description: 'Working directory for command execution' })),
     env: Type.Optional(
       Type.Union([
@@ -524,14 +574,7 @@ export function registerShellTool(pi: ExtensionAPI) {
         Type.String({ description: 'Start flox services on activation' }),
       ], { description: 'Start flox services (default: false)' })
     ),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal('text', { description: 'Plain text output' }),
-        Type.Literal('json', { description: 'JSON output' }),
-        Type.Literal('nuon', { description: 'Nushell ON output' }),
-        Type.Literal('toon', { description: 'TOON output via tru' }),
-      ], { description: 'Output format (default: text)' })
-    ),
+
     timeout_ms: Type.Optional(
       Type.Union([
         Type.Number({ description: 'Timeout in milliseconds' }),
@@ -579,7 +622,7 @@ export function registerShellTool(pi: ExtensionAPI) {
     parameters: shellSchema,
     renderCall(args, theme, _context) {
       const params = args as Partial<ShellToolParams>;
-      const command = oneLine(params.command, 110);
+      const command = oneLine(params.commands?.[0], 110);
       const env = params.env ? ` env=${params.env}` : '';
       const cwd = params.cwd ? ` cwd=${params.cwd}` : '';
       const mode = params.mode && params.mode !== 'text' ? ` mode=${params.mode}` : '';
@@ -601,10 +644,12 @@ export function registerShellTool(pi: ExtensionAPI) {
           stderr?: string;
           backend?: string;
           envResolved?: string;
+          truncated?: boolean;
+          fullOutputPath?: string;
         };
       }).details;
       const exitCode = details?.exitCode;
-      const output = oneLine(firstContentText(result) || details?.stderr || details?.stdout, 140);
+      const output = oneLine(details?.stderr || details?.stdout, 140);
       const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
       const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
       let text = `${status}${duration}`;
@@ -621,10 +666,13 @@ export function registerShellTool(pi: ExtensionAPI) {
       if (showFull && details) {
         if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
         if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
-        const stdout = oneLine(details.stdout, 180);
-        const stderr = oneLine(details.stderr, 180);
-        if (stdout) text += `\n${theme.fg('muted', `stdout: ${stdout}`)}`;
-        if (stderr) text += `\n${theme.fg('warning', `stderr: ${stderr}`)}`;
+        // Nu shell already produces pretty table output for structured data — show it in full.
+        if (details.stdout) text += `\n${details.stdout}`;
+        if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
+        if (details.truncated) {
+          const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
+          text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
+        }
       }
 
       return new Text(text, 0, 0);
@@ -645,7 +693,7 @@ export function registerShellTool(pi: ExtensionAPI) {
           isError: true,
           details: {
             cwd: targetCwd,
-            command: params.command,
+            command: params.commands[0] ?? '',
             shell: 'nu',
             envRequested: envMode,
             envResolved: 'not-found',
@@ -661,9 +709,35 @@ export function registerShellTool(pi: ExtensionAPI) {
         };
       }
 
+      // Multi-command: run each sequentially, combine into one labeled TOON block
+      if (params.commands.length > 1) {
+        const mResolved = resolveEnvMode(envMode, targetCwd);
+        const mNuConfig = resolveNuConfig();
+        const mPrefix = buildNuPrefix(mNuConfig.configPath);
+        const shellMap: Record<string, unknown> = {};
+        let anyError = false;
+        for (const cmd of params.commands) {
+          const nuCmd = mode === 'json' ? `${cmd} | to json`
+            : mode === 'nuon' ? `${cmd} | to nuon`
+            : mode === 'toon' ? `${cmd} | to json | tru`
+            : `${cmd} | to text`;
+          const r = runNuCommand([...mPrefix, '-c', nuCmd], targetCwd, timeoutMs);
+          shellMap[cmd] = [{ exitCode: r.exitCode, durationMs: r.durationMs, stdout: r.stdout.trimEnd(), stderr: r.stderr.trimEnd() }];
+          if (r.exitCode !== 0) anyError = true;
+        }
+        return {
+          content: [{ type: 'text', text: encodeToon({ shell: shellMap }).text }],
+          isError: anyError,
+          details: { cwd: targetCwd, envResolved: mResolved.envResolved, commands: params.commands },
+        };
+      }
+
+      // Single command
+      const command = params.commands[0] ?? '';
+
       // Build the nu command with mode-based output formatting
       // Pipe through to text/json/toon for clean output
-      let nuCommand = params.command;
+      let nuCommand = command;
       if (mode === 'json') {
         nuCommand = `${nuCommand} | to json`;
       } else if (mode === 'nuon') {
@@ -701,20 +775,15 @@ export function registerShellTool(pi: ExtensionAPI) {
             isError: true,
             details: {
               cwd: targetCwd,
-              command: params.command,
-              shell: 'bwrap',
-              envRequested: envMode,
+              command,
               envResolved: 'readonly (bubblewrap)',
               configResolved: nuConfig.configSource,
-              activationCommand: '',
-              packages,
               exitCode: -1,
               stdout: '',
               stderr: bwrapResult.bwrapError,
               durationMs: bwrapResult.durationMs,
               truncated: false,
               timedOut: false,
-              mode,
               readonlyShell: true,
               sandbox: 'bubblewrap',
             },
@@ -723,30 +792,24 @@ export function registerShellTool(pi: ExtensionAPI) {
 
         const { stdout: bwrapStdout, stderr: bwrapStderr, exitCode: bwrapExitCode, durationMs: bwrapDurationMs, timedOut: bwrapTimedOut } = bwrapResult;
         const failureSummary = buildFailureSummary(bwrapExitCode, bwrapStdout, bwrapStderr, timeoutMs, bwrapDurationMs, bwrapTimedOut);
-        const display = (params.display ?? 'auto') as DisplayMode;
-        const compactResult = { exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr };
-        let userText = display === 'compact' ? formatShellCompact(compactResult) : formatShellCompact(compactResult);
-        if (failureSummary) userText += '\n' + failureSummary;
+        const bwrapToon = encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] }).text;
+        let bwrapUserText = bwrapToon;
+        if (failureSummary) bwrapUserText += '\n' + failureSummary;
 
         return {
-          content: [{ type: 'text', text: userText }],
+          content: [{ type: 'text', text: bwrapUserText }],
           isError: bwrapExitCode !== 0 || bwrapTimedOut,
           details: {
             cwd: targetCwd,
-            command: params.command,
-            shell: 'bwrap+nu',
-            envRequested: envMode,
+            command,
             envResolved: 'readonly (bubblewrap)',
             configResolved: nuConfig.configSource,
-            activationCommand: '',
-            packages,
             exitCode: bwrapExitCode,
             stdout: bwrapStdout,
             stderr: bwrapStderr,
             durationMs: bwrapDurationMs,
             truncated: false,
             timedOut: bwrapTimedOut,
-            mode,
             readonlyShell: true,
             sandbox: 'bubblewrap',
             sandboxArgs: ['--die-with-parent', '--bind', targetCwd, '--tmpfs', '/tmp', '--clearenv', '--unshare-all'],
@@ -754,87 +817,114 @@ export function registerShellTool(pi: ExtensionAPI) {
         };
       }
 
-      // Execute based on resolved backend
+      // Execute based on resolved backend (streaming)
       let stdout = '';
       let stderr = '';
       let exitCode = 1;
       let durationMs = 0;
       let timedOut = false;
 
-      // Build nu args with config resolution
       const nuArgsBase = buildNuPrefix(nuConfig.configPath);
-      const start = Date.now();
 
-      if (backend === 'nu-clean') {
-        const cleanEnv = {
-          HOME: process.env.HOME ?? '',
-          USER: process.env.USER ?? '',
-          PATH: process.env.PATH ?? '/usr/bin:/bin',
-          TERM: process.env.TERM ?? 'xterm-256color',
+      try {
+        if (backend === 'nu-clean') {
+          const cleanEnv: NodeJS.ProcessEnv = {
+            HOME: process.env.HOME ?? '',
+            USER: process.env.USER ?? '',
+            PATH: process.env.PATH ?? '/usr/bin:/bin',
+            TERM: process.env.TERM ?? 'xterm-256color',
+          };
+          const result = await runNuStreaming(
+            NU_BIN,
+            [...nuArgsBase, '-c', nuCommand],
+            targetCwd,
+            cleanEnv,
+            timeoutMs,
+            _onUpdate as any,
+          );
+          stdout = result.stdout;
+          stderr = result.stderr;
+          exitCode = result.exitCode;
+          durationMs = result.durationMs;
+          timedOut = result.timedOut;
+        } else if (backend === 'nu+direnv') {
+          const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
+          const result = await runNuStreaming(
+            bin,
+            ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand],
+            targetCwd,
+            { ...process.env },
+            timeoutMs,
+            _onUpdate as any,
+          );
+          stdout = result.stdout;
+          stderr = result.stderr;
+          exitCode = result.exitCode;
+          durationMs = result.durationMs;
+          timedOut = result.timedOut;
+        } else if (backend === 'nu+flox') {
+          const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
+          const result = await runNuStreaming(
+            bin,
+            ['activate', '-d', targetCwd, '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand],
+            targetCwd,
+            { ...process.env },
+            timeoutMs,
+            _onUpdate as any,
+          );
+          stdout = result.stdout;
+          stderr = result.stderr;
+          exitCode = result.exitCode;
+          durationMs = result.durationMs;
+          timedOut = result.timedOut;
+        } else if (backend === 'nu+flox-default') {
+          const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
+          const result = await runNuStreaming(
+            bin,
+            ['activate', '-d', '/home/rona', '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand],
+            targetCwd,
+            { ...process.env },
+            timeoutMs,
+            _onUpdate as any,
+          );
+          stdout = result.stdout;
+          stderr = result.stderr;
+          exitCode = result.exitCode;
+          durationMs = result.durationMs;
+          timedOut = result.timedOut;
+        } else {
+          // nu (current, none, auto with no detection) — plain nu
+          const result = await runNuStreaming(
+            NU_BIN,
+            [...nuArgsBase, '-c', nuCommand],
+            targetCwd,
+            { ...process.env },
+            timeoutMs,
+            _onUpdate as any,
+          );
+          stdout = result.stdout;
+          stderr = result.stderr;
+          exitCode = result.exitCode;
+          durationMs = result.durationMs;
+          timedOut = result.timedOut;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text', text: error('binary-failed', `nu execution failed: ${msg}`, { tool: 'shell', details: { command } }).message }],
+          isError: true,
+          details: {
+            cwd: targetCwd,
+            envResolved,
+            configResolved: nuConfig.configSource,
+            exitCode: -1,
+            stdout: '',
+            stderr: msg,
+            durationMs: 0,
+            truncated: false,
+            timedOut: false,
+          },
         };
-        const syncResult = spawnSync(NU_BIN, [...nuArgsBase, '-c', nuCommand], {
-          cwd: targetCwd,
-          env: cleanEnv,
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024 * 10,
-        });
-        stdout = syncResult.stdout?.toString() ?? '';
-        stderr = syncResult.stderr?.toString() ?? '';
-        exitCode = syncResult.status ?? 1;
-        durationMs = Date.now() - start;
-        timedOut = syncResult.status === null || syncResult.status === 124 || durationMs >= timeoutMs;
-      } else if (backend === 'nu+direnv') {
-        const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
-        const result = spawnSync(bin, ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand], {
-          cwd: targetCwd,
-          env: { ...process.env },
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024 * 10,
-        });
-        stdout = result.stdout?.toString() ?? '';
-        stderr = result.stderr?.toString() ?? '';
-        exitCode = result.status ?? 1;
-        durationMs = Date.now() - start;
-        timedOut = result.status === null || result.status === 124 || durationMs >= timeoutMs;
-      } else if (backend === 'nu+flox') {
-        const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-        const result = spawnSync(bin, ['activate', '-d', targetCwd, '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand], {
-          cwd: targetCwd,
-          env: { ...process.env },
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024 * 10,
-        });
-        stdout = result.stdout?.toString() ?? '';
-        stderr = result.stderr?.toString() ?? '';
-        exitCode = result.status ?? 1;
-        durationMs = Date.now() - start;
-        timedOut = result.status === null || result.status === 124 || durationMs >= timeoutMs;
-      } else if (backend === 'nu+flox-default') {
-        const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-        const result = spawnSync(bin, ['activate', '-d', '/home/rona', '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand], {
-          cwd: targetCwd,
-          env: { ...process.env },
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024 * 10,
-        });
-        stdout = result.stdout?.toString() ?? '';
-        stderr = result.stderr?.toString() ?? '';
-        exitCode = result.status ?? 1;
-        durationMs = Date.now() - start;
-        timedOut = result.status === null || result.status === 124 || durationMs >= timeoutMs;
-      } else {
-        // nu (current, none, auto with no detection) — plain nu
-        const result = spawnSync(NU_BIN, [...nuArgsBase, '-c', nuCommand], {
-          cwd: targetCwd,
-          env: { ...process.env },
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024 * 10,
-        });
-        stdout = result.stdout?.toString() ?? '';
-        stderr = result.stderr?.toString() ?? '';
-        exitCode = result.status ?? 1;
-        durationMs = Date.now() - start;
-        timedOut = result.status === null || result.status === 124 || durationMs >= timeoutMs;
       }
 
       // Phase 20: Load settings for shell guards
@@ -887,84 +977,26 @@ export function registerShellTool(pi: ExtensionAPI) {
         }
       }
 
-      // Build user text: display-aware (Phase 21)
-      // auto/compact both use compact for content.text; renderResult handles expansion
+      // Build content.text: TOON-encoded shell result for LLM consumption.
+      // renderResult handles display-mode branching for the TUI card.
       const display = (params.display ?? 'auto') as DisplayMode;
-      const compactResult = {
-        exitCode,
-        durationMs,
-        stdout: stdoutPreview,
-        stderr: stderrPreview,
-      };
-      let userText: string;
-
-      if (display === 'compact' || display === 'auto') {
-        userText = formatShellCompact(compactResult);
-        if (failureSummary) {
-          userText += '\n' + failureSummary;
-        }
-      } else if (display === 'table') {
-        userText = formatShellCompact(compactResult);
-        if (failureSummary) {
-          userText += '\n\n' + failureSummary;
-        }
-        if (stdoutPreview) {
-          userText += '\n\n**stdout:**\n' + stdoutPreview;
-        }
-        if (stderrPreview) {
-          userText += '\n\n**stderr:**\n' + stderrPreview;
-        }
-      } else {
-        // Full
-        userText = formatShellCompact(compactResult);
-        if (failureSummary) {
-          userText += '\n\n' + failureSummary;
-        }
-        if (stdoutPreview) {
-          userText += '\n\n**stdout:**\n' + stdoutPreview;
-        }
-        if (stderrPreview) {
-          userText += '\n\n**stderr:**\n' + stderrPreview;
-        }
-        if (envResolved) {
-          userText += '\n\n' + SHELL_GUIDANCE;
-        }
-      }
-
-      // For TOON mode, we already piped through tru in the command.
-      // Calculate token savings if we have the original command output.
-      let tokenSavings: number | undefined;
-
-      if (mode === 'toon' && stdout && !failureSummary) {
-        try {
-          const jsonStr = JSON.stringify(JSON.parse(stdout), null, 2);
-          tokenSavings = Math.round((1 - stdout.length / jsonStr.length) * 100);
-        } catch {
-          // stdout might not be valid JSON (tru output), skip token savings
-        }
-      }
+      let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] }).text;
+      if (failureSummary) userText += '\n' + failureSummary;
 
       return {
         content: [{ type: 'text', text: userText }],
         isError: exitCode !== 0 || timedOut,
         details: {
           cwd: targetCwd,
-          command: params.command,
-          shell: 'nu',
-          envRequested: envMode,
+          command,
           envResolved,
           configResolved: nuConfig.configSource,
-          activationCommand,
-          packages,
           exitCode,
           stdout: stdoutTruncated ? stdoutPreview : stdout,
           stderr: stderrTruncated ? stderrPreview : stderr,
           durationMs,
           truncated: stdoutTruncated || stderrTruncated,
           timedOut,
-          mode,
-          tokenSavings,
-          visibleBudget: { maxLines, maxBytes },
           ...(fullOutputPath ? { fullOutputPath } : {}),
           ...(settingsWarning ? { settingsWarning } : {}),
         },

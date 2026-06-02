@@ -1,0 +1,79 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "edit:\n  \"/tmp/pi-test.ts\"[1]{applied,linesChanged,diff}:\n    true,4,\"Index: /tmp/pi-test.ts\\n===================================================================\\n--- /tmp/pi-test.ts\\t\\n+++ /tmp/pi-test.ts\\t\\n@@ -1,4 +1,4 @@\\n export function greet(name: string): string {\\n-  return \\\"Hello, \\\" + name;\\n+  return \\\"Hi there, \\\" + name;\\n }\""
+    }
+  ],
+  "details": {
+    "path": "/tmp/pi-test.ts",
+    "applied": true,
+    "dry_run": false,
+    "unchanged": false,
+    "linesChanged": 4,
+    "diff": "--- a//tmp/pi-test.ts\n+++ b//tmp/pi-test.ts\n@@ -1,5 +1,5 @@\n export function greet(name: string): string {\n-  return \"Hello, \" + name;\n+  return \"Hi there, \" + name;\n }\n \n export const PI = 3.14159;\n",
+    "beforeAnchors": [
+      {
+        "line": 1,
+        "anchor": "e4ce"
+      },
+      {
+        "line": 2,
+        "anchor": "7f63"
+      },
+      {
+        "line": 3,
+        "anchor": "bb18"
+      },
+      {
+        "line": 4,
+        "anchor": "5d05"
+      },
+      {
+        "line": 5,
+        "anchor": "ff1d"
+      }
+    ],
+    "afterAnchors": [
+      {
+        "line": 1,
+        "anchor": "e4ce"
+      },
+      {
+        "line": 2,
+        "anchor": "21a0"
+      },
+      {
+        "line": 3,
+        "anchor": "bb18"
+      },
+      {
+        "line": 4,
+        "anchor": "5d05"
+      },
+      {
+        "line": 5,
+        "anchor": "ff1d"
+      }
+    ]
+  }
+}
+
+── content.text ──
+edit:
+  "/tmp/pi-test.ts"[1]{applied,linesChanged,diff}:
+    true,4,"Index: /tmp/pi-test.ts\n===================================================================\n--- /tmp/pi-test.ts\t\n+++ /tmp/pi-test.ts\t\n@@ -1,4 +1,4 @@\n export function greet(name: string): string {\n-  return \"Hello, \" + name;\n+  return \"Hi there, \" + name;\n }"
+
+── collapsed ──
+edited — 4 line(s) changed
+
+── expanded ──
+
+[34m1[0m: 
+[38;2;249;38;114mexport[38;2;248;248;242m [38;2;102;217;239mfunction[38;2;248;248;242m [38;2;166;226;46mgreet[38;2;248;248;242m([38;2;253;151;31mname[38;2;249;38;114m:[38;2;248;248;242m [38;2;166;226;46mstring[38;2;248;248;242m)[38;2;249;38;114m:[38;2;248;248;242m [38;2;166;226;46mstring[38;2;248;248;242m {[0m
+[48;2;63;0;1m  return "[48;2;144;16;17mHello[48;2;63;0;1m, " + name;[0m[48;2;63;0;1m[0K[0m
+[48;2;0;40;0;38;2;248;248;242m  [38;2;249;38;114mreturn[38;2;248;248;242m [38;2;230;219;116m"[48;2;0;96;0mHi there[48;2;0;40;0m, "[38;2;248;248;242m [38;2;249;38;114m+[38;2;248;248;242m [38;2;255;255;255mname[38;2;248;248;242m;[0m[48;2;0;40;0m[0K[0m
+[38;2;248;248;242m}[0m
+
+[38;2;249;38;114mexport[38;2;248;248;242m [38;2;102;217;239mconst[38;2;248;248;242m [38;2;255;255;255mPI[38;2;248;248;242m [38;2;249;38;114m=[38;2;248;248;242m [38;2;190;132;255m3.14159[38;2;248;248;242m;[0m
+

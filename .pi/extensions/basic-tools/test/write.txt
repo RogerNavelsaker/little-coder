@@ -1,0 +1,56 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "write:\n  \"/tmp/pi-test.ts\"[1]{created,overwritten,appended,bytesWritten,linesWritten,diff}:\n    true,false,false,103,6,null"
+    }
+  ],
+  "details": {
+    "path": "/tmp/pi-test.ts",
+    "created": true,
+    "overwritten": false,
+    "appended": false,
+    "bytesWritten": 103,
+    "linesWritten": 6,
+    "beforeAnchors": null,
+    "afterAnchors": [
+      {
+        "line": 1,
+        "anchor": "e4ce"
+      },
+      {
+        "line": 2,
+        "anchor": "7f63"
+      },
+      {
+        "line": 3,
+        "anchor": "bb18"
+      },
+      {
+        "line": 4,
+        "anchor": "5d05"
+      },
+      {
+        "line": 5,
+        "anchor": "ff1d"
+      }
+    ],
+    "diff": ""
+  }
+}
+
+── content.text ──
+write:
+  "/tmp/pi-test.ts"[1]{created,overwritten,appended,bytesWritten,linesWritten,diff}:
+    true,false,false,103,6,null
+
+── collapsed ──
+created — 103 bytes, 6 lines
+
+── expanded ──
+[38;2;131;148;150m   1[0m [38;2;249;38;114mexport[0m[38;2;248;248;242m [0m[38;2;102;217;239mfunction[0m[38;2;248;248;242m [0m[38;2;166;226;46mgreet[0m[38;2;248;248;242m([0m[38;2;253;151;31mname[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mstring[0m[38;2;248;248;242m)[0m[38;2;249;38;114m:[0m[38;2;248;248;242m [0m[38;2;166;226;46mstring[0m[38;2;248;248;242m [0m[38;2;248;248;242m{[0m
+[38;2;131;148;150m   2[0m [38;2;248;248;242m  [0m[38;2;249;38;114mreturn[0m[38;2;248;248;242m [0m[38;2;230;219;116m"[0m[38;2;230;219;116mHello, [0m[38;2;230;219;116m"[0m[38;2;248;248;242m [0m[38;2;249;38;114m+[0m[38;2;248;248;242m [0m[38;2;255;255;255mname[0m[38;2;248;248;242m;[0m
+[38;2;131;148;150m   3[0m [38;2;248;248;242m}[0m
+[38;2;131;148;150m   4[0m 
+[38;2;131;148;150m   5[0m [38;2;249;38;114mexport[0m[38;2;248;248;242m [0m[38;2;102;217;239mconst[0m[38;2;248;248;242m [0m[38;2;255;255;255mPI[0m[38;2;248;248;242m [0m[38;2;249;38;114m=[0m[38;2;248;248;242m [0m[38;2;190;132;255m3[0m[38;2;190;132;255m.[0m[38;2;190;132;255m14159[0m[38;2;248;248;242m;[0m
+

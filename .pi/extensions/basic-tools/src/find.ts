@@ -5,15 +5,16 @@
  * list for user + JSON/TOON for LLM with path, type, size, and metadata.
  */
 import { Type } from '@sinclair/typebox';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { resolve } from 'path';
 import { existsSync, statSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Component, Text } from '@earendil-works/pi-tui';
-import { encodeToon, type ToonMode } from '../../_shared/toon.js';
-import { error } from '../../_shared/output.js';
-import { loadSettings, type Settings } from '../../_shared/settings.js';
-import { type DisplayMode, formatFindCompact, formatFindTableMarkdown, renderMarkdown } from '../../_shared/display.js';
+import { encodeToon, type ToonMode } from './toon.js';
+import { error } from './output.js';
+import { loadSettings, type Settings } from './settings.js';
+import { type DisplayMode, formatFindCompact, formatFileSize, makeThrottle } from './display.js';
+import type { ChildProcess } from 'child_process';
 
 /** Resolve fd binary path. */
 function resolveFdBin(): string {
@@ -27,6 +28,19 @@ function resolveFdBin(): string {
 }
 
 const FD_BIN = resolveFdBin();
+
+/** Resolve eza binary path. */
+function resolveEzaBin(): string {
+  if (process.env.EZA_BIN) return process.env.EZA_BIN;
+  try {
+    const { execSync } = require('child_process');
+    const p = execSync('which eza 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (p) return p;
+  } catch { /* continue */ }
+  return 'eza';
+}
+
+const EZA_BIN = resolveEzaBin();
 
 export interface FindToolParams {
   pattern?: string;
@@ -48,62 +62,58 @@ export interface FindEntry {
   depth: number;
 }
 
-export interface FindResult {
-  query: string;
-  cwd: string;
-  pattern: string;
-  patternMode: 'glob';
-  type?: string;
-  entries: FindEntry[];
-  totalEntries: number;
-  returnedEntries: number;
-  truncated: boolean;
-  command: string[];
-  visibleBudget: number;
-  excludedPatterns: string[];
-  recoveryHint: string;
-  settingsWarning?: string;
-}
 
 /**
- * Execute fd with structured output.
+ * Stream fd output: call onEntry for each null-delimited path as it arrives.
+ * Returns { proc, kill } so the caller can abort when the limit is reached.
  */
-function runFd(searchPath: string, options: {
-  pattern?: string;
-  type?: string;
-  hidden?: boolean;
-  followSymlinks?: boolean;
-  exclude?: string[];
-  maxDepth?: number;
-  limit?: number;
-}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const args: string[] = ['--print0', '--glob'];
-    if (options.pattern) args.push(options.pattern);
-    else args.push('*');
-    if (options.type) args.push('-t', options.type);
-    if (options.hidden) args.push('--hidden');
-    if (options.followSymlinks) args.push('-L');
-    if (options.exclude) {
-      for (const ex of options.exclude) args.push('--exclude', ex);
-    }
-    if (options.maxDepth) args.push('--max-depth', String(options.maxDepth));
-    if (options.limit !== undefined) args.push('--max-results', String(options.limit));
+function runFdStream(
+  searchPath: string,
+  options: {
+    pattern?: string;
+    type?: string;
+    hidden?: boolean;
+    followSymlinks?: boolean;
+    exclude?: string[];
+    maxDepth?: number;
+  },
+  onEntry: (rawPath: string) => void,
+): { proc: ChildProcess; kill: () => void } {
+  const args: string[] = ['--print0', '--glob'];
+  if (options.pattern) args.push(options.pattern);
+  else args.push('*');
+  if (options.type) args.push('-t', options.type);
+  if (options.hidden) args.push('--hidden');
+  if (options.followSymlinks) args.push('-L');
+  if (options.exclude) {
+    for (const ex of options.exclude) args.push('--exclude', ex);
+  }
+  if (options.maxDepth) args.push('--max-depth', String(options.maxDepth));
+  // Do NOT pass --max-results here — we kill manually when limit is hit.
 
-    args.push(searchPath);
+  args.push(searchPath);
 
-    const proc = spawn(FD_BIN, args, {
-      cwd: process.cwd(),
-      env: { ...process.env },
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on('close', (exitCode) => { resolve({ stdout, stderr, exitCode: exitCode ?? 1 }); });
-    proc.on('error', (err) => { reject(err); });
+  const proc = spawn(FD_BIN, args, {
+    cwd: process.cwd(),
+    env: { ...process.env },
   });
+
+  let buffer = Buffer.alloc(0);
+  let stderr = '';
+
+  proc.stdout.on('data', (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    let nullIndex: number;
+    while ((nullIndex = buffer.indexOf(0)) !== -1) {
+      const path = buffer.slice(0, nullIndex).toString('utf-8');
+      buffer = buffer.slice(nullIndex + 1);
+      if (path) onEntry(path);
+    }
+  });
+
+  proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+  return { proc, kill: () => proc.kill() };
 }
 
 /**
@@ -148,19 +158,6 @@ function parseFdOutput(stdout: string): FindEntry[] {
 /**
  * Register the find tool with pi.
  */
-/**
- * Build a narrowing hint for truncated find results.
- */
-function buildFindRecoveryHint(
-  searchPath: string,
-  pattern: string,
-  totalEntries: number,
-  returnedEntries: number,
-  truncated: boolean,
-): string {
-  if (!truncated) return '';
-  return `Narrow the search: specify a subdirectory, use a more specific glob pattern, or increase the limit.`;
-}
 
 export function registerFindTool(pi: ExtensionAPI) {
   const findSchema = Type.Object({
@@ -193,10 +190,7 @@ export function registerFindTool(pi: ExtensionAPI) {
       Type.Number({ description: 'Maximum number of results to return' }),
       Type.String({ description: 'Maximum number of results to return' }),
     ], { description: 'Limit the number of results' })),
-    mode: Type.Optional(Type.Union([
-      Type.Literal('toon', { description: 'TOON format for LLM' }),
-      Type.Literal('json', { description: 'JSON format for LLM' }),
-    ], { description: 'Output format for LLM (defaults to toon)' })),
+
     display: Type.Optional(
       Type.Union([
         Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
@@ -251,120 +245,78 @@ export function registerFindTool(pi: ExtensionAPI) {
         };
       }
 
-      // Execute fd
-      let fdResult: { stdout: string; stderr: string; exitCode: number };
-      try {
-        fdResult = await runFd(searchPath, { pattern, type, hidden, followSymlinks, exclude: allExcludes, maxDepth, limit });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+      // Stream fd output with throttled onUpdate
+      const throttle = makeThrottle(500);
+      const entries: FindEntry[] = [];
+      let killedEarly = false;
+      let fdStderr = '';
+
+      const { proc, kill } = runFdStream(searchPath, { pattern, type, hidden, followSymlinks, exclude: allExcludes, maxDepth }, (rawPath) => {
+        try {
+          const stat = statSync(rawPath);
+          let type: FindEntry['type'] = 'other';
+          if (stat.isFile()) type = 'file';
+          else if (stat.isDirectory()) type = 'directory';
+          else if (stat.isSymbolicLink()) type = 'symlink';
+          else if (stat.isSocket()) type = 'socket';
+          else if (stat.isFIFO()) type = 'pipe';
+
+          const depth = (rawPath.split('/').length - 1);
+          entries.push({ path: rawPath, type, size: stat.size, depth });
+        } catch {
+          const depth = (rawPath.split('/').length - 1);
+          entries.push({ path: rawPath, type: 'other', depth });
+        }
+
+        // Kill when limit reached
+        if (limit !== undefined && entries.length >= limit) {
+          killedEarly = true;
+          kill();
+        }
+
+        // Throttled progress update
+        throttle(() => {
+          _onUpdate?.({
+            content: [],
+            details: { totalEntries: entries.length, truncated: false },
+          });
+        });
+      });
+
+      // Wait for process to close (may have been killed early)
+      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+        proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
+        proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
+      });
+      fdStderr = stderr;
+
+      if (exitCode > 0 && !killedEarly) {
         return {
-          content: [{ type: 'text', text: error('binary-failed', `fd execution failed: ${msg}`, { tool: 'find', path: searchPath }).message }],
+          content: [{ type: 'text', text: error('binary-failed', `fd exited ${exitCode}: ${fdStderr.trim()}`, { tool: 'find', path: searchPath }).message }],
           isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, stderr: msg },
+          details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: fdStderr.trim() },
         };
       }
 
-      if (fdResult.exitCode > 0) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `fd exited ${fdResult.exitCode}: ${fdResult.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode: fdResult.exitCode, stderr: fdResult.stderr.trim() },
-        };
-      }
-
-      // Parse fd output.
-      // To accurately detect truncation, fetch limit + 1 entries:
-      // if we get limit + 1, we know there are more and can set truncated=true.
-      const fetchLimit = limit !== undefined ? limit + 1 : undefined;
-      const fdResult2 = await runFd(searchPath, { pattern, type, hidden, followSymlinks, exclude: allExcludes, maxDepth, limit: fetchLimit });
-
-      if (fdResult2.exitCode > 0) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `fd exited ${fdResult2.exitCode}: ${fdResult2.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode: fdResult2.exitCode, stderr: fdResult2.stderr.trim() },
-        };
-      }
-
-      const entries = parseFdOutput(fdResult2.stdout);
       const totalEntries = entries.length;
       const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
-      const truncated = limit !== undefined && totalEntries > limit;
-      const displayed = limit !== undefined ? entries.slice(0, limit) : entries;
+      const truncated = killedEarly || (limit !== undefined && totalEntries > limit);
+      const displayed = truncated ? entries.slice(0, limit) : entries;
 
-      // --- User-facing text output (Phase 21: display-aware) ---
-      const display = (params.display ?? 'compact') as DisplayMode;
-      const typeLabel = type ? ` (${type})` : '';
-
-      const findCompactResult = {
-        query: pattern ?? '',
-        totalEntries,
-        returnedEntries,
-        truncated,
-        entries: displayed,
-      };
-
-      let userText: string;
-      const recoveryHint = truncated
-        ? buildFindRecoveryHint(searchPath, pattern ?? '*', totalEntries, returnedEntries, truncated)
-        : '';
-
-      if (display === 'compact' || display === 'auto') {
-        userText = formatFindCompact(findCompactResult);
-      } else if (display === 'table') {
-        // Table: table-only (no compact summary)
-        const tableLines: string[] = [];
-        tableLines.push('| Path | Type | Size | Depth |');
-        tableLines.push('|------|------|------|-------|');
-        for (const e of displayed) {
-          const sizeStr = e.size !== undefined ? `${(e.size / 1024).toFixed(1)}KB` : '—';
-          tableLines.push(`| ${e.path} | ${e.type} | ${sizeStr} | ${e.depth} |`);
-        }
-        userText = tableLines.join('\n');
-      } else {
-        // Full: table-only (no compact summary) — expanded view should focus on table
-        const tableLines: string[] = [];
-        tableLines.push('| Path | Type | Size | Depth |');
-        tableLines.push('|------|------|------|-------|');
-        for (const e of displayed) {
-          const sizeStr = e.size !== undefined ? `${(e.size / 1024).toFixed(1)}KB` : '—';
-          tableLines.push(`| ${e.path} | ${e.type} | ${sizeStr} | ${e.depth} |`);
-        }
-        userText = tableLines.join('\n');
-      }
-
-      // --- LLM-facing JSON/TOON in details ---
-      const llmResult: FindResult = {
-        query: pattern ?? '',
-        cwd: ctx.cwd,
-        pattern: pattern ?? '',
-        patternMode: 'glob',
-        type,
-        entries: displayed.map(e => ({
-          path: e.path,
-          type: e.type,
-          size: e.size,
-          depth: e.depth,
-        })),
-        totalEntries,
-        returnedEntries,
-        truncated,
-        command: [FD_BIN, '--print0', '--glob', ...(pattern ? [pattern] : ['*']), ...(type ? ['-t', type] : []), ...(hidden ? ['--hidden'] : []), ...(followSymlinks ? ['-L'] : []), ...(allExcludes.flatMap(e => ['--exclude', e])), ...(maxDepth ? ['--max-depth', String(maxDepth)] : []), ...(limit ? ['--max-results', String(limit)] : []), searchPath],
-        visibleBudget: findSettings.findMaxEntries,
-        excludedPatterns: allExcludes,
-        recoveryHint,
-        ...(settingsWarning ? { settingsWarning } : {}),
-      };
-      const llmEncoded = encodeToon(llmResult, { mode });
+      // --- content.text: entries JSON → TOON ---
+      const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, depth: e.depth }));
+      const searchLabel = pattern ?? '.';
+      const contentToon = encodeToon({ find: { [searchLabel]: contentEntries } });
 
       return {
-        content: [{ type: 'text', text: userText }],
+        content: [{ type: 'text', text: contentToon.text }],
         details: {
-          ...llmResult,
-          mode,
-          tokenSavings: llmEncoded.tokenSavings,
-          source: 'fd',
-          backend: 'fd+nu',
+          pattern: pattern ?? '',
+          totalEntries,
+          returnedEntries,
+          truncated,
+          entries: contentEntries,
+          ...(settingsWarning ? { settingsWarning } : {}),
         },
       };
     },
@@ -383,22 +335,36 @@ export function registerFindTool(pi: ExtensionAPI) {
       const returnedEntries = details.details?.returnedEntries ?? 0;
       const truncated = details.details?.truncated ?? false;
 
-      // Phase 21: expanded mode is table-only for all modes except compact
-      const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-      const isCompact = displayParam === 'compact';
-      const showFull = expanded && !isCompact;
-
-      let text: string;
-      if (showFull && details.details?.entries) {
-        // Expanded mode (auto/full/table): table-only, no redundant compact summary
-        text = formatFindTableMarkdown(details.details.entries);
-      } else {
-        // Collapsed or compact mode: compact summary
-        text = `found ${totalEntries} entries`;
-        if (truncated) text += ` — showing ${returnedEntries}`;
+      if (expanded && details.details?.entries && details.details.entries.length > 0) {
+        const entries = details.details.entries;
+        const paths = entries.map(e => e.path);
+        try {
+          const r = spawnSync(EZA_BIN, [
+            '--color=always', '--icons', '--oneline', '--group-directories-first',
+            ...paths,
+          ], { encoding: 'utf-8', timeout: 5000 });
+          if (r.status === 0 && r.stdout) {
+            const footer = truncated ? `\n${theme.fg('muted', `… ${totalEntries - returnedEntries} more`)}` : '';
+            return new Text(r.stdout.trimEnd() + footer, 1, 0);
+          }
+        } catch { /* fall through */ }
+        // Fallback: plain path list
+        const lines = entries.map(e => {
+          const name = e.path.split('/').pop() ?? e.path;
+          const dir = e.path.slice(0, e.path.length - name.length - 1);
+          return `${dir}/${theme.fg('accent', name)}`;
+        });
+        const footer = truncated ? `\n${theme.fg('muted', `… ${totalEntries - returnedEntries} more`)}` : '';
+        return new Text(lines.join('\n') + footer, 1, 0);
       }
 
-      return renderMarkdown(text, theme as { fg: (color: unknown, text: string) => string; bold: (text: string) => string; italic: (text: string) => string; strikethrough: (text: string) => string; underline: (text: string) => string; }) as unknown as Component;
+      // Collapsed: compact summary
+      const countLabel = totalEntries === 0
+        ? theme.fg('muted', '0 files')
+        : truncated
+          ? theme.fg('success', `${returnedEntries} of ${totalEntries} files`)
+          : theme.fg('success', `${totalEntries} file${totalEntries !== 1 ? 's' : ''}`);
+      return new Text(countLabel, 0, 0);
     },
   });
 }

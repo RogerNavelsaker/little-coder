@@ -1,0 +1,156 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "ast_search:\n  \"encodeToon($$$ARGS)\"[17]{file,line,text,anchor}:\n    /home/rona/.pi/agent/pi-structural-tools/src/read.ts,299,\"encodeToon({ read: fileMap })\",c279\n    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,456,\"encodeToon({ ast_search: { [pattern]: contentMatches } })\",05d3\n    /home/rona/.pi/agent/pi-structural-tools/src/find.ts,308,\"encodeToon({ find: { [searchLabel]: contentEntries } })\",8c2c\n    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,454,\"encodeToon({ ls: { [searchPath]: displayedEntries } })\",5b19\n    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,456,\"encodeToon({ ls: { [searchPath]: displayedEntries } })\",f7df\n    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,341,\"encodeToon({ write: { [absolutePath]: [{ created, overwritten, appended, bytesWritten, linesWritten, diff }] } })\",fdb0\n    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,419,\"encodeToon({ write: writeMap })\",\"1437\"\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,308,\"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged: 0, diff: null }] } })\",c37a\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,323,\"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: diffText }] } })\",a8ca\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,344,\"encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })\",61d0\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,511,\"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: unchanged ? null : diffText }] } })\",a8e7\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,529,\"encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })\",27be\n    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,658,\"encodeToon({ edit: editMap })\",47ef\n    /home/rona/.pi/agent/pi-structural-tools/src/grep.ts,373,\"encodeToon({ grep: { [pattern]: contentMatches } })\",f61d\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,728,\"encodeToon({ shell: shellMap })\",52d4\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,794,\"encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] })\",db84\n    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,982,\"encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] })\",cd8e"
+    }
+  ],
+  "details": {
+    "query": "encodeToon($$$ARGS)",
+    "cwd": "/home/rona/.pi/agent/pi-structural-tools",
+    "path": "/home/rona/.pi/agent/pi-structural-tools/src",
+    "language": "typescript",
+    "glob": null,
+    "totalMatches": 17,
+    "returnedMatches": 17,
+    "truncated": false,
+    "matches": [
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/read.ts",
+        "line": 299,
+        "text": "encodeToon({ read: fileMap })",
+        "anchor": "c279"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts",
+        "line": 456,
+        "text": "encodeToon({ ast_search: { [pattern]: contentMatches } })",
+        "anchor": "05d3"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/find.ts",
+        "line": 308,
+        "text": "encodeToon({ find: { [searchLabel]: contentEntries } })",
+        "anchor": "8c2c"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/ls.ts",
+        "line": 454,
+        "text": "encodeToon({ ls: { [searchPath]: displayedEntries } })",
+        "anchor": "5b19"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/ls.ts",
+        "line": 456,
+        "text": "encodeToon({ ls: { [searchPath]: displayedEntries } })",
+        "anchor": "f7df"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/write.ts",
+        "line": 341,
+        "text": "encodeToon({ write: { [absolutePath]: [{ created, overwritten, appended, bytesWritten, linesWritten, diff }] } })",
+        "anchor": "fdb0"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/write.ts",
+        "line": 419,
+        "text": "encodeToon({ write: writeMap })",
+        "anchor": "1437"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 308,
+        "text": "encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged: 0, diff: null }] } })",
+        "anchor": "c37a"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 323,
+        "text": "encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: diffText }] } })",
+        "anchor": "a8ca"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 344,
+        "text": "encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })",
+        "anchor": "61d0"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 511,
+        "text": "encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: unchanged ? null : diffText }] } })",
+        "anchor": "a8e7"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 529,
+        "text": "encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })",
+        "anchor": "27be"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/edit.ts",
+        "line": 658,
+        "text": "encodeToon({ edit: editMap })",
+        "anchor": "47ef"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/grep.ts",
+        "line": 373,
+        "text": "encodeToon({ grep: { [pattern]: contentMatches } })",
+        "anchor": "f61d"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+        "line": 728,
+        "text": "encodeToon({ shell: shellMap })",
+        "anchor": "52d4"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+        "line": 794,
+        "text": "encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] })",
+        "anchor": "db84"
+      },
+      {
+        "file": "/home/rona/.pi/agent/pi-structural-tools/src/shell.ts",
+        "line": 982,
+        "text": "encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] })",
+        "anchor": "cd8e"
+      }
+    ]
+  }
+}
+
+── content.text ──
+ast_search:
+  "encodeToon($$$ARGS)"[17]{file,line,text,anchor}:
+    /home/rona/.pi/agent/pi-structural-tools/src/read.ts,299,"encodeToon({ read: fileMap })",c279
+    /home/rona/.pi/agent/pi-structural-tools/src/ast-search.ts,456,"encodeToon({ ast_search: { [pattern]: contentMatches } })",05d3
+    /home/rona/.pi/agent/pi-structural-tools/src/find.ts,308,"encodeToon({ find: { [searchLabel]: contentEntries } })",8c2c
+    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,454,"encodeToon({ ls: { [searchPath]: displayedEntries } })",5b19
+    /home/rona/.pi/agent/pi-structural-tools/src/ls.ts,456,"encodeToon({ ls: { [searchPath]: displayedEntries } })",f7df
+    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,341,"encodeToon({ write: { [absolutePath]: [{ created, overwritten, appended, bytesWritten, linesWritten, diff }] } })",fdb0
+    /home/rona/.pi/agent/pi-structural-tools/src/write.ts,419,"encodeToon({ write: writeMap })","1437"
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,308,"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged: 0, diff: null }] } })",c37a
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,323,"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: diffText }] } })",a8ca
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,344,"encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })",61d0
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,511,"encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: unchanged ? null : diffText }] } })",a8e7
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,529,"encodeToon({ edit: { [absolutePath]: [{ applied: d.applied, linesChanged: d.linesChanged, diff: diffText }] } })",27be
+    /home/rona/.pi/agent/pi-structural-tools/src/edit.ts,658,"encodeToon({ edit: editMap })",47ef
+    /home/rona/.pi/agent/pi-structural-tools/src/grep.ts,373,"encodeToon({ grep: { [pattern]: contentMatches } })",f61d
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,728,"encodeToon({ shell: shellMap })",52d4
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,794,"encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] })",db84
+    /home/rona/.pi/agent/pi-structural-tools/src/shell.ts,982,"encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] })",cd8e
+
+── collapsed ──
+17 matches for "encodeToon($$$ARGS)"
+
+── expanded ──
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mast-search.ts[0m (1 match)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33medit.ts[0m (1 match)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mfind.ts[0m (1 match)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mgrep.ts[0m (2 matches)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mls.ts[0m (2 matches)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mread.ts[0m (6 matches)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mshell.ts[0m (1 match)
+[36m/home/rona/.pi/agent/pi-structural-tools/src/[1;33mwrite.ts[0m (3 matches)

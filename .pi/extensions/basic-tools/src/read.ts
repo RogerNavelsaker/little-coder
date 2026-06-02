@@ -8,17 +8,30 @@
  * Phase 20: Context guards — visible budgets and truncation hints.
  */
 import { Type } from '@sinclair/typebox';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { resolve } from 'path';
 import { existsSync, statSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
-import { encodeToon, type ToonMode } from '../../_shared/toon.js';
-import { parseLineHash, extractText, type LineHashRecord } from '../../_shared/linehash.js';
-import { error } from '../../_shared/output.js';
-import { loadSettings } from '../../_shared/settings.js';
-import { type DisplayMode, formatReadCompact, formatReadTableMarkdown, formatReadTablePlain, renderMarkdown } from '../../_shared/display.js';
+import { encodeToon, type ToonMode } from './toon.js';
+import { parseLineHash, extractText, type LineHashRecord } from './linehash.js';
+import { error } from './output.js';
+import { loadSettings } from './settings.js';
+import { type DisplayMode, formatReadCompact, formatReadTableMarkdown, formatReadTablePlain, renderMarkdown } from './display.js';
 import { type Component, Markdown, Text } from '@earendil-works/pi-tui';
+
+/** Resolve bat binary path. */
+function resolveBatBin(): string {
+  if (process.env.BAT_BIN) return process.env.BAT_BIN;
+  try {
+    const { execSync } = require('child_process');
+    const p = execSync('which bat 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    if (p) return p;
+  } catch { /* continue */ }
+  return 'bat';
+}
+
+const BAT_BIN = resolveBatBin();
 
 /** Simple async command executor */
 function executeCommand(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -110,12 +123,15 @@ export interface ReadToolOptions {
   onSuccessfulRead?: (path: string) => void;
 }
 
-export interface ReadToolParams {
+export interface ReadFileSpec {
   path: string;
-  mode?: ToonMode;
   offset?: number | string;
   limit?: number | string;
   after_anchor?: string;
+}
+
+export interface ReadToolParams {
+  files: ReadFileSpec[];
   /** Display mode for visible output: compact (default), table, or full */
   display?: DisplayMode;
 }
@@ -131,8 +147,6 @@ export interface ReadToolResult {
   records: LineHashRecord[];
   /** Concatenated text content */
   content: string;
-  /** Output mode used */
-  mode: ToonMode;
   /** Token savings (if TOON was used) */
   tokenSavings?: number;
   /** Visible budget applied */
@@ -208,6 +222,90 @@ function executeLinehash(
 }
 
 /**
+ * Execute multi-file read: process each file spec and concatenate TOON with headers.
+ */
+async function executeMultiRead(
+  files: ReadFileSpec[],
+  cwd: string,
+  params: ReadToolParams
+): Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }> {
+  const { loadSettings } = await import('./settings.js');
+  const { settings } = loadSettings(cwd);
+  const effectiveLimit = settings.readMaxVisibleLines ?? 2000;
+
+  const fileMap: Record<string, unknown> = {};
+  const fileResults: Array<{
+    path: string;
+    totalLines: number;
+    returnedLines: number;
+    truncated: boolean;
+    error?: string;
+  }> = [];
+
+  for (const spec of files) {
+    const requestedPath = spec.path.startsWith('@') ? spec.path.slice(1) : spec.path;
+    const absolutePath = resolve(cwd, requestedPath);
+
+    if (!existsSync(absolutePath)) {
+      const msg = `not found: ${absolutePath}`;
+      fileMap[spec.path] = `[error: ${msg}]`;
+      fileResults.push({ path: absolutePath, totalLines: 0, returnedLines: 0, truncated: false, error: msg });
+      continue;
+    }
+
+    try {
+      const stats = statSync(absolutePath);
+      if (stats.isDirectory()) {
+        const msg = `is a directory: ${absolutePath}`;
+        fileMap[spec.path] = `[error: ${msg}]`;
+        fileResults.push({ path: absolutePath, totalLines: 0, returnedLines: 0, truncated: false, error: msg });
+        continue;
+      }
+    } catch { /* fall through to linehash */ }
+
+    const offset = typeof spec.offset === 'string' ? parseInt(spec.offset, 10) : spec.offset;
+    const limit = typeof spec.limit === 'string' ? parseInt(spec.limit, 10) : (spec.limit ?? effectiveLimit);
+
+    let result: { stdout: string; stderr: string; exitCode: number };
+    try {
+      result = await executeLinehash(absolutePath, offset, spec.after_anchor, limit + 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      fileMap[spec.path] = `[error: ${msg}]`;
+      fileResults.push({ path: absolutePath, totalLines: 0, returnedLines: 0, truncated: false, error: msg });
+      continue;
+    }
+
+    if (result.exitCode !== 0) {
+      const msg = result.stderr.trim() || `linehash exited ${result.exitCode}`;
+      fileMap[spec.path] = `[error: ${msg}]`;
+      fileResults.push({ path: absolutePath, totalLines: 0, returnedLines: 0, truncated: false, error: msg });
+      continue;
+    }
+
+    const parsed = parseLineHash(result.stdout);
+    const truncated = parsed.records.length > limit;
+    const records = truncated ? parsed.records.slice(0, limit) : parsed.records;
+
+    fileMap[spec.path] = records;
+    fileResults.push({
+      path: absolutePath,
+      totalLines: parsed.records.length,
+      returnedLines: records.length,
+      truncated,
+    });
+  }
+
+  return {
+    content: [{ type: 'text' as const, text: encodeToon({ read: fileMap }).text }],
+    details: {
+      files: fileResults,
+      totalFiles: files.length,
+    },
+  };
+}
+
+/**
  * Register the read tool with pi.
  *
  * @param pi - Pi extension API
@@ -215,29 +313,18 @@ function executeLinehash(
  */
 export function registerReadTool(pi: ExtensionAPI, options: ReadToolOptions = {}) {
   const readSchema = Type.Object({
-    path: Type.String({ description: 'File path to read (relative or absolute)' }),
-    mode: Type.Optional(
-      Type.Union([
-        Type.Literal('toon', { description: 'TOON format (compact, 30-60% token savings)' }),
-        Type.Literal('json', { description: 'Pretty-printed JSON' }),
-        Type.Literal('raw', { description: 'Raw text content' }),
-      ], { description: 'Output format: toon, json, or raw' })
-    ),
-    offset: Type.Optional(
-      Type.Union([
+    files: Type.Array(Type.Object({
+      path: Type.String({ description: 'File path to read (relative or absolute)' }),
+      offset: Type.Optional(Type.Union([
         Type.Number({ description: 'Start line (1-indexed)' }),
         Type.String({ description: 'Start line (1-indexed)' }),
-      ], { description: 'Start reading from this line (line-number based). Future: linehash --offset flag.' })
-    ),
-    after_anchor: Type.Optional(
-      Type.String({ description: 'Anchor hash to start after (exclusive)' }),
-    ),
-    limit: Type.Optional(
-      Type.Union([
-        Type.Number({ description: 'Maximum number of lines to read' }),
-        Type.String({ description: 'Maximum number of lines to read' }),
-      ], { description: 'Limit the number of lines returned' })
-    ),
+      ])),
+      limit: Type.Optional(Type.Union([
+        Type.Number({ description: 'Max lines to read' }),
+        Type.String({ description: 'Max lines to read' }),
+      ])),
+      after_anchor: Type.Optional(Type.String({ description: 'Anchor hash to start after (exclusive)' })),
+    }), { description: 'Files to read. Single read: [{path}]. Multi-read: [{path}, {path}, ...].' }),
     display: Type.Optional(
       Type.Union([
         Type.Literal('auto', { description: 'Auto: compact by default, fuller when expanded (default)' }),
@@ -252,337 +339,97 @@ export function registerReadTool(pi: ExtensionAPI, options: ReadToolOptions = {}
     name: 'read',
     label: 'Read',
     description:
-      'Read file contents with structured line-level output. '
-      + 'Returns line anchors for change detection and follow-up edits. '
-      + 'Supports compact (TOON), JSON, and raw text output modes.',
-    promptSnippet: 'Read file contents with line anchors for edits',
+      'Read file contents with line anchors for change detection and follow-up edits. '
+      + 'Always pass files[]. Single read: files: [{path}]. Multi-read: files: [{path}, {path}, ...].',
+    promptSnippet: 'Read files with line anchors',
     promptGuidelines: [
-      'Use read before editing a file or when exact content matters.',
-      'Use mode: "toon" for compact output that reduces token usage.',
-      'Use mode: "json" for structured data processing.',
-      'Use mode: "raw" for plain text content.',
-      'Keep returned anchors available for follow-up edits.',
-      'Use offset/limit for large files to stay within visible budgets.',
+      'Always pass files: [{path, offset?, limit?, after_anchor?}].',
+      'Single read: files: [{path: "src/foo.ts"}].',
+      'Multi-read: files: [{path: "src/a.ts"}, {path: "src/b.ts"}].',
+      'Use offset/limit per file for large files.',
+      'Keep returned anchors for follow-up edits.',
     ],
     parameters: readSchema,
     async execute(_toolCallId, params: ReadToolParams, _signal, _onUpdate, ctx) {
-      const requestedPath = params.path.startsWith('@') ? params.path.slice(1) : params.path;
-      const absolutePath = resolve(ctx.cwd, requestedPath);
-      const mode = (params.mode ?? 'json') as ToonMode;
-
-      // Validate file exists
-      if (!existsSync(absolutePath)) {
+      if (!params.files || params.files.length === 0) {
         return {
-          content: [{
-            type: 'text',
-            text: error('not-found', `File not found: ${absolutePath}`, {
-              tool: 'read',
-              path: absolutePath,
-              mode,
-            }).message,
-          }],
+          content: [{ type: 'text', text: error('invalid-params', 'files[] is required (e.g. files: [{path: "src/foo.ts"}])', { tool: 'read' }).message }],
           isError: true,
-          details: {
-            errorType: 'not-found',
-            path: absolutePath,
-            mode,
-          },
+          details: { errorType: 'invalid-params' },
         };
       }
+      return executeMultiRead(params.files, ctx.cwd, params) as any;
 
-      // Validate file is readable
-      try {
-        const stats = statSync(absolutePath);
-        if (stats.isDirectory()) {
-          return {
-            content: [{
-              type: 'text',
-              text: error('invalid-params', `Path is a directory, not a file: ${absolutePath}`, {
-                tool: 'read',
-                path: absolutePath,
-                mode,
-              }).message,
-            }],
-            isError: true,
-            details: {
-              errorType: 'invalid-params',
-              path: absolutePath,
-              mode,
-            },
-          };
-        }
-      } catch {
-        return {
-          content: [{
-            type: 'text',
-            text: error('permission-denied', `Cannot read file: ${absolutePath}`, {
-              tool: 'read',
-              path: absolutePath,
-              mode,
-            }).message,
-          }],
-          isError: true,
-          details: {
-            errorType: 'permission-denied',
-            path: absolutePath,
-            mode,
-          },
-        };
-      }
-
-      // Validate and parse offset/limit
-      let offset: number | undefined;
-      let limit: number | undefined;
-
-      if (params.offset !== undefined) {
-        const rawOffset = typeof params.offset === 'string' ? parseInt(params.offset, 10) : params.offset;
-        if (!Number.isFinite(rawOffset) || rawOffset < 1 || Number.isNaN(rawOffset)) {
-          return {
-            content: [{
-              type: 'text',
-              text: error('invalid-params', `offset must be a finite integer >= 1, got: ${JSON.stringify(params.offset)}`, {
-                tool: 'read',
-                path: absolutePath,
-                mode,
-              }).message,
-            }],
-            isError: true,
-            details: {
-              errorType: 'invalid-params',
-              path: absolutePath,
-              mode,
-              param: 'offset',
-              value: params.offset,
-            },
-          };
-        }
-        offset = rawOffset;
-      }
-
-      if (params.limit !== undefined) {
-        const rawLimit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
-        if (!Number.isFinite(rawLimit) || rawLimit < 0 || Number.isNaN(rawLimit)) {
-          return {
-            content: [{
-              type: 'text',
-              text: error('invalid-params', `limit must be a finite integer >= 0, got: ${JSON.stringify(params.limit)}`, {
-                tool: 'read',
-                path: absolutePath,
-                mode,
-              }).message,
-            }],
-            isError: true,
-            details: {
-              errorType: 'invalid-params',
-              path: absolutePath,
-              mode,
-              param: 'limit',
-              value: params.limit,
-            },
-          };
-        }
-        limit = rawLimit;
-      }
-
-      // Load settings
-      const { settings, warnings } = loadSettings(ctx.cwd);
-      const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
-
-      // Phase 20: Apply visible budgets
-      const maxLines = settings.readMaxVisibleLines;
-      const maxBytes = settings.readMaxVisibleBytes;
-
-      // If no explicit limit was set, apply the budget as a sensible default
-      let effectiveLimit: number | undefined = limit;
-      if (effectiveLimit === undefined) {
-        effectiveLimit = maxLines;
-      }
-
-      // Execute linehash with offset/after_anchor/effective_limit
-      let result: { stdout: string; stderr: string; exitCode: number };
-      try {
-        result = await executeLinehash(absolutePath, offset, params.after_anchor, effectiveLimit);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{
-            type: 'text',
-            text: error('binary-failed', `linehash execution failed: ${errorMessage}`, {
-              tool: 'read',
-              path: absolutePath,
-              mode,
-            }).message,
-          }],
-          isError: true,
-          details: {
-            errorType: 'binary-failed',
-            path: absolutePath,
-            mode,
-            stderr: errorMessage,
-          },
-        };
-      }
-
-      // Check for binary errors
-      if (result.exitCode !== 0) {
-        return {
-          content: [{
-            type: 'text',
-            text: error('binary-failed', `linehash exited with code ${result.exitCode}: ${result.stderr.trim()}`, {
-              tool: 'read',
-              path: absolutePath,
-              mode,
-            }).message,
-          }],
-          isError: true,
-          details: {
-            errorType: 'binary-failed',
-            path: absolutePath,
-            mode,
-            exitCode: result.exitCode,
-            stderr: result.stderr.trim(),
-          },
-        };
-      }
-
-      // Get total file lines for truncation detection
-      const totalFileLines = (await executeCommand('wc', ['-l', absolutePath])).stdout.trim();
-      const fileTotalLines = parseInt(totalFileLines.split('\n')[0]?.trim() ?? '0', 10);
-
-      // Parse linehash output
-      let parsed2: ReturnType<typeof parseLineHash>;
-      try {
-        parsed2 = parseLineHash(result.stdout);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{
-            type: 'text',
-            text: error('parse-error', `Failed to parse linehash output: ${errorMessage}`, {
-              tool: 'read',
-              path: absolutePath,
-              mode,
-            }).message,
-          }],
-          isError: true,
-          details: {
-            errorType: 'parse-error',
-            path: absolutePath,
-            mode,
-            stderr: errorMessage,
-          },
-        };
-      }
-
-      const slicedRecords = parsed2.records;
-      const content = extractText(slicedRecords);
-
-      // Call onSuccessfulRead callback if provided
-      if (options.onSuccessfulRead) {
-        options.onSuccessfulRead(absolutePath);
-      }
-
-      // Determine truncation: true only when file is actually truncated (not all lines shown)
-      const truncated = slicedRecords.length >= maxLines || content.length > maxBytes;
-      const recoveryHint = slicedRecords.length >= maxLines
-        ? `Use offset/limit to read other sections. Example: offset: ${slicedRecords.length + 1}, limit: ${maxLines}.`
-        : '';
-
-      // --- User-facing text output ---
-      // Phase 21: auto/compact both use compact for content.text; renderResult handles expansion
-      const display = (params.display ?? 'auto') as DisplayMode;
-      let userText: string;
-
-      if (display === 'compact' || display === 'auto') {
-        // Compact: summary line + preview with omitted-lines affordance
-        // Use linehash totalLines as source of truth; fallback to wc -l when unknown
-        const effectiveTotalLines = parsed2.totalLines > 0 ? parsed2.totalLines : fileTotalLines;
-        const compactPreview = slicedRecords.slice(0, 3).map(r => ({ line: r.line, text: r.text }));
-        const compactResult = {
-          totalLines: effectiveTotalLines,
-          returnedLines: slicedRecords.length,
-          truncated,
-          recoveryHint,
-          previewLines: compactPreview,
-          maxPreviewLines: 3,
-        };
-        userText = formatReadCompact(compactResult);
-      } else if (display === 'table') {
-        // Table: Markdown table (plain fallback)
-        userText = formatReadTablePlain(slicedRecords);
-      } else {
-        // Full: table-only (no compact summary) — expanded view should focus on table
-        if (slicedRecords.length > 0) {
-          userText = formatReadTablePlain(slicedRecords);
-        } else {
-          userText = '(empty file)';
-        }
-      }
-
-      if (truncated && recoveryHint) {
-        userText += `\n\n[truncated: ${slicedRecords.length} lines shown, ${fileTotalLines} total. ${recoveryHint}]`;
-      }
-
-      // --- LLM-facing TOON/JSON in details ---
-      const llmResult = {
-        path: absolutePath,
-        totalLines: parsed2.totalLines,
-        returnedLines: slicedRecords.length,
-        records: slicedRecords.map(r => ({ line: r.line, anchor: r.anchor, text: r.text })),
-        content,
-        visibleBudget: { maxLines, maxBytes },
-        truncated,
-        recoveryHint,
-        ...(settingsWarning ? { settingsWarning } : {}),
-      };
-      const llmEncoded = encodeToon(llmResult, { mode });
-      const backendUsed = 'linehash+nu';
-
-      return {
-        content: [{ type: 'text', text: userText }],
-        details: {
-          ...llmResult,
-          mode,
-          tokenSavings: llmEncoded.tokenSavings,
-          source: 'linehash',
-          backend: backendUsed,
-        },
-      };
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0) as unknown as Component;
 
+      // Multi-file mode
+      const multiDetails = (result as any).details as { totalFiles?: number; files?: Array<{ path: string; returnedLines: number; truncated: boolean }> } | undefined;
+      if (multiDetails?.totalFiles !== undefined) {
+        const count = multiDetails.totalFiles;
+        if (expanded && multiDetails.files) {
+          const lines = multiDetails.files.map(f => {
+            const name = f.path.split('/').pop() ?? f.path;
+            const trunc = f.truncated ? ` (truncated)` : '';
+            return `${theme.fg('accent', name)} — ${f.returnedLines} lines${trunc}`;
+          });
+          return new Text(lines.join('\n'), 1, 0) as unknown as Component;
+        }
+        return new Text(`${count} file${count !== 1 ? 's' : ''} read`, 0, 0) as unknown as Component;
+      }
+
       const details = result as {
         details?: {
-          totalLines?: number;
-          returnedLines?: number;
-          truncated?: boolean;
-          records?: Array<{ line: number; anchor: string; text: string }>;
+          truncation?: {
+            truncated?: boolean;
+            outputLines?: number;
+            totalLines?: number;
+          };
           path?: string;
+          startLine?: number;
+          endLine?: number;
         };
       };
-      const recs = details.details?.records ?? [];
-      const totalLines = details.details?.totalLines ?? 0;
-      const returnedLines = details.details?.returnedLines ?? 0;
-      const truncated = details.details?.truncated ?? false;
-
-      // Phase 21: expanded mode is table-only for all modes except compact
-      const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-      const isCompact = displayParam === 'compact';
-      const showFull = expanded && !isCompact;
+      const totalLines = details.details?.truncation?.totalLines ?? 0;
+      const returnedLines = details.details?.truncation?.outputLines ?? 0;
+      const truncated = details.details?.truncation?.truncated ?? false;
+      const filePath = details.details?.path ?? '';
+      const offset = (result as { params?: { offset?: number } }).params?.offset;
+      const limit = (result as { params?: { limit?: number } }).params?.limit;
+      const startLine = details.details?.startLine ?? (offset ?? 1);
+      const endLine = details.details?.endLine ?? (offset ?? 1) + returnedLines - 1;
 
       let text: string;
-      if (showFull && recs.length > 0) {
-        // Expanded mode (auto/full/table): table-only, no redundant compact summary
-        text = formatReadTableMarkdown(recs);
+      if (expanded && filePath) {
+        // Expanded: bat directly on the file with --line-range for the returned window
+        try {
+          const batArgs: string[] = [
+            '--color=always',
+            '--style=numbers',
+            '--paging=never',
+            '--theme=ansi',
+            '--wrap=never',
+            '--line-range', `${startLine}:${endLine}`,
+            filePath,
+          ];
+          const batResult = spawnSync(BAT_BIN, batArgs, { encoding: 'utf-8', timeout: 5000 });
+          if (!batResult.error && batResult.status === 0 && batResult.stdout) {
+            const more = Math.max(0, totalLines - endLine);
+            const expandedFooter = truncated && more > 0
+              ? `\x1b[2m── ${returnedLines} of ${totalLines} lines · ${more} more · use offset=${endLine + 1} ──\x1b[22m\n`
+              : '';
+            return new Text(batResult.stdout.trimEnd() + (expandedFooter ? '\n' + expandedFooter : ''), 1, 0);
+          }
+        } catch { /* fall through */ }
+        text = `${returnedLines} lines from ${filePath}`;
       } else {
-        // Collapsed or compact mode: compact summary + truncated hint
-        if (truncated) {
-          text = `${returnedLines} lines returned from ${totalLines} total (truncated)`;
-        } else if (returnedLines < totalLines) {
-          text = `${returnedLines} lines returned from ${totalLines} total`;
+        // Collapsed: same dim style as expanded footer
+        const more = Math.max(0, totalLines - endLine);
+        if (truncated && more > 0) {
+          text = `\x1b[2m── ${returnedLines} of ${totalLines} lines · ${more} more · use offset=${endLine + 1} ──\x1b[22;23;24;25;39m`;
         } else {
-          text = `${totalLines} lines total`;
+          text = `\x1b[2m── ${returnedLines} of ${totalLines} lines ──\x1b[22;23;24;25;39m`;
         }
       }
 
