@@ -60,4 +60,43 @@ describe("grep tool", () => {
     expect(result.isError).toBe(true);
     expect(result.details.errorType).toBe("not-found");
   });
+
+  test("context:2: returns matches with context_before and context_after arrays", async () => {
+    const { result } = await invokeTool(registerGrepTool, {
+      pattern: "tool",
+      path: FIXTURE,
+      context: 2,
+    });
+    const d = result.details;
+    expect(d.totalMatches).toBeGreaterThan(0);
+    expect(d.matches[0].context_before).toBeDefined();
+    expect(d.matches[0].context_after).toBeDefined();
+    expect(Array.isArray(d.matches[0].context_before)).toBe(true);
+    expect(Array.isArray(d.matches[0].context_after)).toBe(true);
+  });
+
+  test("glob:\"*.md\": only .md files matched", async () => {
+    const { result } = await invokeTool(registerGrepTool, {
+      pattern: "tool",
+      path: FIXTURE,
+      glob: "*.md",
+    });
+    const d = result.details;
+    expect(d.totalMatches).toBeGreaterThanOrEqual(0);
+    // All matched paths should end with .md
+    for (const m of d.matches) {
+      expect(m.path.endsWith('.md')).toBe(true);
+    }
+  });
+
+  test("context:3: details.context=3 round-trips into result", async () => {
+    const { result } = await invokeTool(registerGrepTool, {
+      pattern: "tool",
+      path: FIXTURE,
+      context: 3,
+    });
+    const d = result.details;
+    expect(d.context).toBe(3);
+    expect(d.totalMatches).toBeGreaterThan(0);
+  });
 });

@@ -14,6 +14,9 @@
           "cn"
         ]
       },
+      "linehash": {
+        "flake": "github:RogerNavelsaker/nixpkg-linehash"
+      },
       "mulch": {
         "flake": "github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d",
         "outputs": [
@@ -36,7 +39,9 @@
         ]
       }
     },
-    "hook": {},
+    "hook": {
+      "on-activate": "  export PATH=\"/home/rona/Repositories/scripts:$PATH\"\n"
+    },
     "profile": {},
     "options": {
       "systems": [
@@ -98,6 +103,31 @@
       "name": "canopy-0.2.4-r1",
       "pname": "canopy",
       "version": "0.2.4-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "linehash",
+      "locked-url": "github:RogerNavelsaker/nixpkg-linehash/ff15b6fd3494d2058867b2adf251e12d3159c34d?narHash=sha256-d/R4Aq5leUKCiTbJqZadvXbSBoYXAlMewEnG%2BEzXvVE%3D",
+      "flake-description": "linehash (le): Fast, deterministic line editing CLI for LLMs",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/kry1811iw8japy4qfvnc6ayjfhnp7qxb-linehash-0.1.0.drv",
+      "outputs": {
+        "out": "/nix/store/dzc6dhwcpnfrs2w7krzpdd3b3dbwq88k-linehash-0.1.0"
+      },
+      "output-names": [
+        "out"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "linehash-0.1.0",
+      "pname": "linehash",
+      "version": "0.1.0",
       "broken": false,
       "unfree": false,
       "priority": 5

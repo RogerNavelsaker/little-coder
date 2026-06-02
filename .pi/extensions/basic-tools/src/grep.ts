@@ -43,6 +43,10 @@ export interface GrepToolParams {
   /** When true, include files that match default exclude patterns */
   include_excluded?: boolean | string;
   display?: DisplayMode;
+  /** Number of context lines to include on each side (rg -B N -A N) */
+  context?: number | string;
+  /** Glob pattern to scope search (rg --glob <pattern>) */
+  glob?: string;
 }
 
 export interface GrepMatch {
@@ -53,6 +57,8 @@ export interface GrepMatch {
   submatches: Array<{ text: string; start: number; end: number }>;
   anchor: string | null;
   anchor_error: string | null;
+  context_before?: string[];
+  context_after?: string[];
 }
 
 
@@ -63,12 +69,18 @@ export interface GrepMatch {
 function runRgStream(
   pattern: string,
   searchPath: string,
-  options: { literal?: boolean; ignoreCase?: boolean; excludes?: string[] },
+  options: { literal?: boolean; ignoreCase?: boolean; excludes?: string[]; context?: number; glob?: string },
   onMatch: (line: string) => void,
 ): { proc: ChildProcess; kill: () => void } {
   const args = ['--json', '--no-filename', '--line-number', pattern, searchPath];
   if (options.literal) args.unshift('-F');
   if (options.ignoreCase) args.push('-i');
+  if (options.context) {
+    args.push('-B', String(options.context), '-A', String(options.context));
+  }
+  if (options.glob) {
+    args.push('--glob', options.glob);
+  }
   if (options.excludes) {
     for (const ex of options.excludes) {
       args.push('--glob', `!${ex}`);
@@ -224,6 +236,15 @@ export function registerGrepTool(pi: ExtensionAPI) {
         Type.String({ description: 'Maximum number of matches to return' }),
       ], { description: 'Limit the number of matches returned' })
     ),
+    context: Type.Optional(
+      Type.Union([
+        Type.Number({ description: 'Number of context lines before and after each match (rg -B N -A N)' }),
+        Type.String({ description: 'Number of context lines before and after each match (rg -B N -A N)' }),
+      ], { description: 'Show surrounding context lines' })
+    ),
+    glob: Type.Optional(
+      Type.String({ description: 'Glob pattern to scope search (rg --glob <pattern>)' })
+    ),
 
     display: Type.Optional(
       Type.Union([
@@ -249,6 +270,8 @@ export function registerGrepTool(pi: ExtensionAPI) {
       'Use literal: true for exact string matching (no regex).',
       'Use ignore_case: true for case-insensitive search.',
       'Use limit to cap the number of results.',
+      'Use context: N to show N lines of surrounding context (rg -B N -A N).',
+      'Use glob: "*.ext" to scope search to specific file patterns.',
       'Use returned line anchors when a match will be edited.',
       'Use include_excluded: true only when you need to search excluded directories.',
       'For broad searches (e.g. ~/.pi/agent), use a targeted path or limit to avoid overflow.',
@@ -261,6 +284,8 @@ export function registerGrepTool(pi: ExtensionAPI) {
       const ignoreCase = params.ignore_case === true || params.ignore_case === 'true';
       const includeExcluded = params.include_excluded === true || params.include_excluded === 'true';
       const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
+      const context = typeof params.context === 'string' ? parseInt(params.context, 10) : params.context;
+      const glob = params.glob;
       const mode = (params.mode ?? 'toon') as ToonMode;
 
       // Load settings
@@ -285,8 +310,9 @@ export function registerGrepTool(pi: ExtensionAPI) {
       const searchedPathsSet = new Set<string>();
       let killedEarly = false;
       let rgStderr = '';
+      let pendingContextBefore: string[] | undefined;
 
-      const { proc, kill } = runRgStream(pattern, searchPath, { literal, ignoreCase, excludes }, (line) => {
+      const { proc, kill } = runRgStream(pattern, searchPath, { literal, ignoreCase, excludes, context, glob }, (line) => {
         let parsed: { type: string; data: unknown };
         try {
           parsed = JSON.parse(line);
@@ -298,6 +324,11 @@ export function registerGrepTool(pi: ExtensionAPI) {
         } else if (parsed.type === 'match') {
           const m = parseRgMatchLine(line);
           if (m) {
+            // Attach pending context_before from preceding context lines
+            if (pendingContextBefore) {
+              m.context_before = pendingContextBefore;
+              pendingContextBefore = undefined;
+            }
             matches.push(m);
 
             // Kill when limit reached
@@ -313,6 +344,25 @@ export function registerGrepTool(pi: ExtensionAPI) {
                 details: { totalMatches: matches.length, truncated: false },
               });
             });
+          }
+        } else if (parsed.type === 'context') {
+          const data = (parsed.data as {
+            path?: { text?: string };
+            line_number?: number;
+            lines?: { text?: string };
+          });
+          const ctxLine = data.lines?.text;
+          if (ctxLine !== undefined) {
+            const last = matches[matches.length - 1];
+            if (last) {
+              // context_after → previous match
+              if (!last.context_after) last.context_after = [];
+              last.context_after.push(ctxLine);
+            } else {
+              // context_before → pending for next match
+              if (!pendingContextBefore) pendingContextBefore = [];
+              pendingContextBefore.push(ctxLine);
+            }
           }
         }
       });
@@ -383,7 +433,8 @@ export function registerGrepTool(pi: ExtensionAPI) {
           truncated,
           totalMatches,
           returnedMatches,
-          matches: displayedMatches.map(m => ({ path: m.path, line: m.line, anchor: m.anchor ?? null, text: m.text })),
+          matches: displayedMatches.map(m => ({ path: m.path, line: m.line, anchor: m.anchor ?? null, text: m.text, context_before: m.context_before ?? null, context_after: m.context_after ?? null })),
+          context,
           ...(settingsWarning ? { settingsWarning } : {}),
         },
       };
@@ -398,6 +449,7 @@ export function registerGrepTool(pi: ExtensionAPI) {
           truncated?: boolean;
           query?: string;
           patternMode?: string;
+          context?: number;
           matches?: Array<{ line: number; anchor: string; path: string; text: string }>;
         };
       };
@@ -405,9 +457,10 @@ export function registerGrepTool(pi: ExtensionAPI) {
       const returnedMatches = details.details?.returnedMatches ?? 0;
       const truncated = details.details?.truncated ?? false;
       const query = details.details?.query ?? '';
+      const ctxLines = details.details?.context ?? 1;
 
       if (expanded && details.details?.matches && details.details.matches.length > 0) {
-        // bat ±1 context per file, muted amber background on matched text only
+        // bat ±context per file, muted amber background on matched text only
         const patternMode = details.details?.patternMode ?? 'regex';
         let highlightRe: RegExp | null = null;
         try {
@@ -424,7 +477,7 @@ export function registerGrepTool(pi: ExtensionAPI) {
         }
         const blocks: string[] = [];
         for (const [filePath, lines] of byFile) {
-          const block = batContextHighlight(filePath, lines, highlightRe, 1);
+          const block = batContextHighlight(filePath, lines, highlightRe, ctxLines);
           if (block) blocks.push(block);
         }
         if (truncated) blocks.push(theme.fg('muted', `… ${totalMatches - returnedMatches} more`));

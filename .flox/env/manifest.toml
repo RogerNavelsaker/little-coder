@@ -3,6 +3,7 @@ schema-version = "1.12.0"
 [install]
 bun.pkg-path = "bun"
 bun.pkg-group = "bun"
+linehash.flake = "github:RogerNavelsaker/nixpkg-linehash"
 mulch.flake = "github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d"
 mulch.outputs = ["out", "ml"]
 seeds.flake = "github:RogerNavelsaker/nixpkg-seeds"
@@ -15,6 +16,9 @@ canopy.outputs = ["out", "cn"]
 [vars]
 
 [hook]
+on-activate = '''
+  export PATH="/home/rona/Repositories/scripts:$PATH"
+'''
 
 [profile]
 

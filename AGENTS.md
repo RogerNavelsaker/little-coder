@@ -18,7 +18,7 @@ ml prime architecture tools   # compact priming prompt
 Grove stores: `.seeds/` `.mulch/` `.trellis/` `.canopy/`
 Flox env provides: `seeds` (`sd`), `mulch` (`ml`), `trellis` (`tl`), `canopy` (`cn`), `bun`.
 
-Session notes: `/home/rona/projects/little-coder/memory-bank/activeContext.md`
+Repo root: `/home/rona/Repositories/.ru/RogerNavelsaker/little-coder` (only path; no `~/projects/little-coder`).
 
 ## Architecture
 
@@ -99,6 +99,10 @@ The launcher detects its mode from `process.argv[1]`:
 - Build: `scripts/build-release.ts`
 - Patches: `scripts/patch-pi.ts`
 
+### Cross-repo dependencies
+
+- **linehash** (Rust CLI) source: `/home/rona/Repositories/.ru/RogerNavelsaker/linehash`. Provides anchored reads, edit safety, diff, fuzzy matching, patch-apply. Binary is flox-provided as `linehash`. Adding a new flag → edit Rust source, `cargo build --release`, then re-resolve via flox.
+
 ## Dev commands
 
 ```sh
@@ -135,6 +139,32 @@ Zellij session: `pi-tool-upgrade`, agents tab.
 | `scripts/dump` | planner | capture pane output (ANSI or `--plain`) |
 | `scripts/log` | planner | inspect Pi session logs |
 | `scripts/report` | editor, tester | send report back to planner |
+| `.pi/extensions/basic-tools/src/invoke.ts` | planner, editor | drive any basic-tool deterministically; print all three output channels |
+
+### Tool inspection layer — `invoke.ts`
+
+`bun .pi/extensions/basic-tools/src/invoke.ts <tool> '<json-params>' [--cwd <dir>]` drives a basic-tool exactly as pi would and prints **all four channels** in one shot:
+
+1. **`details` JSON** — structured tool result (the source of truth for state, anchors, applied flags).
+2. **`content.text`** — TOON-encoded payload the LLM actually sees.
+3. **`── collapsed ──`** — the one-line summary card.
+4. **`── expanded ──`** — the full rendered card (ANSI colors, diffs, highlights).
+
+Use it for:
+
+- **Schema verification.** If a tester report claims a parameter doesn't exist, drive `invoke.ts` with that parameter — if it succeeds, the bug is the tester model, not the extension.
+- **Display verification.** Compare collapsed vs expanded output without toggling the tester pane.
+- **Pre-tester sanity.** Run the exact tool call locally before dispatching tester. Saves a round trip when the issue is obvious.
+- **Channel separation.** Confirm that LLM-visible data (`content.text`) contains the field, even if the human renderer (`expanded`) doesn't surface it yet.
+
+Examples:
+```sh
+bun .pi/extensions/basic-tools/src/invoke.ts grep '{"pattern":"foo","path":"src","context":3}'
+bun .pi/extensions/basic-tools/src/invoke.ts edit '{"edits":[{"path":"/tmp/x","old_text":"a","new_text":"b"}]}'
+bun .pi/extensions/basic-tools/src/invoke.ts find '{"path":"src","type":"file","limit":10}'
+```
+
+Supported tools: `read, edit, write, grep, find, ls, shell, ast-search`.
 
 ```nu
 # Dispatch
@@ -155,6 +185,27 @@ nu scripts/report "EDITOR REPORT: status=done; files=...; tests=...; result=...;
 **Editor:** `EDITOR REPORT: status=<done|blocked>; files=<changed>; tests=<cmd and pass/fail>; result=<summary>; blockers=<none|details>`
 
 **Tester:** `TESTER REPORT: status=<done|blocked>; files=<changed or none>; tests=<cmd and pass/fail>; result=<summary>; blockers=<none|details>`
+
+### Planner workflow
+
+Sequential, never parallel: **editor → wait for `EDITOR REPORT` → tester → wait for `TESTER REPORT` → next task**.
+
+1. Pick next ticket: `sd ready --priority=0..3` (Backlog hidden).
+2. `sd update <id> --status=in_progress`.
+3. Dispatch to editor with substrate refs (`ml prime --files <paths>`, `sd show <id>`) and explicit acceptance: files to edit, tests to add, `bun run typecheck && bun test <file>` command.
+4. Wait for `EDITOR REPORT` in planner pane. Do not dispatch tester before it arrives.
+5. After editor reports done on extension code, tester must reload artifacts. `/reload` only re-reads context/settings — it does **not** re-import extension modules or refresh tool schemas. Rules:
+   - Extension `.ts` source edited (schema, handler, display) → `nu scripts/send new tester` (fresh pi process re-imports the module).
+   - `AGENTS.md` or `skills/` changed (no code change) → `nu scripts/send reload tester`.
+   - Both changed → `reload` then `new`.
+   - Pure prompt-only test (no code change) → no reload needed.
+6. Dispatch tester with the exact exercise (tool call + inputs + expected shape). Tester runs, then `nu scripts/report "TESTER REPORT: ..."`.
+7. Planner inspects (in order of trust):
+   - `bun .pi/extensions/basic-tools/src/invoke.ts <tool> '<json>'` → **deterministic ground truth**. Drives the tool exactly as pi would and prints details JSON, content.text (LLM-visible TOON), collapsed render, and expanded render. Use this first when a tester report looks wrong — the tester model may pass an unexpected param shape and misreport schema.
+   - `nu scripts/dump tester` (with ANSI) → check tester-pane rendering, color/highlight, transparency artifacts.
+   - `nu scripts/dump tester --plain` → check tester-visible response text.
+   - Pi session logs: `nu scripts/log tester` for structured tool calls in the tester run.
+8. On pass: `sd close <id>`, record insight (`ml record ...`), `sd sync && ml sync`. On fail: dispatch fix to editor with the dump excerpt as evidence.
 
 ### Session hygiene
 

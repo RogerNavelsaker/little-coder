@@ -15,6 +15,13 @@ import { error } from './output.js';
 import { type DisplayMode } from './display.js';
 import { encodeToon } from './toon.js';
 
+/** Resolve boolean-or-string param to true/false. */
+function resolveBool(v: unknown, fallback: boolean): boolean {
+  if (v === true || v === 'true') return true;
+  if (v === false || v === 'false') return false;
+  return fallback;
+}
+
 // Lazy-load diff package (ESM CJS bridge)
 let diffModule: typeof import('diff') | null = null;
 function getDiffModule() {
@@ -26,6 +33,7 @@ function getDiffModule() {
 
 /**
  * Resolve the linehash binary path.
+ * LINEHASH_BIN env var overrides; otherwise resolves from PATH (flox-provided).
  */
 function resolveLinehashBin(): string {
   if (process.env.LINEHASH_BIN) return process.env.LINEHASH_BIN;
@@ -34,14 +42,6 @@ function resolveLinehashBin(): string {
     const whichPath = execSync('which linehash 2>/dev/null || true', { encoding: 'utf-8' }).trim();
     if (whichPath) return whichPath;
   } catch { /* continue */ }
-  const fallbackPaths = [
-    '/home/rona/.flox/run/x86_64-linux.default.run/bin/linehash',
-    '/home/rona/.flox/run/bin/linehash',
-    '/run/current-system/sw/bin/linehash',
-  ];
-  for (const path of fallbackPaths) {
-    if (existsSync(path)) return path;
-  }
   throw new Error(
     'linehash binary not found. Set LINEHASH_BIN env var, or ensure it is in PATH.'
   );
@@ -103,12 +103,16 @@ export interface EditItem {
   anchor?: string;
   occurrence?: string;
   all_occurrences?: boolean | string;
+  /** When true (default), fall back to fuzzy matching on exact-match miss */
+  fuzzy?: boolean | string;
 }
 
 export interface EditToolParams {
   edits: EditItem[];
   dry_run?: boolean | string;
   display?: DisplayMode;
+  /** Global fuzzy default (per-edit fuzzy overrides) */
+  fuzzy?: boolean | string;
 }
 
 export interface EditToolResult {
@@ -128,6 +132,66 @@ export interface EditToolResult {
   unchanged: boolean;
   /** Backend used for rendering */
   backend?: string;
+}
+
+/**
+ * Delegate fuzzy edit to `linehash edit --fuzzy <path>`.
+ * Builds JSONL edit ops from fileEdits, pipes to linehash stdin.
+ * Extension stays thin — all matching logic lives in the CLI.
+ * Returns { applied, linesChanged, diff, error } on success.
+ */
+function tryFuzzyEdit(
+  absolutePath: string,
+  fileEdits: EditItem[],
+  dryRun: boolean,
+  oldContent: string,
+): Promise<{ applied: boolean; linesChanged: number; diff: string | null; error?: string }> {
+  return new Promise((resolve) => {
+    // Build JSONL edit ops: replace with from+to anchor range, text = new_text
+    const ops = fileEdits.map(e => ({
+      op: 'replace',
+      from: e.old_text,
+      to: e.old_text,
+      text: e.new_text,
+    }));
+    const jsonl = ops.map(o => JSON.stringify(o)).join('\n');
+
+    const proc = spawn(LINEHASH_BIN, ['edit', '--fuzzy', absolutePath], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdin?.write(jsonl + '\n');
+    proc.stdin?.end();
+
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        // Read file after fuzzy edit to compute diff
+        let newContent: string;
+        try {
+          newContent = readFileSync(absolutePath, 'utf-8');
+        } catch {
+          resolve({ applied: false, linesChanged: 0, diff: null, error: 'failed to read file after fuzzy edit' });
+          return;
+        }
+        const diffText = computeDiff(oldContent, newContent, absolutePath);
+        const linesChanged = countLines(diffText.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).join('\n'));
+        resolve({ applied: true, linesChanged, diff: diffText });
+      } else {
+        resolve({ applied: false, linesChanged: 0, diff: null, error: `linehash edit --fuzzy exited ${code}: ${stderr.trim()}` });
+      }
+    });
+
+    proc.on('error', () => {
+      resolve({ applied: false, linesChanged: 0, diff: null, error: 'linehash edit --fuzzy process error' });
+    });
+  });
 }
 
 /**
@@ -384,6 +448,7 @@ async function executeSingleFileEdits(
   fileEdits: EditItem[],
   dryRun: boolean,
   options: EditToolOptions,
+  globalFuzzy: boolean,
   _ctx: unknown
 ): Promise<Record<string, unknown>> {
   // Validate file exists
@@ -470,8 +535,10 @@ async function executeSingleFileEdits(
   const editResults: Array<{ old_text: string; applied: boolean; index: number }> = [];
 
   for (let i = 0; i < fileEdits.length; i++) {
-    const { old_text, new_text, all_occurrences } = fileEdits[i];
+    const { old_text, new_text, all_occurrences, fuzzy } = fileEdits[i];
     const replaceAll = all_occurrences === true || all_occurrences === 'true';
+    // Resolve fuzzy: per-edit overrides global; default true
+    const fuzzyEnabled = resolveBool(fuzzy !== undefined ? fuzzy : globalFuzzy, true);
 
     if (replaceAll) {
       const escaped = old_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -494,6 +561,52 @@ async function executeSingleFileEdits(
   }
 
   const unchanged = editResults.every(r => !r.applied);
+
+  // Fuzzy fallback: if all edits failed and fuzzy is enabled, try linehash edit --fuzzy
+  if (unchanged && fileEdits.length > 0 && !dryRun) {
+    // Check if any edit has fuzzy enabled (or global fuzzy is enabled)
+    const hasFuzzy = fileEdits.some(e => {
+      const ef = resolveBool(e.fuzzy !== undefined ? e.fuzzy : globalFuzzy, true);
+      return ef;
+    });
+
+    if (hasFuzzy) {
+      const fuzzyResult = await tryFuzzyEdit(absolutePath, fileEdits, dryRun, oldContent);
+      if (fuzzyResult.applied) {
+        // Re-read for after-state anchors
+        let afterResult: { stdout: string; stderr: string; exitCode: number };
+        try {
+          afterResult = await linehashRead(absolutePath);
+        } catch {
+          const details: Record<string, unknown> = {
+            path: absolutePath,
+            applied: true,
+            dry_run: false,
+            unchanged: false,
+            linesChanged: fuzzyResult.linesChanged,
+            diff: fuzzyResult.diff,
+            beforeAnchors,
+            afterAnchors: null,
+            fuzzy: true,
+          };
+          return { content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: true, linesChanged: fuzzyResult.linesChanged, diff: fuzzyResult.diff }] } }).text }], details };
+        }
+        const afterParsed = parseLineHash(afterResult.stdout);
+        const details: Record<string, unknown> = {
+          path: absolutePath,
+          applied: true,
+          dry_run: false,
+          unchanged: false,
+          linesChanged: fuzzyResult.linesChanged,
+          diff: fuzzyResult.diff,
+          beforeAnchors,
+          afterAnchors: afterParsed.records.map(r => ({ line: r.line, anchor: r.anchor })),
+          fuzzy: true,
+        };
+        return { content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: true, linesChanged: fuzzyResult.linesChanged, diff: fuzzyResult.diff }] } }).text }], details };
+      }
+    }
+  }
   const diffText = computeDiff(oldContent, content, absolutePath);
   const linesChanged = unchanged ? 0 : countLines(diffText.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).join('\n'));
   const isBatch = fileEdits.length > 1;
@@ -574,6 +687,12 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
       Type.Boolean({ description: 'Replace all occurrences' }),
       Type.String({ description: 'Replace all occurrences' }),
     ])),
+    fuzzy: Type.Optional(
+      Type.Union([
+        Type.Boolean({ description: 'Fall back to fuzzy matching on exact-match miss (default: true)' }),
+        Type.String({ description: 'Fall back to fuzzy matching on exact-match miss (default: true)' }),
+      ], { description: 'When true, try Unicode/whitespace-normalized fuzzy match if exact match fails' })
+    ),
   });
 
   const editSchema = Type.Object({
@@ -602,6 +721,8 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
     promptGuidelines: [
       'Always pass edits: [{path, old_text, new_text}].',
       'old_text must match exactly (including whitespace and indentation).',
+      'fuzzy: true (default) falls back to normalized matching on exact-match miss.',
+      'fuzzy: false preserves strict exact-match behavior.',
       'Same-file batch: multiple items with the same path applied sequentially.',
       'Multi-file: items with different paths, each applied independently.',
       'Use dry_run: true to preview changes before applying.',
@@ -617,6 +738,7 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
       }
 
       const dryRun = params.dry_run === true || params.dry_run === 'true';
+      const globalFuzzy = resolveBool(params.fuzzy, true);
 
       // Group edits by path (preserving order), then process each group
       const groups = new Map<string, EditItem[]>();
@@ -635,14 +757,14 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
       if (groupOrder.length === 1) {
         const absolutePath = groupOrder[0];
         const fileEdits = groups.get(absolutePath)!;
-        return executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, ctx) as any;
+        return executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx) as any;
       }
 
       // Multi-file: apply each group, collect results
       const results: Array<{ path: string; result: Record<string, unknown> }> = [];
       for (const absolutePath of groupOrder) {
         const fileEdits = groups.get(absolutePath)!;
-        const r = await executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, ctx);
+        const r = await executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx);
         results.push({ path: absolutePath, result: r as Record<string, unknown> });
       }
 

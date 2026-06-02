@@ -1,9 +1,13 @@
 import { describe, test, expect, beforeEach, afterAll } from "bun:test";
-import { registerEditTool } from "./edit.js";
-import { invokeTool, contentText, parseDetails, renderCollapsed, FIXTURE, CWD } from "./test-helpers.js";
 import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Use PATH-resolved linehash (flox-provided) — no hardcoded paths
+// LINEHASH_BIN env var can override for dev/test if needed
+
+import { registerEditTool } from "./edit.js";
+import { invokeTool, contentText, parseDetails, renderCollapsed, FIXTURE, CWD } from "./test-helpers.js";
 
 const TEMP = join(tmpdir(), `pi-edit-test-${Date.now()}.txt`);
 const TEMP2 = join(tmpdir(), `pi-edit-test2-${Date.now()}.txt`);
@@ -117,5 +121,27 @@ describe("edit tool", () => {
     expect(d.files.length).toBe(2);
     expect(d.files[0].applied).toBe(true);
     expect(d.files[1].applied).toBe(true);
+  });
+
+  test("fuzzy whitespace mismatch: succeeds when old_text has extra spaces", async () => {
+    // TEMP has "line one: alpha" — try with extra spaces
+    const { result } = await invokeTool(registerEditTool, {
+      edits: [{ path: TEMP, old_text: "line   one:   alpha", new_text: "LINE ONE: ALPHA" }],
+    });
+    const d = parseDetails(result);
+    // Fuzzy should normalize whitespace and find the match
+    expect(d.applied).toBe(true);
+    expect(readFileSync(TEMP, "utf-8")).toContain("LINE ONE: ALPHA");
+  });
+
+  test("fuzzy=false: strict match fails on whitespace mismatch", async () => {
+    // TEMP has "line one: alpha" — try with extra spaces but fuzzy disabled
+    const { result } = await invokeTool(registerEditTool, {
+      edits: [{ path: TEMP, old_text: "line   one:   alpha", new_text: "LINE ONE: ALPHA" }],
+      fuzzy: false,
+    });
+    const d = parseDetails(result);
+    expect(d.unchanged).toBe(true);
+    expect(d.applied).toBe(false);
   });
 });
