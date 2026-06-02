@@ -116,3 +116,93 @@ bun run build:release                # full release: launcher + pi binary + data
 
 Current patches:
 - Suppress bare "Operation aborted" assistant-message marker (harness interventions surface their own line; ESC is self-evident).
+
+<!-- mulch:start -->
+## Expertise (Mulch)
+<!-- mulch-onboard-v:1 -->
+
+This project uses [Mulch](https://github.com/jayminwest/mulch) for git-native structured expertise.
+
+**At the start of every session**, run:
+```
+ml prime
+```
+
+This injects compressed domain expertise (architecture patterns, tool surface, tech context) into the agent's system prompt.
+
+**Quick reference:**
+- `ml query <domain>` — Read expertise records for a domain
+- `ml prime [domains...]` — Generate a priming prompt from expertise records
+- `ml record <domain> --type <type> --name <name> "<content>"` — Record a new expertise entry
+- `ml search <query>` — Search across all domains
+- `ml status` — Show record counts per domain
+- `ml sync` — Stage and commit `.mulch/` changes
+
+**Domains:** `architecture` (patterns + decisions), `tools` (surface + parity), `tech` (paths, commands, topology)
+<!-- mulch:end -->
+
+<!-- seeds:start -->
+## Issue Tracking (Seeds)
+<!-- seeds-onboard-v:1 -->
+
+This project uses [Seeds](https://github.com/jayminwest/seeds) for git-native issue tracking.
+
+**At the start of every session**, run:
+```
+sd prime
+```
+
+This injects session context: rules, command reference, and workflows.
+
+**Quick reference:**
+- `sd ready` — Find unblocked work
+- `sd create --title "..." --type task --priority 2` — Create issue
+- `sd update <id> --status in_progress` — Claim work
+- `sd close <id>` — Complete work
+- `sd dep add <id> <depends-on>` — Add dependency between issues
+- `sd sync` — Sync with git (run before pushing)
+
+### Before You Finish
+1. Close completed issues: `sd close <id>`
+2. File issues for remaining work: `sd create --title "..."`
+3. Sync and push: `sd sync && git push`
+<!-- seeds:end -->
+
+<!-- trellis:start -->
+## Trellis
+
+Trellis stores specs, plans, and handoffs as git-native artifacts under `.trellis/`.
+Never open the directory directly — use the CLI so events, locks, and validations stay consistent.
+
+- `tl init` — scaffold `.trellis/` in a repo
+- `tl prime` — load current specs, plans, and recent handoffs for an agent
+- `tl ready` — list unblocked work to pick up now
+- `tl spec create <id>` / `tl plan create <id>` — create durable intent and execution artifacts
+- `tl handoff append <plan> --from <role> --to <role> --summary "..."` — record transfer of control
+- `tl sync` — stage and commit changes under `.trellis/`
+<!-- trellis:end -->
+
+<!-- canopy:start -->
+## Prompt Management (Canopy)
+<!-- canopy-onboard-v:2 -->
+
+This project uses [Canopy](https://github.com/jayminwest/canopy) for git-native prompt management.
+
+**At the start of every session**, run:
+```
+cn prime
+```
+
+This injects prompt workflow context: commands, conventions, and common workflows.
+
+**Quick reference:**
+- `cn list` — List all prompts
+- `cn render <name>` — View rendered prompt (resolves inheritance)
+- `cn emit --all` — Render prompts to files
+- `cn update <name>` — Update a prompt (creates new version)
+- `cn sync` — Stage and commit .canopy/ changes
+
+**Do not manually edit emitted files.** Use `cn update` to modify prompts, then `cn emit` to regenerate.
+
+**Mulch metadata:** Prompts can declare expertise dependencies via `mulch.prime.domains`, `mulch.prime.files`, `mulch.budget`, `mulch.on_empty`, plus a top-level `extends_mulch` flag (override-by-default; merge with parent when `true`). Canopy never shells out to `ml` — `cn render --json` surfaces the resolved declaration in a top-level `mulch` field for consumers to act on. See SPEC.md "Mulch Metadata".
+<!-- canopy:end -->
