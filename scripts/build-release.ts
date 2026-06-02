@@ -56,15 +56,21 @@ if (binOnly) process.exit(0);
 // ---------------------------------------------------------------------------
 // 2. Pre-compile extensions
 //    Each extension: bun build → single bundled index.js
-//    External: pi-provided packages + diff (all in node_modules)
-//    Bundled: relative imports (src/*.ts), automatically inlined
+//
+//    External (pi needs these in node_modules at runtime — separate instances
+//    would break pi's component tree / instanceof checks):
+//      @earendil-works/pi-coding-agent  — the host runtime itself
+//      @earendil-works/pi-tui           — pi imports this in its own dist; shared instance required
+//
+//    Bundled (pure utility libs, no shared state with pi):
+//      @sinclair/typebox  \
+//      @toon-format/toon   >  inlined → can be removed from package.json deps
+//      diff               /
+//      all relative src/* imports — automatically inlined
 // ---------------------------------------------------------------------------
 const EXTERNALS = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
-  "@sinclair/typebox",
-  "@toon-format/toon",
-  "diff",
 ];
 const externalArgs = EXTERNALS.flatMap(e => ["--external", e]);
 
