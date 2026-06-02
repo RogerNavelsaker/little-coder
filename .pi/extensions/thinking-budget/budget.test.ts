@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import setupExtension from "./index.ts";
 
 // Exercise the char→token conversion (matches local/context_manager.py)

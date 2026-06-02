@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { pruneMessages, buildPlaceholder } from "./index.ts";
 
 // Live integration test: runs Playwright against a real URL, extracts

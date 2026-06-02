@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { assessResponse, buildCorrectionMessage, phraseForUser } from "./quality.ts";
 import setupQualityMonitor from "./index.ts";
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { buildPlaceholder, pruneMessages } from "./index.ts";
 
 // Canned message shapes mirror pi's AgentMessage / ToolResultMessage.
