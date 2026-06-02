@@ -132,7 +132,10 @@ if (existsSync(extDir)) {
   for (const name of readdirSync(extDir).sort()) {
     if (name.startsWith("_")) continue;
     const subdir = join(extDir, name);
-    const idx = join(subdir, "index.ts");
+    // Prefer pre-compiled index.js (faster startup); fall back to index.ts for dev
+    const idx = existsSync(join(subdir, "index.js"))
+      ? join(subdir, "index.js")
+      : join(subdir, "index.ts");
     try {
       if (statSync(subdir).isDirectory() && existsSync(idx)) {
         extArgs.push("--extension", idx);
