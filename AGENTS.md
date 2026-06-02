@@ -117,6 +117,50 @@ bun run build:release                # full release: launcher + pi binary + data
 Current patches:
 - Suppress bare "Operation aborted" assistant-message marker (harness interventions surface their own line; ESC is self-evident).
 
+## Planner / Editor / Tester
+
+Zellij session: `pi-tool-upgrade`, agents tab.
+
+| Pane | Role |
+|---|---|
+| `terminal_0` | planner (Claude Code) |
+| `terminal_1` | editor: `pi -ne -e npm:pi-continue -e npm:pi-schedule-prompt -e npm:@josephyoung/pi-file-reference` |
+| `terminal_2` | tester: `pi` (plain) |
+
+### Scripts (relative to repo root)
+
+| Script | Who | Purpose |
+|---|---|---|
+| `scripts/send` | planner | dispatch prompt to editor or tester pane |
+| `scripts/dump` | planner | capture pane output (ANSI or `--plain`) |
+| `scripts/log` | planner | inspect Pi session logs |
+| `scripts/report` | editor, tester | send report back to planner |
+
+```nu
+# Dispatch
+nu scripts/send editor '<prompt>'
+nu scripts/send tester '<prompt>'
+nu scripts/send new editor          # reset pane
+nu scripts/send reload tester       # /reload after AGENTS.md change
+nu scripts/send toggle tester       # toggle last tool card
+# Capture
+nu scripts/dump tester              # full ANSI
+nu scripts/dump tester --plain      # plain text
+# Report back
+nu scripts/report "EDITOR REPORT: status=done; files=...; tests=...; result=...; blockers=none"
+```
+
+### Report formats
+
+**Editor:** `EDITOR REPORT: status=<done|blocked>; files=<changed>; tests=<cmd and pass/fail>; result=<summary>; blockers=<none|details>`
+
+**Tester:** `TESTER REPORT: status=<done|blocked>; files=<changed or none>; tests=<cmd and pass/fail>; result=<summary>; blockers=<none|details>`
+
+### Session hygiene
+
+After extension source changes: compile (`bunx tsc` in extension dir) → `/reload` → `/new`.
+Pi crash recovery: `/quit` + Enter → relaunch → redispatch.
+
 <!-- mulch:start -->
 ## Expertise (Mulch)
 <!-- mulch-onboard-v:1 -->

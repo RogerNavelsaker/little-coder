@@ -1,0 +1,28 @@
+#!/usr/bin/env nu
+# dump — capture pane output from a zellij session
+# Usage:
+#   nu scripts/dump <role>          # full ANSI (colors, bold, fg/bg preserved)
+#   nu scripts/dump <role> --plain  # plain text (all escape sequences stripped)
+#
+# Roles: planner | editor | tester
+
+const SESSION = "pi-tool-upgrade"
+const PANES = {
+    planner: "terminal_0"
+    editor:  "terminal_1"
+    tester:  "terminal_2"
+}
+
+def zellij-socket-dir [] {
+    if ($env.ZELLIJ_SOCKET_DIR? != null) { return $env.ZELLIJ_SOCKET_DIR }
+    $"/run/user/(^id -u | str trim)/zellij"
+}
+
+def main [role: string, --plain] {
+    let pane = $PANES | get $role
+    let socket = zellij-socket-dir
+    let raw = with-env { ZELLIJ_SOCKET_DIR: $socket } {
+        ^zellij --session $SESSION action dump-screen --pane-id $pane --full
+    }
+    if $plain { $raw | ansi strip } else { $raw }
+}

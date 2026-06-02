@@ -1,0 +1,21 @@
+#!/usr/bin/env nu
+# report — send editor/tester report back to planner (terminal_0)
+# Usage: nu scripts/report "EDITOR REPORT: status=done; ..."
+#        nu scripts/report "TESTER REPORT: status=done; ..."
+
+const SESSION = "pi-tool-upgrade"
+const PLANNER_PANE = "terminal_0"
+
+def zellij-socket-dir [] {
+    if ($env.ZELLIJ_SOCKET_DIR? != null) { return $env.ZELLIJ_SOCKET_DIR }
+    $"/run/user/(^id -u | str trim)/zellij"
+}
+
+def main [message: string] {
+    let socket = zellij-socket-dir
+    with-env { ZELLIJ_SOCKET_DIR: $socket } {
+        ^zellij --session $SESSION action write-chars --pane-id $PLANNER_PANE $message
+        ^zellij --session $SESSION action send-keys --pane-id $PLANNER_PANE Enter
+    }
+    print $"report sent to planner \(($PLANNER_PANE)\): ($message | str substring 0..60)..."
+}

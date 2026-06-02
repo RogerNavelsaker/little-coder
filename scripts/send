@@ -1,0 +1,58 @@
+#!/usr/bin/env nu
+# send — dispatch prompts from planner to editor/tester panes
+# Usage:
+#   nu scripts/send <role> <text>   # dispatch prompt
+#   nu scripts/send new <role>      # send /new to role
+#   nu scripts/send reload <role>   # send /reload to role
+#   nu scripts/send toggle <role>   # expand/collapse last tool card (Ctrl+O)
+#
+# Roles: planner | editor | tester
+
+const SESSION = "pi-tool-upgrade"
+const PANES = {
+    planner: "terminal_0"
+    editor:  "terminal_1"
+    tester:  "terminal_2"
+}
+
+def zellij-socket-dir [] {
+    if ($env.ZELLIJ_SOCKET_DIR? != null) { return $env.ZELLIJ_SOCKET_DIR }
+    $"/run/user/(^id -u | str trim)/zellij"
+}
+
+def zellij-action [args: list<any>] {
+    let socket = zellij-socket-dir
+    with-env { ZELLIJ_SOCKET_DIR: $socket } {
+        ^zellij --session $SESSION action ...$args
+    }
+}
+
+def "main new" [role: string] {
+    let pane = $PANES | get $role
+    zellij-action [write-chars --pane-id $pane "/new"]
+    zellij-action [write --pane-id $pane 13]
+    print $"sent /new to ($role) \(($pane)\)"
+}
+
+def "main reload" [role: string] {
+    let pane = $PANES | get $role
+    zellij-action [write-chars --pane-id $pane "/reload"]
+    zellij-action [write --pane-id $pane 13]
+    print $"sent /reload to ($role) \(($pane)\)"
+}
+
+def "main toggle" [role: string] {
+    let pane = $PANES | get $role
+    zellij-action [write --pane-id $pane 15]  # Ctrl+o = ASCII 15
+    print $"sent Ctrl+O \(toggle\) to ($role) \(($pane)\)"
+}
+
+def main [role: string, text: string] {
+    let pane = $PANES | get --optional $role
+    if $pane == null {
+        error make { msg: $"unknown role: ($role). Use: planner | editor | tester" }
+    }
+    zellij-action [write-chars --pane-id $pane $text]
+    zellij-action [write --pane-id $pane 13]
+    print $"dispatched to ($role) \(($pane)\): ($text | str substring 0..60)..."
+}

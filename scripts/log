@@ -1,0 +1,83 @@
+#!/usr/bin/env nu
+# log — inspect Pi session logs for a project
+# Usage:
+#   nu scripts/log                        # list sessions (latest first)
+#   nu scripts/log <n>                    # show last n tool calls (default 20)
+#   nu scripts/log calls                  # all tool calls in latest session
+#   nu scripts/log footers                # read tool footers only
+#   nu scripts/log raw                    # raw JSONL lines (latest session)
+#
+# Reads from ~/.pi/agent/sessions/ for the source repo working directory
+
+const SESSION_DIR = $"($env.HOME)/.pi/agent/sessions/--home-rona-Repositories-.ru-RogerNavelsaker-little-coder--"
+
+def latest-session [] {
+    ls $SESSION_DIR | sort-by modified --reverse | first | get name
+}
+
+def parse-messages [file: string] {
+    open $file
+    | lines
+    | each { |l|
+        try { $l | from json } catch { null }
+    }
+    | where { |x| $x != null and $x.type? == "message" }
+    | each { |obj| $obj.message }
+}
+
+# List sessions
+def "main" [] {
+    ls $SESSION_DIR
+    | sort-by modified --reverse
+    | select name modified size
+    | update name { |r| $r.name | path basename }
+}
+
+# Show last N tool calls
+def "main calls" [--last: int = 20] {
+    let file = latest-session
+    parse-messages $file
+    | each { |msg|
+        let content = $msg.content? | default []
+        if ($content | describe) == "list" {
+            $content | each { |c|
+                if $c.type? == "toolCall" {
+                    { role: "call", name: $c.name?, args: ($c.arguments? | to json | str substring 0..120) }
+                } else if $msg.role? == "toolResult" {
+                    let txt = $msg.content? | default [] | where { |x| $x.type? == "text" } | first | get text? | default ""
+                    { role: "result", name: $msg.toolName?, args: ($txt | str substring 0..120) }
+                } else { null }
+            } | where { |x| $x != null }
+        } else { [] }
+    }
+    | flatten
+    | where { |x| $x != null and $x.name? != null }
+    | last $last
+}
+
+# Show read tool footers only
+def "main footers" [] {
+    let file = latest-session
+    parse-messages $file
+    | where { |msg| $msg.role? == "toolResult" and $msg.toolName? == "tool_result" or $msg.toolName? == "read" }
+    | each { |msg|
+        let content = $msg.content? | default []
+        if ($content | describe) == "list" {
+            $content | where { |c| $c.type? == "text" } | each { |c|
+                let txt = $c.text? | default ""
+                if ($txt | str contains "more lines in file") {
+                    let footer = $txt | lines | last 1 | first
+                    { tool: $msg.toolName?, footer: $footer }
+                } else { null }
+            } | where { |x| $x != null }
+        } else { [] }
+    }
+    | flatten
+    | where { |x| $x != null }
+}
+
+# Raw JSONL stream from latest session
+def "main raw" [] {
+    let file = latest-session
+    open $file | lines | each { |l| try { $l | from json } catch { null } } | where { |x| $x != null }
+}
