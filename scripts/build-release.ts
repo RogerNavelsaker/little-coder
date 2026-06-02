@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 // Build release artifacts:
-//   dist/little-coder-<os>-<cpu>    compiled binary with bytecode
-//   dist/data.tar.gz                data archive with pre-compiled extensions
+//   dist/little-coder-<os>-<cpu>    compiled little-coder launcher binary
+//   dist/pi-<os>-<cpu>              compiled pi runtime binary (patches baked in)
+//   dist/data.tar.gz                cross-platform data archive (extensions, AGENTS.md, skills)
 //
 // Usage:
-//   bun scripts/build-release.ts              # binary (current platform) + data
+//   bun scripts/build-release.ts              # all artifacts (current platform)
 //   bun scripts/build-release.ts --data-only  # data archive only (CI cross-build)
-//   bun scripts/build-release.ts --bin-only   # binary only
+//   bun scripts/build-release.ts --bin-only   # launcher + pi binaries only
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -28,16 +29,15 @@ const binOnly  = process.argv.includes("--bin-only");
 // Platform
 // ---------------------------------------------------------------------------
 const osName   = ({ linux: "linux", darwin: "darwin" } as Record<string, string>)[platform()] ?? platform();
-const archName = ({ x64: "x64", arm64: "arm64", aarch64: "arm64" } as Record<string, string>)[arch()] ?? arch();
-const bunTarget = `bun-${osName}-${archName}`;
+const cpuName  = ({ x64: "x64", arm64: "arm64", aarch64: "arm64" } as Record<string, string>)[arch()] ?? arch();
+const bunTarget = `bun-${osName}-${cpuName}`;
 
 // ---------------------------------------------------------------------------
-// 1. Compile binary
-//    --compile  --bytecode  --minify  --target
+// 1. Compile little-coder launcher binary
 // ---------------------------------------------------------------------------
 if (!dataOnly) {
-  const outfile = join(dist, `little-coder-${osName}-${archName}`);
-  console.log(`\nCompiling binary → ${outfile}`);
+  const outfile = join(dist, `little-coder-${osName}-${cpuName}`);
+  console.log(`\nCompiling launcher → ${outfile}`);
   const r = spawnSync("bun", [
     "build",
     "--compile",
@@ -51,29 +51,66 @@ if (!dataOnly) {
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
+// ---------------------------------------------------------------------------
+// 2. Patch + compile pi runtime binary
+//
+//    Patches are applied to pi's dist files before compilation so they are
+//    baked into the binary — no postinstall or runtime patching needed.
+// ---------------------------------------------------------------------------
+if (!dataOnly) {
+  console.log(`\nPatching pi dist...`);
+  const piPkgRoot = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
+  if (!existsSync(piPkgRoot)) {
+    console.error(`  pi package not found at ${piPkgRoot} — run bun install first`);
+    process.exit(1);
+  }
+  try {
+    const { applyPiPatches } = await import(join(root, "scripts", "patch-pi.ts"));
+    applyPiPatches(piPkgRoot);
+    console.log(`  Patches applied.`);
+  } catch (e) {
+    console.warn(`  Warning: patch step failed (${e}). Building unpatched pi.`);
+  }
+
+  // Resolve pi's bin entry
+  const piPkgJson = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"));
+  const binRel = typeof piPkgJson?.bin === "string" ? piPkgJson.bin : piPkgJson?.bin?.pi;
+  if (typeof binRel !== "string") {
+    console.error("  pi package.json has no bin.pi entry");
+    process.exit(1);
+  }
+  const piEntry = join(piPkgRoot, binRel);
+  if (!existsSync(piEntry)) {
+    console.error(`  pi entry not found: ${piEntry}`);
+    process.exit(1);
+  }
+
+  const piOutfile = join(dist, `pi-${osName}-${cpuName}`);
+  console.log(`\nCompiling pi runtime → ${piOutfile}`);
+  const r = spawnSync("bun", [
+    "build",
+    "--compile",
+    `--target=${bunTarget}`,
+    "--bytecode",
+    "--minify",
+    "--format=esm",
+    piEntry,
+    "--outfile", piOutfile,
+  ], { cwd: root, stdio: "inherit" });
+  if (r.status !== 0) process.exit(r.status ?? 1);
+}
+
 if (binOnly) process.exit(0);
 
 // ---------------------------------------------------------------------------
-// 2. Pre-compile extensions
-//    Each extension: bun build → single bundled index.js
+// 3. Pre-compile extensions
 //
-//    External (pi needs these in node_modules at runtime — separate instances
-//    would break pi's component tree / instanceof checks):
-//      @earendil-works/pi-coding-agent  — the host runtime itself
-//      @earendil-works/pi-tui           — pi imports this in its own dist; shared instance required
+//    All dependencies (typebox, toon, diff, pi-tui) are BUNDLED inline.
+//    The installed data dir has no node_modules — extensions must be
+//    self-contained. Only relative src/* imports are inlined automatically.
 //
-//    Bundled (pure utility libs, no shared state with pi):
-//      @sinclair/typebox  \
-//      @toon-format/toon   >  inlined → can be removed from package.json deps
-//      diff               /
-//      all relative src/* imports — automatically inlined
+//    pi-coding-agent is type-only in extensions; bun tree-shakes it away.
 // ---------------------------------------------------------------------------
-const EXTERNALS = [
-  "@earendil-works/pi-coding-agent",
-  "@earendil-works/pi-tui",
-];
-const externalArgs = EXTERNALS.flatMap(e => ["--external", e]);
-
 const extSrc  = join(root, ".pi", "extensions");
 const extDist = join(dist, "extensions");
 
@@ -96,7 +133,8 @@ for (const name of readdirSync(extSrc).sort()) {
     "--format=esm",
     "--target=bun",
     "--minify",
-    ...externalArgs,
+    // No --external flags: pi-tui, typebox, toon, diff all bundled inline.
+    // pi-coding-agent usage in extensions is type-only; tree-shaken away.
   ], { cwd: root, stdio: "inherit" });
   if (r.status !== 0) {
     console.error(`  Error compiling ${name}`);
@@ -105,61 +143,79 @@ for (const name of readdirSync(extSrc).sort()) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Data archive
-//    Replaces .pi/extensions/*/index.ts with pre-compiled index.js
-//    Excludes source .ts files to keep the archive lean
+// 4. Data archive (cross-platform — no pi binary inside)
+//
+//    Contains: compiled extensions, AGENTS.md, skills/, .pi/settings.json,
+//              models.json, vendor/ source (provenance).
+//    Does NOT contain: node_modules, package.json, bun.lock, pi binaries.
+//    pi binary is a separate per-platform release asset (pi-<os>-<cpu>).
 // ---------------------------------------------------------------------------
 const dataOut = join(dist, "data.tar.gz");
 console.log(`\nBuilding data archive → ${dataOut}`);
 
-// Stage: copy everything needed for the data dir into a temp dir
 const stageDir = join(dist, ".stage");
 const { execSync } = await import("node:child_process");
-const { rmSync, cpSync, writeFileSync } = await import("node:fs");
+const { rmSync, cpSync, writeFileSync, copyFileSync } = await import("node:fs");
 
 rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(join(stageDir, "data", ".pi", "extensions"), { recursive: true });
-mkdirSync(join(stageDir, "data", "scripts"), { recursive: true });
-mkdirSync(join(stageDir, "data", "vendor"), { recursive: true });
 
-// Root files
-for (const f of ["package.json", "bun.lock", "AGENTS.md"]) {
-  if (existsSync(join(root, f))) {
-    const { copyFileSync } = await import("node:fs");
-    copyFileSync(join(root, f), join(stageDir, "data", f));
+// AGENTS.md
+if (existsSync(join(root, "AGENTS.md"))) {
+  copyFileSync(join(root, "AGENTS.md"), join(stageDir, "data", "AGENTS.md"));
+}
+
+// models.json
+if (existsSync(join(root, "models.json"))) {
+  copyFileSync(join(root, "models.json"), join(stageDir, "data", "models.json"));
+}
+
+// .pi/settings.json
+const piSettings = join(root, ".pi", "settings.json");
+if (existsSync(piSettings)) {
+  mkdirSync(join(stageDir, "data", ".pi"), { recursive: true });
+  copyFileSync(piSettings, join(stageDir, "data", ".pi", "settings.json"));
+}
+
+// skills/ (for skill-inject)
+const skillsDir = join(root, "skills");
+if (existsSync(skillsDir)) {
+  cpSync(skillsDir, join(stageDir, "data", "skills"), { recursive: true });
+}
+
+// vendor/ source (provenance; excludes vendor/pi/ which is a build artifact)
+const vendorSrc = join(root, "vendor");
+if (existsSync(vendorSrc)) {
+  mkdirSync(join(stageDir, "data", "vendor"), { recursive: true });
+  for (const name of readdirSync(vendorSrc)) {
+    if (name === "pi") continue; // pi binaries are separate release assets
+    const src = join(vendorSrc, name);
+    if (statSync(src).isDirectory()) {
+      cpSync(src, join(stageDir, "data", "vendor", name), { recursive: true });
+    }
   }
 }
 
-// scripts/patch-pi.ts
-const patchSrc = join(root, "scripts", "patch-pi.ts");
-if (existsSync(patchSrc)) {
-  const { copyFileSync } = await import("node:fs");
-  copyFileSync(patchSrc, join(stageDir, "data", "scripts", "patch-pi.ts"));
-}
-
-// Extensions: use compiled index.js + keep non-ts supporting files (none needed — all bundled)
+// Extensions: use compiled index.js
 for (const name of readdirSync(extDist)) {
   const compiledIndex = join(extDist, name, "index.js");
   if (!existsSync(compiledIndex)) continue;
   mkdirSync(join(stageDir, "data", ".pi", "extensions", name), { recursive: true });
-  const { copyFileSync } = await import("node:fs");
   copyFileSync(compiledIndex, join(stageDir, "data", ".pi", "extensions", name, "index.js"));
 }
 
-// vendor/ — kept for provenance and update reference
-cpSync(join(root, "vendor"), join(stageDir, "data", "vendor"), { recursive: true });
-
 // Pack
-const tarR = spawnSync("tar", ["-czf", dataOut, "-C", join(stageDir), "data"], { stdio: "inherit" });
+const tarR = spawnSync("tar", ["-czf", dataOut, "-C", stageDir, "data"], { stdio: "inherit" });
 rmSync(stageDir, { recursive: true, force: true });
 if (tarR.status !== 0) { console.error("tar failed"); process.exit(1); }
 
 // ---------------------------------------------------------------------------
-// 4. Summary
+// 5. Summary
 // ---------------------------------------------------------------------------
 console.log(`\nRelease artifacts for v${version}:`);
 for (const f of [
-  !dataOnly && join(dist, `little-coder-${osName}-${archName}`),
+  !dataOnly && join(dist, `little-coder-${osName}-${cpuName}`),
+  !dataOnly && join(dist, `pi-${osName}-${cpuName}`),
   dataOut,
 ].filter(Boolean) as string[]) {
   if (existsSync(f)) {

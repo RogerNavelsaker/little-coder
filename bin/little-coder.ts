@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // little-coder launcher — install/update/uninstall + pi dispatch.
 //
-// Dev mode  (bun bin/little-coder.ts): pkgRoot = repo root, runtime = bun itself.
-// Compiled  (bun build --compile):     pkgRoot = ~/.little-coder, runtime = bun in PATH.
+// Dev mode  (bun bin/little-coder.ts): pkgRoot = repo root, pi via bun + node_modules.
+// Compiled  (bun build --compile):     pkgRoot = ~/.little-coder, pi via vendored binary.
 
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -40,10 +40,14 @@ const pkgRoot = isDev
   : DATA_HOME;
 
 // ---------------------------------------------------------------------------
-// Bun runtime
-//
-// Dev:      process.execPath IS bun.
-// Compiled: process.execPath is our binary; find bun separately in PATH.
+// Platform names (shared between binary/pi asset resolution)
+// ---------------------------------------------------------------------------
+const osName   = ({ linux: "linux", darwin: "darwin" } as Record<string, string>)[platform()] ?? platform();
+const cpuName  = ({ x64: "x64", arm64: "arm64", aarch64: "arm64" } as Record<string, string>)[arch()] ?? arch();
+
+// ---------------------------------------------------------------------------
+// Bun runtime — dev mode only.
+// Compiled/installed mode uses the vendored pi binary directly (no bun needed).
 // ---------------------------------------------------------------------------
 function findBun(): string {
   if (isDev) return process.execPath;
@@ -59,18 +63,24 @@ function findBun(): string {
 // ---------------------------------------------------------------------------
 // GitHub release coordinates
 // ---------------------------------------------------------------------------
-const REPO = "RogerNavelsaker/little-coder";
+const REPO   = "RogerNavelsaker/little-coder";
 const GH_API = `https://api.github.com/repos/${REPO}`;
-const GH_DL = `https://github.com/${REPO}/releases/download`;
+const GH_DL  = `https://github.com/${REPO}/releases/download`;
 
 function binaryAsset(tag: string): string {
-  const os = { linux: "linux", darwin: "darwin" }[platform()];
-  const cpu = { x64: "x64", arm64: "arm64", aarch64: "arm64" }[arch()];
-  if (!os || !cpu) {
+  if (!osName || !cpuName) {
     console.error(`little-coder: unsupported platform ${platform()}-${arch()}`);
     process.exit(1);
   }
-  return `${GH_DL}/${tag}/little-coder-${os}-${cpu}`;
+  return `${GH_DL}/${tag}/little-coder-${osName}-${cpuName}`;
+}
+
+function piAsset(tag: string): string {
+  if (!osName || !cpuName) {
+    console.error(`little-coder: unsupported platform ${platform()}-${arch()}`);
+    process.exit(1);
+  }
+  return `${GH_DL}/${tag}/pi-${osName}-${cpuName}`;
 }
 
 function dataAsset(tag: string): string {
@@ -97,33 +107,77 @@ if (!isDev && !existsSync(DATA_HOME)) {
 
 // ---------------------------------------------------------------------------
 // pi entry point
+//
+// Dev:      bun + node_modules/@earendil-works/pi-coding-agent bin entry
+// Compiled: vendored pi-<os>-<cpu> binary in DATA_HOME/vendor/pi/
 // ---------------------------------------------------------------------------
-const piPkgRoot = join(pkgRoot, "node_modules", "@earendil-works", "pi-coding-agent");
-let piEntry: string;
-try {
-  const piPkgJson = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"));
-  const binRel = typeof piPkgJson?.bin === "string" ? piPkgJson.bin : piPkgJson?.bin?.pi;
-  if (typeof binRel !== "string") throw new Error("pi package.json has no bin.pi entry");
-  piEntry = resolve(piPkgRoot, binRel);
-} catch (err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`little-coder: cannot resolve pi under ${piPkgRoot}.\n${msg}`);
-  if (!isDev) console.error("Try: little-coder update");
-  process.exit(1);
-}
-if (!existsSync(piEntry)) {
-  console.error(`little-coder: pi entry not found at ${piEntry}`);
-  process.exit(1);
-}
+let piCmd: string;
+let piCmdArgs: string[] = [];
 
-// Re-apply patches (best-effort, cosmetic only)
-try {
-  const patchScript = join(pkgRoot, "scripts", "patch-pi.ts");
-  if (existsSync(patchScript)) {
-    const { applyPiPatches } = await import(patchScript);
-    applyPiPatches(piPkgRoot);
+if (isDev) {
+  const piPkgRoot = join(pkgRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+  let piEntry: string;
+  try {
+    const piPkgJson = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"));
+    const binRel = typeof piPkgJson?.bin === "string" ? piPkgJson.bin : piPkgJson?.bin?.pi;
+    if (typeof binRel !== "string") throw new Error("pi package.json has no bin.pi entry");
+    piEntry = resolve(piPkgRoot, binRel);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`little-coder: cannot resolve pi under ${piPkgRoot}.\n${msg}`);
+    process.exit(1);
   }
-} catch { /* non-fatal */ }
+  if (!existsSync(piEntry)) {
+    console.error(`little-coder: pi entry not found at ${piEntry}`);
+    process.exit(1);
+  }
+
+  // Apply patches in dev mode (baked into vendored binary at build time)
+  try {
+    const patchScript = join(pkgRoot, "scripts", "patch-pi.ts");
+    if (existsSync(patchScript)) {
+      const { applyPiPatches } = await import(patchScript);
+      applyPiPatches(piPkgRoot);
+    }
+  } catch { /* non-fatal */ }
+
+  // Merge quietStartup + lastChangelogVersion into pi settings
+  try {
+    const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
+    let agentDir: string;
+    if (agentDirEnv?.trim()) {
+      agentDir = agentDirEnv === "~" ? homedir()
+        : agentDirEnv.startsWith("~/") ? join(homedir(), agentDirEnv.slice(2))
+        : agentDirEnv;
+    } else {
+      agentDir = join(homedir(), ".pi", "agent");
+    }
+    mkdirSync(agentDir, { recursive: true });
+    const settingsPath = join(agentDir, "settings.json");
+    let s: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") s = p; } catch { s = {}; }
+    }
+    let dirty = false;
+    if (s.quietStartup !== true) { s.quietStartup = true; dirty = true; }
+    let piVer: string | undefined;
+    try { piVer = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"))?.version; } catch { /* ok */ }
+    if (piVer && s.lastChangelogVersion !== piVer) { s.lastChangelogVersion = piVer; dirty = true; }
+    if (dirty) writeFileSync(settingsPath, JSON.stringify(s, null, 2));
+  } catch { /* best-effort */ }
+
+  piCmd = findBun();
+  piCmdArgs = [piEntry];
+} else {
+  // Installed mode: use vendored compiled pi binary (patches baked in at build time)
+  const piVendored = join(DATA_HOME, "vendor", "pi", `pi-${osName}-${cpuName}`);
+  if (!existsSync(piVendored)) {
+    console.error(`little-coder: vendored pi binary not found at ${piVendored}`);
+    console.error(`Run: little-coder install`);
+    process.exit(1);
+  }
+  piCmd = piVendored;
+}
 
 // Auto-discover extensions under pkgRoot/.pi/extensions/*/index.ts
 const extDir = join(pkgRoot, ".pi", "extensions");
@@ -149,33 +203,8 @@ if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
-// Merge quietStartup + lastChangelogVersion into ~/.pi/agent/settings.json
-try {
-  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
-  let agentDir: string;
-  if (agentDirEnv?.trim()) {
-    agentDir = agentDirEnv === "~" ? homedir()
-      : agentDirEnv.startsWith("~/") ? join(homedir(), agentDirEnv.slice(2))
-      : agentDirEnv;
-  } else {
-    agentDir = join(homedir(), ".pi", "agent");
-  }
-  mkdirSync(agentDir, { recursive: true });
-  const settingsPath = join(agentDir, "settings.json");
-  let s: Record<string, unknown> = {};
-  if (existsSync(settingsPath)) {
-    try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") s = p; } catch { s = {}; }
-  }
-  let dirty = false;
-  if (s.quietStartup !== true) { s.quietStartup = true; dirty = true; }
-  let piVer: string | undefined;
-  try { piVer = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"))?.version; } catch { /* ok */ }
-  if (piVer && s.lastChangelogVersion !== piVer) { s.lastChangelogVersion = piVer; dirty = true; }
-  if (dirty) writeFileSync(settingsPath, JSON.stringify(s, null, 2));
-} catch { /* best-effort */ }
-
 // Compose argv and spawn pi
-const userArgs = process.argv.slice(isDev ? 2 : 2);
+const userArgs = process.argv.slice(2);
 const agentsMd = join(pkgRoot, "AGENTS.md");
 const piArgs = [
   "--no-context-files",
@@ -185,8 +214,7 @@ const piArgs = [
   ...userArgs,
 ];
 
-const bun = findBun();
-const child = spawn(bun, [piEntry, ...piArgs], {
+const child = spawn(piCmd, [...piCmdArgs, ...piArgs], {
   stdio: "inherit",
   cwd: process.cwd(),
   env: process.env,
@@ -233,7 +261,7 @@ async function cmdInstall(args: string[]) {
 
   const tag = await fetchLatestTag();
   await downloadData(tag, DATA_HOME);
-  runBunInstall(DATA_HOME);
+  await downloadPiBinary(tag, DATA_HOME);
   writeFileSync(join(DATA_HOME, ".version"), tag);
 
   console.log(`\nlittle-coder ${tag} installed.`);
@@ -262,7 +290,7 @@ async function cmdUpdate(_args: string[]) {
   console.log(`Updating ${current} → ${tag}...`);
   mkdirSync(DATA_HOME, { recursive: true });
   await downloadData(tag, DATA_HOME);
-  runBunInstall(DATA_HOME);
+  await downloadPiBinary(tag, DATA_HOME);
   writeFileSync(pinned, tag);
 
   if (!isDev) await updateBinary(tag);
@@ -297,16 +325,20 @@ async function downloadData(tag: string, dest: string) {
   if (r.status !== 0) { console.error("little-coder: tar extraction failed"); process.exit(1); }
 }
 
+async function downloadPiBinary(tag: string, dest: string) {
+  const url = piAsset(tag);
+  const vendorPiDir = join(dest, "vendor", "pi");
+  mkdirSync(vendorPiDir, { recursive: true });
+  const outPath = join(vendorPiDir, `pi-${osName}-${cpuName}`);
+  console.log(`  Downloading pi runtime...`);
+  await downloadFile(url, outPath);
+  chmodSync(outPath, 0o755);
+}
+
 async function downloadFile(url: string, dest: string) {
   const res = await fetch(url, { headers: { "User-Agent": "little-coder" } });
   if (!res.ok) { console.error(`little-coder: download failed ${url} (${res.status})`); process.exit(1); }
   writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
-}
-
-function runBunInstall(cwd: string) {
-  console.log(`  Running bun install...`);
-  const r = spawnSync(findBun(), ["install", "--frozen-lockfile"], { cwd, stdio: "inherit" });
-  if (r.status !== 0) { console.error("little-coder: bun install failed"); process.exit(1); }
 }
 
 async function updateBinary(tag: string) {
