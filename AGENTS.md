@@ -2,13 +2,23 @@
 
 Hard fork of itayinbarr/little-coder. Upstream is registered as the `upstream` git remote for inspection only — never merge, cherry-pick selectively.
 
-## Planning project
+## Project knowledge (grove)
 
-Architecture decisions, extension design, and work items live here:
+Architecture decisions, issues, and specs live in grove stores in this repo:
 
-    /home/rona/projects/little-coder/
+```sh
+seeds list                    # open issues + backlog
+tl list                       # active specs + plans
+ml query architecture         # architecture patterns + decisions
+ml query tools                # tool surface reference
+ml query tech                 # paths, commands, topology
+ml prime architecture tools   # compact priming prompt
+```
 
-Read `AGENTS.md` and `memory-bank/` there before making structural changes.
+Grove stores: `.seeds/` `.mulch/` `.trellis/` `.canopy/`
+Flox env provides: `seeds` (`sd`), `mulch` (`ml`), `trellis` (`tl`), `canopy` (`cn`), `bun`.
+
+Session notes: `/home/rona/projects/little-coder/memory-bank/activeContext.md`
 
 ## Architecture
 
