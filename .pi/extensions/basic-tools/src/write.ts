@@ -14,6 +14,7 @@ import {
   mkdirSync,
   statSync,
   appendFileSync,
+  unlinkSync,
 } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { parseLineHash, type LineHashRecord } from './linehash.js';
@@ -21,15 +22,6 @@ import { error } from './output.js';
 import { type DisplayMode, formatWriteCompact, type WriteCompactResult } from './display.js';
 import { encodeToon } from './toon.js';
 import { Text } from '@earendil-works/pi-tui';
-
-// Lazy-load diff package (ESM CJS bridge)
-let diffModule: typeof import('diff') | null = null;
-function getDiffModule() {
-  if (!diffModule) {
-    diffModule = require('diff');
-  }
-  return diffModule;
-}
 
 /**
  * Resolve the linehash binary path.
@@ -121,58 +113,30 @@ function linehashRead(filePath: string): Promise<{ stdout: string; stderr: strin
 }
 
 /**
- * Compute unified diff between two strings.
+ * Compute unified diff between two strings using linehash diff.
+ * Writes old/new to temp files, calls `linehash diff`, captures stdout.
  */
 function computeDiff(oldContent: string, newContent: string): string {
-  const mod = getDiffModule();
-  if (!mod || !mod.diffLines) return '';
-  const diffResult = mod.diffLines(oldContent, newContent);
-  // Convert to unified diff format
-  const hunks: string[] = [];
-  let oldLine = 1;
-  let newLine = 1;
-  let inHunk = false;
-
-  for (const part of diffResult) {
-    const lines = part.value.split('\n');
-    // Remove trailing empty string from split
-    if (lines.length > 0 && lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-
-    if (part.added) {
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(`+${line}`);
-        newLine++;
-      }
-    } else if (part.removed) {
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(`-${line}`);
-        oldLine++;
-      }
-    } else {
-      // Context
-      if (!inHunk) {
-        hunks.push(`@@ -${oldLine},+${newLine} @@`);
-        inHunk = true;
-      }
-      for (const line of lines) {
-        hunks.push(` ${line}`);
-        oldLine++;
-        newLine++;
-      }
-    }
+  if (oldContent === newContent) return '';
+  const tmpDir = '/tmp';
+  const oldFile = `${tmpDir}/.lc-old-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const newFile = `${tmpDir}/.lc-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    writeFileSync(oldFile, oldContent, 'utf-8');
+    writeFileSync(newFile, newContent, 'utf-8');
+    const result = spawnSync(LINEHASH_BIN, ['diff', oldFile, newFile], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return '';
+    return result.stdout.toString().trim();
+  } catch {
+    return '';
+  } finally {
+    try { unlinkSync(oldFile); unlinkSync(newFile); } catch { /* best-effort cleanup */ }
   }
-
-  return hunks.join('\n');
 }
 
 /**

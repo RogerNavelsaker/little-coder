@@ -144,4 +144,24 @@ describe("edit tool", () => {
     expect(d.unchanged).toBe(true);
     expect(d.applied).toBe(false);
   });
+
+  test("diff output: no Index: header (linehash diff, not npm diff)", async () => {
+    const { result } = await invokeTool(registerEditTool, {
+      edits: [{ path: TEMP, old_text: "alpha", new_text: "ALPHA" }],
+    });
+    const text = contentText(result);
+    expect(text).not.toContain("Index:");
+  });
+
+  test("diff output: no === header rows (linehash diff, not npm diff)", async () => {
+    const { result } = await invokeTool(registerEditTool, {
+      edits: [{ path: TEMP, old_text: "alpha", new_text: "ALPHA" }],
+    });
+    const text = contentText(result);
+    // === header rows from npm diff's createPatch look like "=== file ==="
+    // linehash diff produces "--- a/file" / "+++ b/file" instead
+    const lines = text.split("\n");
+    const hasEqHeader = lines.some(l => /^={3,}/.test(l.trim()));
+    expect(hasEqHeader).toBe(false);
+  });
 });

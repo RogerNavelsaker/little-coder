@@ -101,7 +101,36 @@ The launcher detects its mode from `process.argv[1]`:
 
 ### Cross-repo dependencies
 
-- **linehash** (Rust CLI) source: `/home/rona/Repositories/.ru/RogerNavelsaker/linehash`. Provides anchored reads, edit safety, diff, fuzzy matching, patch-apply. Binary is flox-provided as `linehash`. Adding a new flag → edit Rust source, `cargo build --release`, then re-resolve via flox.
+Three repos must stay in sync for every linehash change. Skipping any step leaves the consumer running stale code while logs look fine.
+
+| Repo | Path | Role |
+|---|---|---|
+| **linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/linehash` | Rust source. Provides anchored reads, edit, diff, fuzzy matching, patch-apply. |
+| **nixpkg-linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/nixpkg-linehash` | Nix package wrapper. Pinned in `.flox/env/manifest.toml` as `linehash.flake = "github:RogerNavelsaker/nixpkg-linehash"`. |
+| **little-coder** | this repo | Consumer. Flox env exposes `linehash` on PATH. |
+
+#### Sync chain (run for EVERY linehash change)
+
+```
+linehash source  →  push  →  nixpkg-linehash bumps input rev  →  push  →  little-coder flox update
+```
+
+Concrete steps:
+
+1. **linehash repo** — edit Rust source. Run `cargo build --release` (use `CC=/usr/bin/gcc` inside the flox env; the flox cc wrapper rejects `-m64`). Run tests. `git commit` + `git push` to GitHub. Note the new commit SHA.
+2. **nixpkg-linehash repo** — update the linehash flake input to the new commit: `nix flake lock --update-input linehash` (or `nix flake update` for all inputs). `git commit` + `git push`. The flake on GitHub is what flox resolves.
+3. **little-coder repo** — `flox update` (or `flox update -i linehash`) to refresh the env to the latest nixpkg-linehash. Verify with `<new-subcommand> --help` against the `linehash` binary on PATH. **Never reference linehash by absolute path** in extension code — call `linehash` from PATH only.
+
+#### Verification gate (before declaring a cross-repo task done)
+
+- `linehash <new-subcommand> --help` succeeds from a fresh shell in little-coder.
+- `which linehash` resolves through flox, not `~/.local/bin` or `~/.cargo`.
+- Extension `LINEHASH_BIN` resolver finds it via `which linehash`, no hardcoded paths.
+- Invoke harness (`bun .pi/extensions/basic-tools/src/invoke.ts ...`) produces the expected behavior end-to-end, not just unit tests.
+
+#### Failure mode to watch for
+
+Editor builds locally, tests pass against the local-built binary, but flox env still serves the OLD binary because steps 2 or 3 were skipped. Symptom: invoke smoke fails with "unrecognized subcommand" or silent fallback to the previous implementation. Fix: walk the chain again from step 2.
 
 ## Dev commands
 

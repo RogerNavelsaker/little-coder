@@ -7,7 +7,7 @@
 import { Type } from '@sinclair/typebox';
 import { spawn, spawnSync } from 'child_process';
 import { resolve } from 'path';
-import { existsSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { parseLineHash, type LineHashRecord } from './linehash.js';
 import { Text } from '@earendil-works/pi-tui';
@@ -20,15 +20,6 @@ function resolveBool(v: unknown, fallback: boolean): boolean {
   if (v === true || v === 'true') return true;
   if (v === false || v === 'false') return false;
   return fallback;
-}
-
-// Lazy-load diff package (ESM CJS bridge)
-let diffModule: typeof import('diff') | null = null;
-function getDiffModule() {
-  if (!diffModule) {
-    diffModule = require('diff');
-  }
-  return diffModule;
 }
 
 /**
@@ -213,13 +204,30 @@ function linehashRead(filePath: string): Promise<{ stdout: string; stderr: strin
 }
 
 /**
- * Compute unified diff between two strings with ±3 lines of context.
+ * Compute unified diff between two strings using linehash diff.
+ * Writes old/new to temp files, calls `linehash diff`, captures stdout.
  */
 function computeDiff(oldContent: string, newContent: string, filePath = ''): string {
-  const mod = getDiffModule();
-  if (!mod?.createPatch) return '';
-  // Keep --- / +++ header lines so delta can detect language from the filename extension.
-  return mod.createPatch(filePath, oldContent, newContent, '', '', { context: 2 }).trim();
+  if (oldContent === newContent) return '';
+  const tmpDir = '/tmp';
+  const oldFile = `${tmpDir}/.lc-old-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const newFile = `${tmpDir}/.lc-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    writeFileSync(oldFile, oldContent, 'utf-8');
+    writeFileSync(newFile, newContent, 'utf-8');
+    const result = spawnSync(LINEHASH_BIN, ['diff', oldFile, newFile], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return '';
+    return result.stdout.toString().trim();
+  } catch {
+    return '';
+  } finally {
+    try { unlinkSync(oldFile); unlinkSync(newFile); } catch { /* best-effort cleanup */ }
+  }
 }
 
 /**

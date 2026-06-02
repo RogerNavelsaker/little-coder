@@ -79,4 +79,22 @@ describe("write tool", () => {
     expect(Array.isArray(d.files)).toBe(true);
     expect((d.files as any[]).length).toBe(2);
   });
+
+  test("diff output: no Index: header (linehash diff, not npm diff)", async () => {
+    const { result } = await invokeTool(registerWriteTool, {
+      files: [{ path: OVERWRITE_FILE, content: "new content\n" }],
+    });
+    const text = contentText(result);
+    expect(text).not.toContain("Index:");
+  });
+
+  test("diff output: no === header rows (linehash diff, not npm diff)", async () => {
+    const { result } = await invokeTool(registerWriteTool, {
+      files: [{ path: OVERWRITE_FILE, content: "new content\n" }],
+    });
+    const text = contentText(result);
+    const lines = text.split("\n");
+    const hasEqHeader = lines.some(l => /^={3,}/.test(l.trim()));
+    expect(hasEqHeader).toBe(false);
+  });
 });
