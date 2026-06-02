@@ -12,7 +12,7 @@
     "noEmit": true,
     "types": ["bun-types"]
   },
-  "include": [".pi/extensions/**/*.ts"],
+  "include": ["bin/**/*.ts", ".pi/extensions/**/*.ts"],
   "exclude": [
     ".pi/extensions/**/*.test.ts",
     ".pi/extensions/**/test-helpers.ts",

@@ -1,98 +1,178 @@
 #!/usr/bin/env bun
-// little-coder launcher.
-// Spawns the bundled pi runtime with our AGENTS.md, skills, and every
-// custom extension wired in — works from any working directory.
+// little-coder launcher — install/update/uninstall + pi dispatch.
+//
+// Dev mode  (bun bin/little-coder.ts): pkgRoot = repo root, runtime = bun itself.
+// Compiled  (bun build --compile):     pkgRoot = ~/.little-coder, runtime = bun in PATH.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { arch, homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ---- 2. Resolve package install root ----
-const here = dirname(fileURLToPath(import.meta.url));
-const pkgRoot = resolve(here, "..");
+// ---------------------------------------------------------------------------
+// Mode detection
+//
+// process.argv[1] ends with .ts when bun runs source directly (dev mode).
+// In a compiled bun binary process.argv[1] is the binary path itself.
+// ---------------------------------------------------------------------------
+const isDev = Boolean(process.argv[1]?.match(/\.(m?ts|tsx)$/));
 
-// ---- 3. Resolve the bundled pi CLI entry point ----
-// We invoke pi's JS entry directly under the current Node binary instead of
-// the `node_modules/.bin/pi` shim. Two reasons:
-//   1. On Windows, `.bin/pi.cmd` is an npm-generated batch shim. When it (or
-//      anything it transitively invokes) is launched from a path containing
-//      spaces — most notably the default Node install location
-//      `C:\Program Files\nodejs\` — cmd's whitespace tokenization can split
-//      the path at the first space and produce errors like
-//      `'C:\Program' is not recognized as an internal or external command`
-//      (see issue #23). Spawning `process.execPath` with the resolved cli.js
-//      path as an argv element sidesteps cmd entirely — Node's spawn handles
-//      Windows argv quoting itself.
-//   2. We no longer need a separate `cmd.exe /c …` branch, so the same
-//      spawn path works identically on Linux, macOS, and Windows.
+// ---------------------------------------------------------------------------
+// Data directory
+//
+// Dev:      repo root  (sibling of this file)
+// Compiled: ~/.little-coder  (or LITTLE_CODER_HOME env override)
+// ---------------------------------------------------------------------------
+const DATA_HOME = process.env.LITTLE_CODER_HOME ?? join(homedir(), ".little-coder");
+const pkgRoot = isDev
+  ? resolve(dirname(fileURLToPath(import.meta.url)), "..")
+  : DATA_HOME;
+
+// ---------------------------------------------------------------------------
+// Bun runtime
+//
+// Dev:      process.execPath IS bun.
+// Compiled: process.execPath is our binary; find bun separately in PATH.
+// ---------------------------------------------------------------------------
+function findBun(): string {
+  if (isDev) return process.execPath;
+  const PATH = (process.env.PATH ?? "").split(":");
+  for (const d of PATH) {
+    const b = join(d, "bun");
+    if (existsSync(b)) return b;
+  }
+  console.error("little-coder: bun not found in PATH. Install bun: https://bun.sh");
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// GitHub release coordinates
+// ---------------------------------------------------------------------------
+const REPO = "RogerNavelsaker/little-coder";
+const GH_API = `https://api.github.com/repos/${REPO}`;
+const GH_DL = `https://github.com/${REPO}/releases/download`;
+
+function binaryAsset(tag: string): string {
+  const os = { linux: "linux", darwin: "darwin" }[platform()];
+  const cpu = { x64: "x64", arm64: "arm64", aarch64: "arm64" }[arch()];
+  if (!os || !cpu) {
+    console.error(`little-coder: unsupported platform ${platform()}-${arch()}`);
+    process.exit(1);
+  }
+  return `${GH_DL}/${tag}/little-coder-${os}-${cpu}`;
+}
+
+function dataAsset(tag: string): string {
+  return `${GH_DL}/${tag}/data.tar.gz`;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommand dispatch — must come before any pi-launch logic
+// ---------------------------------------------------------------------------
+const sub = process.argv[2];
+if (sub === "install")   { await cmdInstall(process.argv.slice(3));   process.exit(0); }
+if (sub === "uninstall") { await cmdUninstall(process.argv.slice(3)); process.exit(0); }
+if (sub === "update")    { await cmdUpdate(process.argv.slice(3));    process.exit(0); }
+if (sub === "version")   { await cmdVersion();                        process.exit(0); }
+
+// ---------------------------------------------------------------------------
+// Guard: compiled binary requires data dir to exist
+// ---------------------------------------------------------------------------
+if (!isDev && !existsSync(DATA_HOME)) {
+  console.error(`little-coder: data directory not found at ${DATA_HOME}`);
+  console.error(`Run: little-coder install`);
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// pi entry point
+// ---------------------------------------------------------------------------
 const piPkgRoot = join(pkgRoot, "node_modules", "@earendil-works", "pi-coding-agent");
-let piEntry;
+let piEntry: string;
 try {
   const piPkgJson = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"));
   const binRel = typeof piPkgJson?.bin === "string" ? piPkgJson.bin : piPkgJson?.bin?.pi;
   if (typeof binRel !== "string") throw new Error("pi package.json has no bin.pi entry");
   piEntry = resolve(piPkgRoot, binRel);
-} catch (err) {
-  console.error(
-    `little-coder: cannot resolve pi cli entry under ${piPkgRoot}.\n` +
-      `Underlying error: ${err?.message ?? err}\n` +
-      `Try reinstalling: bun add -g little-coder`,
-  );
+} catch (err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`little-coder: cannot resolve pi under ${piPkgRoot}.\n${msg}`);
+  if (!isDev) console.error("Try: little-coder update");
   process.exit(1);
 }
 if (!existsSync(piEntry)) {
-  console.error(
-    `little-coder: cannot find pi at ${piEntry}.\n` +
-      `Try reinstalling: bun add -g little-coder`,
-  );
+  console.error(`little-coder: pi entry not found at ${piEntry}`);
   process.exit(1);
 }
 
-// ---- 3b. Re-apply little-coder's pi-runtime patches (best-effort) ----
-// pi is a normal dependency, so we can't ship a modified copy; instead we
-// re-apply small source edits (e.g. suppressing pi's bare "Operation aborted"
-// marker) on every launch. This self-heals when npm install scripts were
-// skipped or pi was reinstalled. Cosmetic only — never block launch.
+// Re-apply patches (best-effort, cosmetic only)
 try {
-  const { applyPiPatches } = await import("../scripts/patch-pi.ts");
-  applyPiPatches(piPkgRoot);
-} catch {
-  // patches are non-essential; ignore (missing file, read-only FS, etc.)
-}
+  const patchScript = join(pkgRoot, "scripts", "patch-pi.ts");
+  if (existsSync(patchScript)) {
+    const { applyPiPatches } = await import(patchScript);
+    applyPiPatches(piPkgRoot);
+  }
+} catch { /* non-fatal */ }
 
-// ---- 4. Auto-discover bundled extensions ----
+// Auto-discover extensions under pkgRoot/.pi/extensions/*/index.ts
 const extDir = join(pkgRoot, ".pi", "extensions");
-const extArgs = [];
+const extArgs: string[] = [];
 if (existsSync(extDir)) {
   for (const name of readdirSync(extDir).sort()) {
+    if (name.startsWith("_")) continue;
     const subdir = join(extDir, name);
     const idx = join(subdir, "index.ts");
     try {
       if (statSync(subdir).isDirectory() && existsSync(idx)) {
         extArgs.push("--extension", idx);
       }
-    } catch {
-      // skip unreadable entries
-    }
+    } catch { /* skip unreadable */ }
   }
 }
 
-// ---- 5. Compose pi argv ----
-// --no-context-files : ignore the user's AGENTS.md / CLAUDE.md so OURS wins
-// --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load
-// --system-prompt    : load <pkgRoot>/AGENTS.md regardless of cwd
-//
-// Strip our own flags before forwarding to pi so it doesn't reject them.
-const userArgs = process.argv.slice(2);
+// Quiet pi's own version banner
+if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
+  process.env.PI_SKIP_VERSION_CHECK = "1";
+}
+
+// Merge quietStartup + lastChangelogVersion into ~/.pi/agent/settings.json
+try {
+  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
+  let agentDir: string;
+  if (agentDirEnv?.trim()) {
+    agentDir = agentDirEnv === "~" ? homedir()
+      : agentDirEnv.startsWith("~/") ? join(homedir(), agentDirEnv.slice(2))
+      : agentDirEnv;
+  } else {
+    agentDir = join(homedir(), ".pi", "agent");
+  }
+  mkdirSync(agentDir, { recursive: true });
+  const settingsPath = join(agentDir, "settings.json");
+  let s: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try { const p = JSON.parse(readFileSync(settingsPath, "utf-8")); if (p && typeof p === "object") s = p; } catch { s = {}; }
+  }
+  let dirty = false;
+  if (s.quietStartup !== true) { s.quietStartup = true; dirty = true; }
+  let piVer: string | undefined;
+  try { piVer = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"))?.version; } catch { /* ok */ }
+  if (piVer && s.lastChangelogVersion !== piVer) { s.lastChangelogVersion = piVer; dirty = true; }
+  if (dirty) writeFileSync(settingsPath, JSON.stringify(s, null, 2));
+} catch { /* best-effort */ }
+
+// Compose argv and spawn pi
+const userArgs = process.argv.slice(isDev ? 2 : 2);
 const agentsMd = join(pkgRoot, "AGENTS.md");
 const piArgs = [
   "--no-context-files",
@@ -102,130 +182,142 @@ const piArgs = [
   ...userArgs,
 ];
 
-// ---- 6. Suppress pi's own version-banner by default ----
-// pi is an internal dependency here; users install `little-coder` and shouldn't
-// see in-session nags about updating the underlying coding-agent package.
-// PI_SKIP_VERSION_CHECK is the surgical pi switch (interactive-mode.js:525)
-// that gates the "Update Available" banner without touching pi's other
-// network-dependent startup paths. Honor an explicit user value (set to "0" or
-// anything else to re-enable the banner; PI_OFFLINE=1 also re-overrides).
-if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
-  process.env.PI_SKIP_VERSION_CHECK = "1";
-}
-
-// ---- 7. Force pi's global quietStartup + pin lastChangelogVersion ----
-// Two non-destructive merges into ~/.pi/agent/settings.json (or the dir pointed
-// to by PI_CODING_AGENT_DIR):
-//
-//   1. quietStartup: true
-//        Pi's interactive mode otherwise dumps an [Extensions] / [Skills] /
-//        [Prompts] inventory on every launch. Pi reads global settings from
-//        <agentDir>/settings.json — NOT from our npm-installed package dir —
-//        so our shipped .pi/settings.json doesn't reach it. To see the
-//        inventory anyway, run `little-coder --verbose`.
-//
-//   2. lastChangelogVersion: <currently installed pi version>
-//        Pi reads its own bundled CHANGELOG.md on startup and renders a
-//        "What's New" block for every entry strictly newer than this stored
-//        version (interactive-mode.js:getChangelogForDisplay). That makes pi's
-//        upstream changelog show up inside little-coder's TUI every time we
-//        bump the bundled pi dep — which is jarring because little-coder is
-//        the surface, not pi. We pre-stamp this field to the version we just
-//        bundled BEFORE pi starts, so pi sees "user already saw this", and
-//        the block never renders. Users who genuinely want to read pi's
-//        upstream changelog can still do so with `/changelog` inside the TUI.
-//
-// Existing keys are preserved. We only write when the desired value differs
-// from what's already on disk, so this is a no-op on warm launches.
-try {
-  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
-  let agentDir;
-  if (agentDirEnv && agentDirEnv.trim().length > 0) {
-    agentDir = agentDirEnv === "~"
-      ? homedir()
-      : agentDirEnv.startsWith("~/")
-        ? homedir() + agentDirEnv.slice(1)
-        : agentDirEnv;
-  } else {
-    agentDir = join(homedir(), ".pi", "agent");
-  }
-  mkdirSync(agentDir, { recursive: true });
-  const globalSettingsPath = join(agentDir, "settings.json");
-  let globalSettings = {};
-  if (existsSync(globalSettingsPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(globalSettingsPath, "utf-8"));
-      if (parsed && typeof parsed === "object") globalSettings = parsed;
-    } catch {
-      // Corrupted JSON — start fresh rather than throw. Pi would have rejected it too.
-      globalSettings = {};
-    }
-  }
-
-  // Read the bundled pi version. We resolve via the same package.json we used
-  // to find piEntry, so this stays consistent with whichever pi we actually
-  // spawn — no second source of truth.
-  let bundledPiVersion;
-  try {
-    const piPkgJson = JSON.parse(
-      readFileSync(join(piPkgRoot, "package.json"), "utf-8"),
-    );
-    if (typeof piPkgJson?.version === "string") bundledPiVersion = piPkgJson.version;
-  } catch {
-    // If we can't read pi's version, fall back to leaving lastChangelogVersion
-    // alone — pi will then show its own changelog on the next launch. Better
-    // than writing garbage into the user's settings.
-  }
-
-  let mutated = false;
-  if (globalSettings.quietStartup !== true) {
-    globalSettings.quietStartup = true;
-    mutated = true;
-  }
-  if (bundledPiVersion && globalSettings.lastChangelogVersion !== bundledPiVersion) {
-    globalSettings.lastChangelogVersion = bundledPiVersion;
-    mutated = true;
-  }
-  if (mutated) {
-    writeFileSync(globalSettingsPath, JSON.stringify(globalSettings, null, 2));
-  }
-} catch {
-  // Best-effort. If we can't write the settings (read-only HOME, etc.) pi
-  // falls back to its built-in defaults — the [Extensions] block will show
-  // but everything else still works.
-}
-
-// ---- 8. Spawn pi in the user's cwd ----
-// `process.execPath` is the same Node binary that's running this launcher, so
-// pi inherits the exact runtime that already passed our >= 22.19.0 preflight.
-// Passing piEntry as an argv element (not a shell string) avoids any
-// shell-injection / space-in-path classes on every platform.
-const child = spawn(process.execPath, [piEntry, ...piArgs], {
+const bun = findBun();
+const child = spawn(bun, [piEntry, ...piArgs], {
   stdio: "inherit",
   cwd: process.cwd(),
   env: process.env,
 });
 
-const forward = (sig) => () => {
-  try {
-    child.kill(sig);
-  } catch {
-    // child already gone
-  }
-};
-process.on("SIGINT", forward("SIGINT"));
-process.on("SIGTERM", forward("SIGTERM"));
-process.on("SIGHUP", forward("SIGHUP"));
-
-child.on("error", (err) => {
-  console.error("little-coder: failed to start pi:", err.message);
-  process.exit(1);
-});
-
+const fwd = (sig: NodeJS.Signals) => () => { try { child.kill(sig); } catch { /* gone */ } };
+process.on("SIGINT",  fwd("SIGINT"));
+process.on("SIGTERM", fwd("SIGTERM"));
+process.on("SIGHUP",  fwd("SIGHUP"));
+child.on("error", (err) => { console.error("little-coder: failed to start pi:", err.message); process.exit(1); });
 child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-  } else {
-    process.exit(code ?? 0);
-  }
+  if (signal) process.kill(process.pid, signal);
+  else process.exit(code ?? 0);
 });
+
+// ===========================================================================
+// Commands
+// ===========================================================================
+
+async function cmdVersion() {
+  const pkgJson = join(isDev ? pkgRoot : DATA_HOME, "package.json");
+  const ver = existsSync(pkgJson)
+    ? (JSON.parse(readFileSync(pkgJson, "utf-8")) as { version: string }).version
+    : "unknown";
+  const pinned = join(DATA_HOME, ".version");
+  const tag = existsSync(pinned) ? readFileSync(pinned, "utf-8").trim() : ver;
+  console.log(`little-coder ${tag}`);
+}
+
+async function cmdInstall(args: string[]) {
+  const force = args.includes("--force") || args.includes("-f");
+
+  if (existsSync(DATA_HOME) && !force) {
+    try {
+      if (readdirSync(DATA_HOME).length > 0) {
+        console.error(`little-coder: ${DATA_HOME} already exists. Use --force to overwrite or 'update' to upgrade.`);
+        process.exit(1);
+      }
+    } catch { /* readable check failed — proceed */ }
+  }
+
+  console.log(`Installing little-coder to ${DATA_HOME}...`);
+  mkdirSync(DATA_HOME, { recursive: true });
+
+  const tag = await fetchLatestTag();
+  await downloadData(tag, DATA_HOME);
+  runBunInstall(DATA_HOME);
+  writeFileSync(join(DATA_HOME, ".version"), tag);
+
+  console.log(`\nlittle-coder ${tag} installed.`);
+}
+
+async function cmdUninstall(_args: string[]) {
+  if (!existsSync(DATA_HOME)) {
+    console.log(`Nothing to uninstall — ${DATA_HOME} not found.`);
+    return;
+  }
+  rmSync(DATA_HOME, { recursive: true, force: true });
+  console.log(`Removed ${DATA_HOME}`);
+  console.log(`Binary kept. To remove: rm $(which little-coder)`);
+}
+
+async function cmdUpdate(_args: string[]) {
+  const pinned = join(DATA_HOME, ".version");
+  const current = existsSync(pinned) ? readFileSync(pinned, "utf-8").trim() : "(unknown)";
+  const tag = await fetchLatestTag();
+
+  if (tag === current) {
+    console.log(`Already up to date (${tag}).`);
+    return;
+  }
+
+  console.log(`Updating ${current} → ${tag}...`);
+  mkdirSync(DATA_HOME, { recursive: true });
+  await downloadData(tag, DATA_HOME);
+  runBunInstall(DATA_HOME);
+  writeFileSync(pinned, tag);
+
+  if (!isDev) await updateBinary(tag);
+
+  console.log(`\nUpdated to ${tag}.`);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function fetchLatestTag(): Promise<string> {
+  const res = await fetch(`${GH_API}/releases/latest`, {
+    headers: { Accept: "application/vnd.github+json", "User-Agent": "little-coder" },
+  });
+  if (!res.ok) {
+    console.error(`little-coder: GitHub API error ${res.status}`);
+    process.exit(1);
+  }
+  const { tag_name } = await res.json() as { tag_name: string };
+  return tag_name;
+}
+
+async function downloadData(tag: string, dest: string) {
+  const url = dataAsset(tag);
+  const tmp = join(dest, ".data.tar.gz.tmp");
+  console.log(`  Downloading data archive...`);
+  await downloadFile(url, tmp);
+  console.log(`  Extracting...`);
+  const r = spawnSync("tar", ["-xzf", tmp, "--strip-components=1", "-C", dest], { stdio: "inherit" });
+  rmSync(tmp, { force: true });
+  if (r.status !== 0) { console.error("little-coder: tar extraction failed"); process.exit(1); }
+}
+
+async function downloadFile(url: string, dest: string) {
+  const res = await fetch(url, { headers: { "User-Agent": "little-coder" } });
+  if (!res.ok) { console.error(`little-coder: download failed ${url} (${res.status})`); process.exit(1); }
+  writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+}
+
+function runBunInstall(cwd: string) {
+  console.log(`  Running bun install...`);
+  const r = spawnSync(findBun(), ["install", "--frozen-lockfile"], { cwd, stdio: "inherit" });
+  if (r.status !== 0) { console.error("little-coder: bun install failed"); process.exit(1); }
+}
+
+async function updateBinary(tag: string) {
+  const url = binaryAsset(tag);
+  const self = process.execPath;
+  const tmp = `${self}.new`;
+  console.log(`  Updating binary...`);
+  try {
+    await downloadFile(url, tmp);
+    chmodSync(tmp, 0o755);
+    renameSync(tmp, self);
+  } catch (err: unknown) {
+    rmSync(tmp, { force: true });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  Warning: binary update skipped (${msg}). Re-run install.sh to update.`);
+  }
+}

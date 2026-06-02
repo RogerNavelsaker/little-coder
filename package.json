@@ -29,8 +29,11 @@
   ],
   "scripts": {
     "pi": "pi",
+    "dev": "bun bin/little-coder.ts",
     "test": "find .pi -name '*.test.ts' | xargs -I{} bun test ./{}",
     "typecheck": "tsc --noEmit",
+    "build": "bun build --compile bin/little-coder.ts --outfile dist/little-coder",
+    "build:release": "bun scripts/build-release.ts",
     "postinstall": "bun scripts/patch-pi.ts"
   },
   "dependencies": {
