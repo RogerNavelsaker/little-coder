@@ -19,7 +19,7 @@ export const mockTheme: MockTheme = {
   bold: (t) => t,
 };
 
-export const CWD = "/home/rona/.pi/agent/pi-structural-tools";
+export const CWD = "/home/rona/Repositories/.ru/RogerNavelsaker/little-coder";
 export const FIXTURE = `${CWD}/PROMPT.md`; // 186-line existing file
 
 // --- Tool invocation ---
