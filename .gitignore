@@ -38,3 +38,6 @@ __pycache__/
 *.log
 debug_payload.json
 brainstorm_outputs/
+
+# Release build output — distributed via GitHub Releases, not committed
+dist/
