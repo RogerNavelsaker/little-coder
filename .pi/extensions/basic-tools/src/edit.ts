@@ -16,10 +16,10 @@ import { type DisplayMode } from './display.js';
 import { encodeToon } from './toon.js';
 
 // Lazy-load diff package (ESM CJS bridge)
-let diffModule: typeof import('/home/rona/.pi/agent/pi-structural-tools/node_modules/diff/libcjs/index.js') | null = null;
+let diffModule: typeof import('diff') | null = null;
 function getDiffModule() {
   if (!diffModule) {
-    diffModule = require('/home/rona/.pi/agent/pi-structural-tools/node_modules/diff/libcjs/index.js');
+    diffModule = require('diff');
   }
   return diffModule;
 }

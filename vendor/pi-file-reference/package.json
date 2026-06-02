@@ -1,0 +1,36 @@
+{
+  "name": "@josephyoung/pi-file-reference",
+  "version": "0.1.7",
+  "private": false,
+  "license": "MIT",
+  "description": "Pi extension: resolve @filepath (files & directories) in AGENTS.md, inject into system prompt",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "context",
+    "file-reference"
+  ],
+  "homepage": "https://github.com/josephyoung/pi-file-reference#readme",
+  "bugs": {
+    "url": "https://github.com/josephyoung/pi-file-reference/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/josephyoung/pi-file-reference.git"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@types/node": "^25.7.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
