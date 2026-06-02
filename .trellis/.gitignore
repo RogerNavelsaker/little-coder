@@ -1,0 +1,10 @@
+*
+!README.md
+!.gitignore
+!events.jsonl
+!specs/
+!specs/**
+!plans/
+!plans/**
+!templates/
+!templates/**

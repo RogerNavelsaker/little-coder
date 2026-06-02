@@ -1,0 +1,22 @@
+schema-version = "1.12.0"
+
+[install]
+bun.pkg-path = "bun"
+bun.pkg-group = "bun"
+mulch.flake = "github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d"
+mulch.outputs = ["out", "ml"]
+seeds.flake = "github:RogerNavelsaker/nixpkg-seeds"
+seeds.outputs = ["out", "sd"]
+trellis.flake = "github:RogerNavelsaker/nixpkg-trellis"
+trellis.outputs = ["out", "tl"]
+canopy.flake = "github:RogerNavelsaker/nixpkg-canopy"
+canopy.outputs = ["out", "cn"]
+
+[vars]
+
+[hook]
+
+[profile]
+
+[options]
+systems = ["x86_64-linux"]

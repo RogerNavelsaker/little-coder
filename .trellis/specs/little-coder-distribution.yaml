@@ -1,0 +1,20 @@
+id: little-coder-distribution
+title: "Binary distribution: compiled pi + self-contained data dir"
+seed: little-coder-2609
+status: active
+createdAt: "2026-06-02T10:36:53.024Z"
+updatedAt: "2026-06-02T10:36:53.024Z"
+objective: Ship little-coder as two compiled binaries per platform (launcher + pi runtime) plus one cross-platform data archive. Installed data dir (~/.little-coder/) contains no node_modules, requires no bun or npm at runtime.
+constraints:
+  - pi binary compiled from @earendil-works/pi-coding-agent with patch-pi baked in before compilation
+  - Extensions compiled to self-contained index.js with no --external flags (pi-tui, typebox, toon, diff all bundled)
+  - data.tar.gz is cross-platform; pi binaries are separate per-platform release assets
+  - launcher binary handles install/update/uninstall; fetches data.tar.gz + pi-<os>-<cpu> from GitHub Releases
+acceptance:
+  - little-coder install works on clean system with no bun/npm/node
+  - "bun run build:release produces launcher-<os>-<cpu>, pi-<os>-<cpu>, data.tar.gz"
+  - all 12 tools register in installed mode (read/edit/write/grep/find/ls/shell/ast_search/revert_file/ctx_record/ctx_packet/ctx_inject)
+references:
+  - bin/little-coder.ts
+  - scripts/build-release.ts
+  - scripts/patch-pi.ts

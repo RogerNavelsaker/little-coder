@@ -1,0 +1,187 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "schema-version": "1.12.0",
+    "install": {
+      "bun": {
+        "pkg-path": "bun",
+        "pkg-group": "bun"
+      },
+      "canopy": {
+        "flake": "github:RogerNavelsaker/nixpkg-canopy",
+        "outputs": [
+          "out",
+          "cn"
+        ]
+      },
+      "mulch": {
+        "flake": "github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d",
+        "outputs": [
+          "out",
+          "ml"
+        ]
+      },
+      "seeds": {
+        "flake": "github:RogerNavelsaker/nixpkg-seeds",
+        "outputs": [
+          "out",
+          "sd"
+        ]
+      },
+      "trellis": {
+        "flake": "github:RogerNavelsaker/nixpkg-trellis",
+        "outputs": [
+          "out",
+          "tl"
+        ]
+      }
+    },
+    "hook": {},
+    "profile": {},
+    "options": {
+      "systems": [
+        "x86_64-linux"
+      ]
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "bun",
+      "broken": false,
+      "derivation": "/nix/store/qnd4n683czmm44piqp95zz9jcnfbk055-bun-1.3.13.drv",
+      "description": "Incredibly fast JavaScript runtime, bundler, transpiler and package manager – all in one",
+      "install_id": "bun",
+      "license": "[ MIT, LGPL-2.1-only ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+      "name": "bun-1.3.13",
+      "pname": "bun",
+      "rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+      "rev_count": 1004030,
+      "rev_date": "2026-05-23T18:24:25Z",
+      "scrape_date": "2026-05-26T08:32:51.035042Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.3.13",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/z1cxjx705fswwjjns0sw2ysbd5jqxfgm-bun-1.3.13"
+      },
+      "system": "x86_64-linux",
+      "group": "bun",
+      "priority": 5
+    },
+    {
+      "install_id": "canopy",
+      "locked-url": "github:RogerNavelsaker/nixpkg-canopy/aa3642ac92da01156f71224596a0e15b2d2849ef?narHash=sha256-vO6bUCJe0GpBKBslOwdiaIYSKUmj5xiNC3ncS%2BDlKFI%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/canopy-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/9psw9wn475ky528pa82394g35nk9xrsa-canopy-0.2.4-r1.drv",
+      "outputs": {
+        "cn": "/nix/store/ndz26gzb8m1d4n2l1klahqx1yzscdj63-canopy-0.2.4-r1-cn",
+        "out": "/nix/store/fa5xhlrk1fmx8v50v6hhddln4jaw1j6k-canopy-0.2.4-r1"
+      },
+      "output-names": [
+        "out",
+        "cn"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "canopy-0.2.4-r1",
+      "pname": "canopy",
+      "version": "0.2.4-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "mulch",
+      "locked-url": "github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d?narHash=sha256-gvnkGhAZFFckbdhCy7RtqdX7jlXr9M/xglsfj9tqj2k%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/mulch-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/q7sbj7i7cmb8sl7bg96g4pp1vdgwi7bk-mulch-0.10.1-r1.drv",
+      "outputs": {
+        "ml": "/nix/store/lxp2sv52b2nbhy53q3f1mwikmw252w4n-mulch-0.10.1-r1-ml",
+        "out": "/nix/store/d9f6k5nmh3h6f1wj30cjb72qsikrkv4f-mulch-0.10.1-r1"
+      },
+      "output-names": [
+        "out",
+        "ml"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "mulch-0.10.1-r1",
+      "pname": "mulch",
+      "version": "0.10.1-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "seeds",
+      "locked-url": "github:RogerNavelsaker/nixpkg-seeds/0e13e0ab2040c5a51371ecea554b3e1636c6ce7f?narHash=sha256-VuxQDHShS0o5SBmtFZ1sCa2bKr%2BS7qv2QpPqgUs3rkg%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/seeds-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/xwx1v00jcm0wba8wislfa0ybl6b9fxm5-seeds-0.2.5-r5.drv",
+      "outputs": {
+        "out": "/nix/store/nys4dv7h21fh6p8d4sljy4zf3sahi8w8-seeds-0.2.5-r5",
+        "sd": "/nix/store/hxmx37qlrfsanmscmgdia90gnv2qkr0a-seeds-0.2.5-r5-sd"
+      },
+      "output-names": [
+        "out",
+        "sd"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "seeds-0.2.5-r5",
+      "pname": "seeds",
+      "version": "0.2.5-r5",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "trellis",
+      "locked-url": "github:RogerNavelsaker/nixpkg-trellis/95e88fde49b77dab643f8546000c7e05422e2aec?narHash=sha256-VSncM7Si%2B0KTphUkAOlfayTlCs/fsSNOfJ/xDzZcgoA%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/trellis-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/96qnv23hjnwqi3g4iywc6byzl5qd4awh-trellis-0.2.1-r2.drv",
+      "outputs": {
+        "out": "/nix/store/lp81rs0wk0gnnshh3jc7gjya3x6lc4p8-trellis-0.2.1-r2",
+        "tl": "/nix/store/w66yqrzv0i0s13w4dn2giv080bkw7ikz-trellis-0.2.1-r2-tl"
+      },
+      "output-names": [
+        "out",
+        "tl"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "trellis-0.2.1-r2",
+      "pname": "trellis",
+      "version": "0.2.1-r2",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    }
+  ]
+}
