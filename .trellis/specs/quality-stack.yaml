@@ -1,0 +1,16 @@
+id: quality-stack
+title: "Quality stack: output-parser, write-guard, read-guard, quality-monitor, turn-cap, evidence"
+seed: little-coder-c0da
+status: active
+createdAt: "2026-06-02T10:53:12.734Z"
+updatedAt: "2026-06-02T10:53:12.734Z"
+objective: "Six passive extensions on Pi hooks. output-parser (turn_end): fenced/tagged/bare-JSON tool call detection, 6-pass repairJson, followUp nudge. write-guard (tool_call): path normalization, blocks write to existing file -> redirects to edit. read-guard (tool_result): ctx.getContextUsage() overflow trim to 30 lines. quality-monitor (turn_end): empty/hallucinated-tool/stuck-loop/malformed checks + read-loop + patch-spiral detection. turn-cap (turn_start): ctx.abort() at LITTLE_CODER_MAX_TURNS. finalize-warn: followUp 5 turns before cap. evidence: EvidenceAdd/Get/List, session_compact bridge, ephemeral per-session facts."
+constraints:
+  - "All interventions use harnessIntervention pattern: ctx.ui.notify(\"harness intervention: \"+msg, \"info\")"
+  - write-guard and read-guard are fast-deny between profile whitelist and dcg
+acceptance:
+  - output-parser catches bare JSON tool calls in assistant text
+  - write-guard blocks write to existing file with redirect message
+  - turn-cap aborts at cap; finalize-warn fires once at 5 turns remaining
+references:
+  - memory-bank/activeContext.md

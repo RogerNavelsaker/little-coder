@@ -1,0 +1,14 @@
+id: web-tools
+title: "web-tools extension group: fetch, search, control, source"
+seed: little-coder-6ebe
+status: draft
+createdAt: "2026-06-02T10:54:05.904Z"
+updatedAt: "2026-06-02T10:54:05.904Z"
+objective: "Four web-oriented extensions as own group. fetch: flyscrape+defuddle/readability pipeline, Nu wrapper from fetch.nu, ops get/crawl. search: ddgr+SearXNG, Nu wrapper from search.nu, ops query/searxng. control: browser-cli Firefox automation, ops open/snap/click/type/read/eval/shot/close. source: Sourcegraph, ops search/file. Artifact storage: <5KB inline, >=5KB -> ~/.pi/fetch/<ts>-<slug>/ (global default) or .pi/fetch/ (target:repo). Flox env additions: flyscrape, ddgr, browser-cli."
+constraints:
+  - "Artifact pruning: post-turn keep 2 newest fetch/browser results raw; replace older with compact placeholder (URL + size + Evidence IDs)"
+acceptance:
+  - fetch get returns readable text via defuddle; artifacts >=5KB stored to disk with path in details
+  - search query returns ranked results via ddgr; searxng op uses configured SearXNG instance
+references:
+  - "memory-bank/activeContext.md#web-tools"

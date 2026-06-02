@@ -1,0 +1,16 @@
+id: ops-universal-schema
+title: "ops[] universal schema migration"
+seed: little-coder-c106
+status: active
+createdAt: "2026-06-02T10:53:39.762Z"
+updatedAt: "2026-06-02T10:53:39.762Z"
+objective: "Migrate all 8 basic-tools to ops[] discriminated union schema: { ops: Op[] } where each Op has a literal op field. Replaces all legacy edits[], files[], commands[], action field schemas. Op variants per tool: edit (replace_text, replace_symbol, insert_at, delete_symbol, patch), read (file, symbol, range, image), write (create, overwrite, append), grep (search, summary), find (glob+sortBy, recent, sized), ls (dir, tree), shell (run, eval), ast_search (query, count). New capability = new op variant, zero interface churn. Mixed op types per call allowed. TOON merges results across ops."
+constraints:
+  - Single op = one-element array; no top-level shorthand union with single form
+  - "linehash CLI extensions required: linehash diff --anchored, linehash patch --apply, linehash edit --symbol"
+acceptance:
+  - "All tools accept { ops: Op[] } envelope; legacy schemas removed"
+  - "grep summary op returns [{file, matchCount}] sorted desc via rg --count-matches"
+  - "edit patch op: anchor-verified apply; rejects on drift rather than applying to wrong location"
+references:
+  - "memory-bank/systemPatterns.md#universal-ops-schema-pattern"

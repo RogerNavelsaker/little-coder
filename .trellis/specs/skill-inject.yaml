@@ -1,0 +1,16 @@
+id: skill-inject
+title: skill-inject + knowledge-inject extensions
+seed: little-coder-3c2d
+status: active
+createdAt: "2026-06-02T10:53:54.199Z"
+updatedAt: "2026-06-02T10:53:54.199Z"
+objective: "Two before_agent_start extensions for contextual knowledge injection. skill-inject: loads skills/tools/*.md (frontmatter: target_tool, token_cost), 3-priority selection: (1) last failed tool error-recovery, (2) last 2 tool calls recency, (3) keyword INTENT_MAP on user prompt. Budget 300 tok default. Research-trigger regex injects Research-first directive block. Chains knowledge-inject requiredTools + tool-gating allowedTools. Returns {systemPrompt: existing+skillBlock+directive}. knowledge-inject: loads skills/knowledge+protocols/*.md (frontmatter: topic, keywords, token_cost, requires_tools), keyword-scores vs user prompt (threshold 2.0, cap 150 tok/entry), publishes requires_tools on systemPromptOptions.littleCoder.requiredTools for skill-inject."
+constraints:
+  - Fork reads bundled skills/ copy, not ~/.llm — ~/.llm is curation source only
+  - "Orientation Block (before_agent_start cold-start): grove seeds last-action timestamp; if idle >1h inject [ORIENTATION] block with time-asleep + grove summary"
+acceptance:
+  - skill-inject selects and injects relevant tool skill on agent start
+  - knowledge-inject scores and injects relevant knowledge/protocol files
+  - "Scratchpad always-inject: full content as [ACTIVE_CLIPBOARD] in system prompt on before_agent_start"
+references:
+  - "memory-bank/activeContext.md#skill-inject"

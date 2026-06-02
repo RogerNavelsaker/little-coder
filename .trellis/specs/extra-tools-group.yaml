@@ -1,0 +1,19 @@
+id: extra-tools-group
+title: extra-tools extension group
+seed: little-coder-cbcc
+status: active
+createdAt: "2026-06-02T10:52:37.193Z"
+updatedAt: "2026-06-02T10:52:37.193Z"
+objective: "Seven extra-tools extensions beyond basic-tools: ast_search (ast-grep + Nu), scratchpad (session-local JSONL, always-inject into system prompt on before_agent_start, Volition Tier 1.5 clipboard), repo_map (git + modified files cap 10 + entrypoints + build scripts), session (Zellij-backed panes, ops: create/exec/write/read/list/close, file registry ~/.pi/sessions/, Nu env + flox/direnv auto-detection), outline (universal-ctags + linehash anchors, {name,kind,line,anchor,signature}), effort/extra-tools (thinking_budget_tokens injection via before_model_request, models.json compat.thinkingBudgets per model), model/extra-tools (model_switch tool, pi.unregisterProvider+re-register, automatic split-brain router via light.sock Gemma 4 E2B ONNX)."
+constraints:
+  - "ast_search: ast-grep emits JSON array not JSONL; streaming pending"
+  - "scratchpad: before_agent_start hook compacts and re-injects full content as [ACTIVE_CLIPBOARD] block"
+  - "effort: lemonade must run without --reasoning-budget flag (default -1) for per-request override"
+  - "model: always write (model,effort) to profiles.json after switch for overseer drift-check"
+acceptance:
+  - all 7 tools compile and register cleanly under .pi/extensions/extra-tools/
+  - "outline: ctags + linehash anchor per symbol; anchor enables direct edit targeting without re-read"
+  - "model router: light.sock classifies message -> {escalate, model, effort}; model_switch tool handles explicit override"
+references:
+  - "memory-bank/systemPatterns.md#model-switch-effort-pattern"
+  - memory-bank/activeContext.md

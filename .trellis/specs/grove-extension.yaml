@@ -1,0 +1,17 @@
+id: grove-extension
+title: "grove extension: seeds/mulch/trellis/canopy ops"
+seed: little-coder-bd7f
+status: active
+createdAt: "2026-06-02T10:52:49.297Z"
+updatedAt: "2026-06-02T10:52:49.297Z"
+objective: "Pi extension wrapping the four grove CLIs as agent tools. Single tool grove with ops: seeds_add, seeds_list, seeds_update, mulch_record, mulch_query, mulch_prime, trellis_spec_show, trellis_plan_show, trellis_list, canopy_prompt, canopy_schema. Each op shells out to the CLI (seeds/ml/tl/cn) via Nu wrapper. Output: structured TOON for LLM, plain struct for details. Enables agents to read/write project knowledge, file issues, read specs and plans, and invoke canopy prompts without leaving Pi."
+constraints:
+  - CLIs (seeds/ml/tl/cn) must be in PATH when Pi launches — guaranteed by Flox env activation in pi-dev.ts launcher
+  - Read ops are cheap (shell out, parse JSON output); write ops should confirm before mutating
+  - grove is separate from evidence (evidence = ephemeral per-session; grove = persistent cross-session semantic store)
+acceptance:
+  - mulch_prime op returns compressed domain expertise for injection into agent context
+  - seeds_add creates issue and returns id; seeds_list filters by tag/priority
+  - trellis_list shows active specs+plans; trellis_spec_show shows full spec with constraints and acceptance criteria
+references:
+  - "memory-bank/activeContext.md#grove-extension"

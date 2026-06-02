@@ -1,0 +1,16 @@
+id: parity-gaps
+title: "basic-tools parity gaps: grep context/glob, edit fuzzy, find sort/filter, computeDiff"
+seed: little-coder-8835
+status: active
+createdAt: "2026-06-02T10:54:17.263Z"
+updatedAt: "2026-06-02T10:54:17.263Z"
+objective: "Five remaining parity gaps vs earendil/pi-basic/pi-hashline/itay. (1) grep context param: context:number schema, -B N -A N rg flags. (2) grep glob param: glob:string schema, --glob <pattern> rg flag. (3) edit fuzzy matching: delegate to linehash edit --fuzzy (Unicode quote/dash/space norm + multi-pass fallback). (4) find sortBy/modifiedSince/minSize/maxSize: fd --changed-within, fd --size, Nu sort pipeline. (5) computeDiff -> linehash diff: remove Index:/=== artifact from content.text (tool_result hook already cleans details.diff for TUI rendering)."
+constraints:
+  - linehash edit --fuzzy must be implemented in linehash CLI before edit fuzzy can be wired
+acceptance:
+  - "grep with context:2 returns 2 lines before/after each match"
+  - "grep with glob:\"**/*.ts\" restricts search to TypeScript files"
+  - "find with modifiedSince:\"1h\" returns files changed in last hour"
+  - "edit content.text diff uses linehash diff output (no Index:/=== prefix)"
+references:
+  - "memory-bank/progress.md#remaining-parity-gaps"

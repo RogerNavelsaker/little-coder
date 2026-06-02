@@ -1,0 +1,16 @@
+id: nu-foundation
+title: Nu foundation + Flox env for all tool backends
+seed: little-coder-efff
+status: active
+createdAt: "2026-06-02T10:53:26.849Z"
+updatedAt: "2026-06-02T10:53:26.849Z"
+objective: "Shared Nu layer for all backend tool execution, isolated by Flox env. Flox env pins: nu, rg, fd, eza, bat, delta, ast-grep, linehash, sd. Activated at pi-dev.ts launcher via flox activate, inherited by all Pi subprocesses. Nu wrappers in nu/lib/ (grep/find/ls/read/diff/query/bat/sd/outline), loaded via \"use little-coder *\". TypeScript extension becomes thin adapter: calls Nu, encodes TOON, shapes details, renders TUI. JSON/structural parsing moves to Nu. tru encode/decode in Nu layer for TOON ops. Isolated Nu config: nu/config.nu + nu/env.nu loaded with --config --env-config flags."
+constraints:
+  - Nu config isolated from user ~/.config/nushell/ to avoid collision
+  - "flox/direnv auto-detection in session create and shell startup: .envrc -> direnv, .flox/ -> flox, neither -> clean Nu env"
+acceptance:
+  - All tool backends call Nu wrappers, not raw binary invocations in TypeScript
+  - tru available in PATH; Nu wrappers use tru encode/decode for TOON
+  - flox activate at pi-dev.ts launch; inherited env reaches all shell tool subprocesses
+references:
+  - "memory-bank/systemPatterns.md#nu-foundation-flox-env-pattern"

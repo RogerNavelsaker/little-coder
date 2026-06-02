@@ -1,0 +1,19 @@
+id: permission-gate
+title: "Permission-gate: defense-in-depth stack"
+seed: little-coder-5e37
+status: active
+createdAt: "2026-06-02T10:52:19.902Z"
+updatedAt: "2026-06-02T10:52:19.902Z"
+objective: "Four-layer permission system. L0: AgentFS (FUSE/SQLite copy-on-write, audit trail) + YoloFS (staging, snapshots, progressive permissions) — hard filesystem boundary. L1: profile tool whitelist — only registered tools reach Pi at startup. L2: profile op whitelist — TypeBox schema union restricted per profile. L3: own dcg (Pi tool_call hook, .toml pattern packs) + Reinforced Agent reviewer (light.sock Gemma 4 E2B default, escalates to remote qwen3.6 for destructive ops) + own slb peer approval for DANGEROUS tier. Bun-native first for L3, Rust port later. No vendoring of upstream dcg/slb."
+constraints:
+  - Layers 1+2 active from v1; whitelist over blacklist; AgentFS/YoloFS is the outer wall (L0 cannot be bypassed by a compromised inner layer)
+  - Bubblewrap retained for readonly shell only (Phase 22); not primary outer wall
+  - "Pi hook API: tool_call returns { block:true, reason } to block; tool_result returns { content } or { details } to mutate; no vendoring upstream"
+acceptance:
+  - "Profile system loads on launch: PI_LITTLE_CODER_PROFILE=<name> or --profile <name>; only whitelisted tools+ops registered"
+  - dcg .toml pattern packs block subshell escalation, docker misuse, eval injection
+  - Reinforced Agent reviewer fires for DANGEROUS tier before execute; uses light.sock default
+  - harnessIntervention(ctx, msg) -> ctx.ui.notify pattern used uniformly for scaffolding overrides
+references:
+  - "memory-bank/systemPatterns.md#defense-in-depth-pattern"
+  - "arxiv:2604.27233 (Reinforced Agent)"
