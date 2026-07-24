@@ -1,0 +1,1 @@
+{"id":"schema-04f8","name":"agent-context","requiredSections":["role"],"optionalSections":["tools","context","constraints"],"createdAt":"2026-07-24T21:31:21.453Z","updatedAt":"2026-07-24T21:31:21.453Z"}
