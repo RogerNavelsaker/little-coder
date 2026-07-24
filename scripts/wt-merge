@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Merge through Worktrunk, then verify every state transition before reporting success.
+branch="$(git branch --show-current)"
+if [[ -z "$branch" || "$branch" == "main" ]]; then
+	printf '%s\n' "scripts/wt-merge must run from a feature worktree branch." >&2
+	exit 1
+fi
+
+head="$(git rev-parse HEAD)"
+git_dir="$(git rev-parse --absolute-git-dir)"
+target="${1:-main}"
+
+wt merge --yes "$target"
+
+main_path="$(git --git-dir="$git_dir" worktree list --porcelain | awk -v target="refs/heads/$target" '
+	/^worktree / { path=$2 }
+	/^branch / && $2 == target { print path; exit }
+')"
+if [[ -z "$main_path" ]]; then
+	printf 'Cannot locate target worktree for %s.\n' "$target" >&2
+	exit 1
+fi
+
+for _ in {1..20}; do
+	if git --git-dir="$git_dir" merge-base --is-ancestor "$head" "refs/heads/$target" \
+		&& ! git --git-dir="$git_dir" show-ref --verify --quiet "refs/heads/$branch" \
+		&& ! git --git-dir="$git_dir" worktree list --porcelain | awk '/^branch / { print $2 }' | grep -Fxq "refs/heads/$branch"; then
+		printf 'Verified: %s is in %s and its worktree/branch are removed.\n' "$head" "$target"
+		exit 0
+	fi
+	sleep 0.25
+done
+
+printf 'Merge completed without cleanup verification. Inspect with: wt list --full\n' >&2
+exit 1

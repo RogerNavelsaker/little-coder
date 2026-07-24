@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v terrarium >/dev/null 2>&1; then
+  echo "Terrarium CLI is not on PATH. Run through dx/flox." >&2
+  exit 1
+fi
+
+exec terrarium "$@"

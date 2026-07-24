@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export QUIET=1
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+if [ "${1:-}" = "-d" ] && [ -n "${2:-}" ]; then
+  repo="$(realpath "$2")"
+  shift 2
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: fx [-d <path>] <command> [args]
+
+Runs commands through `flox activate -d <path> --`.
+
+Flox management conveniences:
+  install, remove, uninstall, upgrade, list, search, show
+
+Examples:
+  fx -d ../main tr triage
+  fx -d ../main sd create --help
+  fx install ripgrep
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  "")
+    usage >&2
+    exit 2
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  install|remove|uninstall|upgrade|list|search|show)
+    exec flox "$cmd" -d "$repo" "${@:2}"
+    ;;
+  *)
+    cd -- "$repo"
+    export FLOX_ENV_PROJECT="$repo"
+    exec flox activate -d "$repo" -- "$@"
+    ;;
+esac

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+branch="$(git branch --show-current)"
+if [[ -z "$branch" || "$branch" == main ]]; then
+  echo "scripts/wt-cleanup must run from a feature worktree branch." >&2
+  exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "Refusing cleanup: worktree is dirty." >&2
+  exit 1
+fi
+git fetch origin --prune >/dev/null
+if ! git merge-base --is-ancestor HEAD origin/main; then
+  echo "Refusing cleanup: $branch is not merged into origin/main." >&2
+  echo "Use bun run ship for remote integration, or bun run wt:merge for local integration." >&2
+  exit 1
+fi
+wt remove --foreground "$branch"

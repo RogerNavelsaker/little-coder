@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+git_dir="$(git rev-parse --absolute-git-dir)"
+target="${1:-origin/main}"
+failures=0
+git fetch origin --prune >/dev/null
+
+main_path="$(git --git-dir="$git_dir" worktree list --porcelain | awk -v target="refs/heads/main" '
+  /^worktree / { path=$2 }
+  /^branch / && $2 == target { print path; exit }
+')"
+if [[ -z "$main_path" ]]; then echo "FAIL: main worktree is missing" >&2; exit 1; fi
+if [[ -n "$(git -C "$main_path" status --porcelain)" ]]; then
+  echo "FAIL: main worktree is dirty: $main_path" >&2; failures=1
+fi
+if ! git --git-dir="$git_dir" merge-base --is-ancestor main "$target"; then
+  echo "FAIL: local main is behind $target" >&2; failures=1
+fi
+if ! git --git-dir="$git_dir" merge-base --is-ancestor "$target" main; then
+  echo "FAIL: local main diverges from $target" >&2; failures=1
+fi
+
+while read -r branch path; do
+  [[ "$branch" == main ]] && continue
+  if git --git-dir="$git_dir" merge-base --is-ancestor "refs/heads/$branch" "$target"; then
+    echo "STALE: $branch ($path) is already merged into $target"
+    failures=1
+  fi
+done < <(git --git-dir="$git_dir" worktree list --porcelain | awk '
+  /^worktree / { path=$2 }
+  /^branch / { sub("refs/heads/", "", $2); print $2, path }
+')
+
+if (( failures )); then echo "Worktree doctor found issues. Run: wt list --full" >&2; exit 1; fi
+echo "Worktree doctor passed: main is clean and synchronized; no merged worktrees remain."

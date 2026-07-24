@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+config="$root/.config/workspace.toml"
+command="${1:-}"
+[ -n "$command" ] || { echo 'Usage: wx <wt-command> --repo <name> [wt args...]' >&2; exit 2; }
+shift
+
+repo_name=""
+args=()
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--repo" ] && [ "$#" -ge 2 ]; then
+    repo_name="$2"
+    shift 2
+  else
+    args+=("$1")
+    shift
+  fi
+done
+
+[ -n "$repo_name" ] || { echo "wx: --repo is required for '$command'" >&2; exit 2; }
+
+relative="$(awk -v wanted="$repo_name" '
+  /^\[\[repositories\]\]$/ { in_repo=1; name=""; path="" }
+  /^name = / { value=$0; sub(/^name = "/, "", value); sub(/"$/, "", value); if (in_repo) name=value }
+  /^path = / { value=$0; sub(/^path = "/, "", value); sub(/"$/, "", value); if (in_repo) path=value }
+  in_repo && name == wanted && path != "" { print path; exit }
+' "$config")"
+[ -n "$relative" ] || { echo "wx: unknown repository '$repo_name'" >&2; exit 1; }
+
+wrapper="$(realpath "$root/$relative")"
+[ -d "$wrapper/.git" ] || { echo "wx: repository wrapper missing: $wrapper" >&2; exit 1; }
+
+exec wt -C "$wrapper" "$command" "${args[@]}"

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DIRENV_LOG_FORMAT=""
+export QUIET=1
+
+repo="$(
+  git rev-parse --show-toplevel 2>/dev/null ||
+    { [ -n "${FLOX_ENV_PROJECT:-}" ] && printf '%s\n' "$FLOX_ENV_PROJECT"; } ||
+    pwd
+)"
+
+if [ "${1:-}" = "-d" ] && [ -n "${2:-}" ]; then
+  repo="$(realpath "$2")"
+  shift 2
+fi
+
+cmd="${1:-}"
+real_direnv="$(command -v direnv | grep -v "/scripts/direnv" | head -n 1 || echo direnv)"
+
+case "$cmd" in
+  allow|permit|grant|block|deny|disallow|revoke|edit)
+    exec "$real_direnv" "$cmd" "$repo"
+    ;;
+  reload|status|prune|version|help)
+    exec "$real_direnv" "$cmd"
+    ;;
+  "")
+    echo "Usage: dx [-d <path>] <command> [args]" >&2
+    exit 2
+    ;;
+  *)
+	    command_path="$1"
+	    if [ -x "$repo/scripts/$command_path" ]; then
+	      command_path="$repo/scripts/$command_path"
+	    fi
+	    cd -- "$repo"
+	    export FLOX_ENV_PROJECT="$repo"
+	    exec "$real_direnv" exec "$repo" "$command_path" "${@:2}"
+    ;;
+esac
