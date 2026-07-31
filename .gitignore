@@ -41,3 +41,7 @@ brainstorm_outputs/
 
 # Release build output — distributed via GitHub Releases, not committed
 dist/
+coverage/
+test-outputs/
+.pi-context/
+all_files.txt

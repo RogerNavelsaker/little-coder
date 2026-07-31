@@ -215,13 +215,13 @@ function computeDiff(oldContent: string, newContent: string, filePath = ''): str
   try {
     writeFileSync(oldFile, oldContent, 'utf-8');
     writeFileSync(newFile, newContent, 'utf-8');
-    const result = spawnSync(LINEHASH_BIN, ['diff', oldFile, newFile], {
+    const result = spawnSync('diff', ['-u', oldFile, newFile], {
       cwd: process.cwd(),
       env: { ...process.env },
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     });
-    if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return '';
+    if (result.status === null || result.status > 1 || !result.stdout || result.stdout.length === 0) return '';
     return result.stdout.toString().trim();
   } catch {
     return '';
@@ -597,7 +597,7 @@ async function executeSingleFileEdits(
             afterAnchors: null,
             fuzzy: true,
           };
-          return { content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: true, linesChanged: fuzzyResult.linesChanged, diff: fuzzyResult.diff }] } }).text }], details };
+          return { content: [{ type: 'text', text: fuzzyResult.diff }], details };
         }
         const afterParsed = parseLineHash(afterResult.stdout);
         const details: Record<string, unknown> = {
@@ -611,7 +611,7 @@ async function executeSingleFileEdits(
           afterAnchors: afterParsed.records.map(r => ({ line: r.line, anchor: r.anchor })),
           fuzzy: true,
         };
-        return { content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: true, linesChanged: fuzzyResult.linesChanged, diff: fuzzyResult.diff }] } }).text }], details };
+        return { content: [{ type: 'text', text: fuzzyResult.diff }], details };
       }
     }
   }
@@ -630,7 +630,7 @@ async function executeSingleFileEdits(
       ...(isBatch ? { editResults } : {}),
     };
     return {
-      content: [{ type: 'text', text: encodeToon({ edit: { [absolutePath]: [{ applied: false, linesChanged, diff: unchanged ? null : diffText }] } }).text }],
+      content: [{ type: 'text', text: diffText }],
       details: dryDetails,
     };
   }
@@ -675,38 +675,123 @@ async function executeSingleFileEdits(
 }
 
 /**
+ * Exported executeEditOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeEditOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() },
+  options: EditToolOptions = {}
+) {
+  const dryRun = params.dry_run === true || params.dry_run === 'true';
+  const globalFuzzy = resolveBool(params.fuzzy, true);
+
+  let rawEdits: EditItem[] = [];
+  if (Array.isArray(params.ops)) {
+    rawEdits = params.ops;
+  } else if (Array.isArray(params.edits)) {
+    rawEdits = params.edits;
+  } else if (params.path) {
+    rawEdits = [{
+      path: params.path,
+      old_text: params.old_text,
+      new_text: params.new_text,
+      fuzzy: params.fuzzy,
+    }];
+  }
+
+  if (!rawEdits || rawEdits.length === 0) {
+    return {
+      content: [{ type: 'text', text: error('invalid-params', 'ops[] or edits[] is required (e.g. ops: [{path, old_text, new_text}])', { tool: 'edit' }).message }],
+      isError: true,
+      details: { errorType: 'invalid-params' },
+    };
+  }
+
+  // Group edits by path (preserving order), then process each group
+  const groups = new Map<string, EditItem[]>();
+  const groupOrder: string[] = [];
+  for (const item of rawEdits) {
+    const requestedPath = item.path.startsWith('@') ? item.path.slice(1) : item.path;
+    const absolutePath = resolve(ctx.cwd, requestedPath);
+    if (!groups.has(absolutePath)) {
+      groups.set(absolutePath, []);
+      groupOrder.push(absolutePath);
+    }
+    groups.get(absolutePath)!.push({ ...item, path: absolutePath });
+  }
+
+  // Single-path shortcut: existing single-file logic
+  if (groupOrder.length === 1 && !Array.isArray(params.ops)) {
+    const absolutePath = groupOrder[0];
+    const fileEdits = groups.get(absolutePath)!;
+    return executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx) as any;
+  }
+
+  // Multi-file: apply each group, collect results
+  const results: Array<{ path: string; result: Record<string, unknown> }> = [];
+  for (const absolutePath of groupOrder) {
+    const fileEdits = groups.get(absolutePath)!;
+    const r = await executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx);
+    results.push({ path: absolutePath, result: r as Record<string, unknown> });
+  }
+
+  const allApplied = results.every(r => (r.result as any).details?.applied !== false);
+  const totalChanged = results.reduce((sum, r) => sum + ((r.result as any).details?.linesChanged ?? 0), 0);
+
+  const editMap: Record<string, unknown> = {};
+  for (const r of results) {
+    const d = (r.result as any).details ?? {};
+    editMap[r.path] = [{ applied: d.applied, linesChanged: d.linesChanged, diff: d.diff ?? '' }];
+  }
+
+  return {
+    content: [{ type: 'text' as const, text: encodeToon({ edit: editMap }).text }],
+    details: {
+      applied: allApplied && !dryRun,
+      dry_run: dryRun,
+      linesChanged: totalChanged,
+      files: results.map(r => ({
+        path: (r.result as any).details?.path ?? r.path,
+        applied: (r.result as any).details?.applied,
+        linesChanged: (r.result as any).details?.linesChanged ?? 0,
+        editResults: (r.result as any).details?.editResults,
+        diff: (r.result as any).details?.diff ?? null,
+      })),
+    },
+  };
+}
+
+/**
  * Register the edit tool with pi.
+ *
+ * @param pi - Pi extension API
+ * @param options - Optional configuration
  */
 export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}) {
   const editItemSchema = Type.Object({
     path: Type.String({ description: 'File path to edit (relative or absolute)' }),
-    old_text: Type.String({ description: 'Exact text to find' }),
+    old_text: Type.Optional(Type.String({ description: 'Exact text snippet to replace' })),
     new_text: Type.String({ description: 'Replacement text' }),
-    mode: Type.Optional(Type.Union([
-      Type.Literal('replace', { description: 'Default: find and replace exact text' }),
-      Type.Literal('replace_by_anchor', { description: 'Locate line by anchor, replace old_text within it' }),
+    line: Type.Optional(Type.Union([
+      Type.Number({ description: '1-indexed line number hint for old_text' }),
+      Type.String({ description: '1-indexed line number hint for old_text' }),
     ])),
-    anchor: Type.Optional(Type.String({ description: 'Linehash anchor (required for replace_by_anchor mode)' })),
-    occurrence: Type.Optional(Type.Union([
-      Type.Literal('first', { description: 'Replace first occurrence (default)' }),
-      Type.Literal('all', { description: 'Replace all occurrences' }),
+    after_anchor: Type.Optional(Type.String({ description: 'Anchor hash to position edit relative to' })),
+    fuzzy: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Allow fuzzy (normalized) matching on exact-match miss' }),
+      Type.String({ description: 'Allow fuzzy (normalized) matching on exact-match miss' }),
     ])),
-    all_occurrences: Type.Optional(Type.Union([
-      Type.Boolean({ description: 'Replace all occurrences' }),
-      Type.String({ description: 'Replace all occurrences' }),
-    ])),
-    fuzzy: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Fall back to fuzzy matching on exact-match miss (default: true)' }),
-        Type.String({ description: 'Fall back to fuzzy matching on exact-match miss (default: true)' }),
-      ], { description: 'When true, try Unicode/whitespace-normalized fuzzy match if exact match fails' })
-    ),
   });
 
   const editSchema = Type.Object({
-    edits: Type.Array(editItemSchema, {
-      description: 'Edits to apply. Single edit: [{path, old_text, new_text}]. Multi-file: [{path: "a.ts", ...}, {path: "b.ts", ...}]. Same-file batch: multiple items with the same path.',
-    }),
+    ops: Type.Optional(Type.Array(editItemSchema, { description: 'Edit operations array. Single: ops: [{path, old_text, new_text}]. Multi: ops: [{path, ...}, ...]' })),
+    edits: Type.Optional(Type.Array(editItemSchema, { description: 'Edits array (alias for ops)' })),
+    path: Type.Optional(Type.String({ description: 'File path (direct parameter)' })),
+    old_text: Type.Optional(Type.String({ description: 'Old text (direct parameter)' })),
+    new_text: Type.Optional(Type.String({ description: 'New text (direct parameter)' })),
     dry_run: Type.Optional(Type.Union([
       Type.Boolean({ description: 'Preview only, do not write' }),
       Type.String({ description: 'Preview only, do not write' }),
@@ -722,12 +807,10 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
     name: 'edit',
     label: 'Edit',
     description:
-      'Make surgical text replacements in files. Always pass edits[]. '
-      + 'Single edit: edits: [{path, old_text, new_text}]. '
-      + 'Multi-file or same-file batch: edits: [{path, ...}, {path, ...}].',
+      'Make surgical text replacements in files. Pass ops: [{path, old_text, new_text}].',
     promptSnippet: 'Edit files with surgical text replacements',
     promptGuidelines: [
-      'Always pass edits: [{path, old_text, new_text}].',
+      'Pass ops: [{path, old_text, new_text}].',
       'old_text must match exactly (including whitespace and indentation).',
       'fuzzy: true (default) falls back to normalized matching on exact-match miss.',
       'fuzzy: false preserves strict exact-match behavior.',
@@ -736,70 +819,8 @@ export function registerEditTool(pi: ExtensionAPI, options: EditToolOptions = {}
       'Use dry_run: true to preview changes before applying.',
     ],
     parameters: editSchema,
-    async execute(_toolCallId, params: EditToolParams, _signal, _onUpdate, ctx) {
-      if (!params.edits || params.edits.length === 0) {
-        return {
-          content: [{ type: 'text', text: error('invalid-params', 'edits[] is required (e.g. edits: [{path, old_text, new_text}])', { tool: 'edit' }).message }],
-          isError: true,
-          details: { errorType: 'invalid-params' },
-        };
-      }
-
-      const dryRun = params.dry_run === true || params.dry_run === 'true';
-      const globalFuzzy = resolveBool(params.fuzzy, true);
-
-      // Group edits by path (preserving order), then process each group
-      const groups = new Map<string, EditItem[]>();
-      const groupOrder: string[] = [];
-      for (const item of params.edits) {
-        const requestedPath = item.path.startsWith('@') ? item.path.slice(1) : item.path;
-        const absolutePath = resolve(ctx.cwd, requestedPath);
-        if (!groups.has(absolutePath)) {
-          groups.set(absolutePath, []);
-          groupOrder.push(absolutePath);
-        }
-        groups.get(absolutePath)!.push({ ...item, path: absolutePath });
-      }
-
-      // Single-path shortcut: existing single-file logic
-      if (groupOrder.length === 1) {
-        const absolutePath = groupOrder[0];
-        const fileEdits = groups.get(absolutePath)!;
-        return executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx) as any;
-      }
-
-      // Multi-file: apply each group, collect results
-      const results: Array<{ path: string; result: Record<string, unknown> }> = [];
-      for (const absolutePath of groupOrder) {
-        const fileEdits = groups.get(absolutePath)!;
-        const r = await executeSingleFileEdits(absolutePath, fileEdits, dryRun, options, globalFuzzy, ctx);
-        results.push({ path: absolutePath, result: r as Record<string, unknown> });
-      }
-
-      const allApplied = results.every(r => (r.result as any).details?.applied !== false);
-      const totalChanged = results.reduce((sum, r) => sum + ((r.result as any).details?.linesChanged ?? 0), 0);
-
-      const editMap: Record<string, unknown> = {};
-      for (const r of results) {
-        const d = (r.result as any).details ?? {};
-        editMap[r.path] = [{ applied: d.applied, linesChanged: d.linesChanged, diff: d.diff ?? '' }];
-      }
-
-      return {
-        content: [{ type: 'text' as const, text: encodeToon({ edit: editMap }).text }],
-        details: {
-          applied: allApplied && !dryRun,
-          dry_run: dryRun,
-          linesChanged: totalChanged,
-          files: results.map(r => ({
-            path: (r.result as any).details?.path ?? r.path,
-            applied: (r.result as any).details?.applied,
-            linesChanged: (r.result as any).details?.linesChanged ?? 0,
-            editResults: (r.result as any).details?.editResults,
-            diff: (r.result as any).details?.diff ?? null,
-          })),
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeEditOp(toolCallId, params, signal, onUpdate as any, ctx, options) as any;
     },
 
     renderResult(result, { expanded }, theme, _context) {

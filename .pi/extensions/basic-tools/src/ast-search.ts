@@ -252,9 +252,176 @@ async function getAnchorsForLines(
 /**
  * Register the ast_search tool with pi.
  */
+/**
+ * Exported executeAstSearchOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeAstSearchOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeAstSearchOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeAstSearchOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const astMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = opSpec.pattern ?? `search_${i}`;
+      const d = (r as any).details ?? {};
+      astMap[key] = d.matches ?? [];
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ ast_search: astMap }).text }],
+      details: {
+        searches: results.map(r => (r as any).details),
+        totalSearches: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const pattern = params.pattern ?? '';
+  const searchPath = params.path
+    ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path)
+    : ctx.cwd;
+  const language = params.language || null;
+  const glob = params.glob || null;
+  const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
+  const mode = (params.mode ?? 'toon') as ToonMode;
+
+  const { settings, warnings } = loadSettings(ctx.cwd);
+  const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
+
+  const maxMatches = settings.astSearchMaxMatches;
+  const effectiveLimit = limit !== undefined ? Math.min(limit, maxMatches) : maxMatches;
+
+  if (!existsSync(searchPath)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'ast_search', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'not-found', path: searchPath },
+    };
+  }
+
+  const binPath = getAstGrepBin();
+
+  const whichResult = spawnSync('which', [binPath], {
+    cwd: process.cwd(),
+    env: { ...process.env },
+    timeout: 5000,
+  });
+  if (whichResult.status !== 0) {
+    return {
+      content: [{ type: 'text', text: error('binary-failed', 'ast-grep is not installed or not in PATH', { tool: 'ast_search' }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed' },
+    };
+  }
+
+  let agResult: { stdout: string; stderr: string; exitCode: number };
+  try {
+    agResult = await runAstGrep(binPath, pattern, searchPath, { language: language || undefined, glob: glob || undefined });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `ast-grep execution failed: ${msg}`, { tool: 'ast_search', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: searchPath, stderr: msg },
+    };
+  }
+
+  if (agResult.exitCode > 1) {
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `ast-grep exited ${agResult.exitCode}: ${agResult.stderr.trim()}`, { tool: 'ast_search', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: searchPath, exitCode: agResult.exitCode, stderr: agResult.stderr.trim() },
+    };
+  }
+
+  const allMatches = parseAstGrepOutput(agResult.stdout);
+  const totalMatches = allMatches.length;
+  const returnedMatches = Math.min(totalMatches, effectiveLimit);
+  const truncated = totalMatches > effectiveLimit;
+  const agMatches = allMatches.slice(0, returnedMatches);
+
+  const matchesByFile = new Map<string, AstMatch[]>();
+  const fileLines = new Map<string, Set<number>>();
+
+  for (const m of agMatches) {
+    if (!matchesByFile.has(m.file)) {
+      matchesByFile.set(m.file, []);
+      fileLines.set(m.file, new Set());
+    }
+    matchesByFile.get(m.file)!.push(m);
+    fileLines.get(m.file)!.add(m.range.start.line);
+  }
+
+  const fileAnchors = new Map<string, Map<number, string>>();
+  for (const [filePath, lineSet] of fileLines) {
+    fileAnchors.set(filePath, await getAnchorsForLines(filePath, lineSet));
+  }
+
+  for (const m of agMatches) {
+    const anchors = fileAnchors.get(m.file);
+    if (anchors) {
+      const anchor = anchors.get(m.range.start.line);
+      if (anchor !== undefined) {
+        m.anchor = anchor;
+      } else {
+        m.anchor_error = `linehash did not return anchor for line ${m.range.start.line}`;
+      }
+    } else {
+      m.anchor_error = 'linehash failed for this file';
+    }
+  }
+
+  const recoveryHint = totalMatches > effectiveLimit
+    ? `Narrow the search: specify a subdirectory, use a more specific pattern, or restrict with glob/language.`
+    : '';
+
+  const contentMatches = agMatches.map(m => ({ file: m.file, line: m.range?.start?.line ?? null, text: m.text, anchor: m.anchor ?? null }));
+  const contentToon = encodeToon({ ast_search: { [pattern]: contentMatches } });
+
+  return {
+    content: [{ type: 'text', text: contentToon.text }],
+    details: {
+      query: pattern,
+      cwd: ctx.cwd,
+      path: searchPath,
+      language,
+      glob,
+      totalMatches,
+      returnedMatches,
+      truncated,
+      matches: contentMatches,
+      ...(settingsWarning ? { settingsWarning } : {}),
+    },
+  };
+}
+
+/**
+ * Register the ast_search tool with pi.
+ */
 export function registerAstSearchTool(pi: ExtensionAPI) {
+  const astSearchItemSchema = Type.Object({
+    pattern: Type.Optional(Type.String({ description: 'AST pattern to search for' })),
+    path: Type.Optional(Type.String()),
+    language: Type.Optional(Type.String()),
+    glob: Type.Optional(Type.String()),
+    limit: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+  });
+
   const schema = Type.Object({
-    pattern: Type.String({ description: 'AST pattern to search for (e.g., console.log($A))' }),
+    ops: Type.Optional(Type.Array(astSearchItemSchema, { description: 'AST search operations array. Single: ops: [{pattern: "foo($A)"}]. Multi: ops: [{pattern: "foo($A)"}, {pattern: "bar($B)"}]' })),
+    pattern: Type.Optional(Type.String({ description: 'AST pattern to search for (e.g., console.log($A))' })),
     path: Type.Optional(
       Type.String({ description: 'File or directory to search (defaults to cwd)' })
     ),
@@ -285,191 +452,20 @@ export function registerAstSearchTool(pi: ExtensionAPI) {
     name: 'ast_search',
     label: 'AST Search',
     description:
-      'Syntax-aware code search using AST patterns. '
-      + 'Searches code structure instead of plain text, enabling queries about imports, '
-      + 'calls, function shapes, and object patterns. Returns structured '
-      + 'matches with ranges, metavariables, and line anchors. '
-      + 'Returns error if the AST backend is unavailable.',
+      'Syntax-aware code search using AST patterns. Pass ops: [{pattern: "..."}].',
     promptSnippet: 'ast_search(pattern: "console.log($A)")',
     promptGuidelines: [
+      'Pass ops: [{pattern: "..."}].',
       'Use ast_search for syntax-aware code searches that need AST context.',
       'Use metavariables like $A, $B to match variable parts of patterns.',
       'Specify language for precise parsing (typescript, javascript, rust, etc.).',
       'Use glob to restrict search to specific file patterns.',
       'Use limit to cap the number of results.',
       'Use returned line anchors when a match will be edited.',
-      'Large result sets are bounded; use narrowing hints to focus.',
     ],
     parameters: schema,
-    async execute(_toolCallId, params: AstSearchParams, _signal, _onUpdate, ctx) {
-      const pattern = params.pattern;
-      const searchPath = params.path
-        ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path)
-        : ctx.cwd;
-      const language = params.language || null;
-      const glob = params.glob || null;
-      const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
-      const mode = (params.mode ?? 'toon') as ToonMode;
-
-      // Load settings
-      const { settings, warnings } = loadSettings(ctx.cwd);
-      const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
-
-      // Phase 20: Visible match budget
-      const maxMatches = settings.astSearchMaxMatches;
-      const effectiveLimit = limit !== undefined ? Math.min(limit, maxMatches) : maxMatches;
-
-      // Validate search path
-      if (!existsSync(searchPath)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'ast_search', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'not-found', path: searchPath },
-        };
-      }
-
-      // Resolve binary path (dynamic for test injection)
-      const binPath = getAstGrepBin();
-
-      // Check ast-grep binary availability
-      const whichResult = spawnSync('which', [binPath], {
-        cwd: process.cwd(),
-        env: { ...process.env },
-        timeout: 5000,
-      });
-      if (whichResult.status !== 0) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', 'ast-grep is not installed or not in PATH', { tool: 'ast_search' }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed' },
-        };
-      }
-
-      // Execute ast-grep
-      let agResult: { stdout: string; stderr: string; exitCode: number };
-      try {
-        agResult = await runAstGrep(binPath, pattern, searchPath, { language: language || undefined, glob: glob || undefined });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `ast-grep execution failed: ${msg}`, { tool: 'ast_search', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, stderr: msg },
-        };
-      }
-
-      if (agResult.exitCode > 1) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `ast-grep exited ${agResult.exitCode}: ${agResult.stderr.trim()}`, { tool: 'ast_search', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode: agResult.exitCode, stderr: agResult.stderr.trim() },
-        };
-      }
-
-      // Parse ast-grep output
-      const allMatches = parseAstGrepOutput(agResult.stdout);
-
-      // Apply global limit in JS (capped by visible budget)
-      const totalMatches = allMatches.length;
-      const returnedMatches = Math.min(totalMatches, effectiveLimit);
-      const truncated = totalMatches > effectiveLimit;
-      const agMatches = allMatches.slice(0, returnedMatches);
-
-      // Group returned matches by file and get anchors for matched lines
-      const matchesByFile = new Map<string, AstMatch[]>();
-      const fileLines = new Map<string, Set<number>>();
-
-      for (const m of agMatches) {
-        if (!matchesByFile.has(m.file)) {
-          matchesByFile.set(m.file, []);
-          fileLines.set(m.file, new Set());
-        }
-        matchesByFile.get(m.file)!.push(m);
-        fileLines.get(m.file)!.add(m.range.start.line);
-      }
-
-      // Get anchors for matched lines
-      const fileAnchors = new Map<string, Map<number, string>>();
-      for (const [filePath, lineSet] of fileLines) {
-        fileAnchors.set(filePath, await getAnchorsForLines(filePath, lineSet));
-      }
-
-      // Enrich returned matches with anchors
-      for (const m of agMatches) {
-        const anchors = fileAnchors.get(m.file);
-        if (anchors) {
-          const anchor = anchors.get(m.range.start.line);
-          if (anchor !== undefined) {
-            m.anchor = anchor;
-          } else {
-            m.anchor_error = `linehash did not return anchor for line ${m.range.start.line}`;
-          }
-        } else {
-          m.anchor_error = 'linehash failed for this file';
-        }
-      }
-
-      // Add recovery hint
-      const recoveryHint = totalMatches > effectiveLimit
-        ? `Narrow the search: specify a subdirectory, use a more specific pattern, or restrict with glob/language.`
-        : '';
-
-      const recoveryHintText = totalMatches > effectiveLimit
-        ? `Narrow the search: specify a subdirectory, use a more specific pattern, or restrict with glob/language.`
-        : '';
-
-      // --- LLM-facing JSON/TOON in details ---
-      const llmResult: AstSearchResult = {
-        query: pattern,
-        cwd: ctx.cwd,
-        path: searchPath,
-        language,
-        glob,
-        backend: 'ast-grep+nu',
-        command: [
-          binPath,
-          'run',
-          '--pattern',
-          pattern,
-          ...(language ? ['--lang', language] : []),
-          ...(glob ? ['--globs', glob] : []),
-          '--json',
-          searchPath,
-        ],
-        matches: agMatches.map(m => ({
-          file: m.file,
-          text: m.text,
-          language: m.language,
-          range: m.range,
-          metaVariables: m.metaVariables,
-          anchor: m.anchor,
-          anchor_error: m.anchor_error,
-        })),
-        totalMatches,
-        returnedMatches,
-        truncated,
-        visibleBudget: settings.astSearchMaxMatches,
-        recoveryHint,
-        ...(settingsWarning ? { settingsWarning } : {}),
-      };
-      // --- content.text: matches JSON → TOON ---
-      const contentMatches = agMatches.map(m => ({ file: m.file, line: m.range?.start?.line ?? null, text: m.text, anchor: m.anchor ?? null }));
-      const contentToon = encodeToon({ ast_search: { [pattern]: contentMatches } });
-
-      return {
-        content: [{ type: 'text', text: contentToon.text }],
-        details: {
-          query: pattern,
-          cwd: ctx.cwd,
-          path: searchPath,
-          language,
-          glob,
-          totalMatches,
-          returnedMatches,
-          truncated,
-          matches: contentMatches,
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeAstSearchOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0);

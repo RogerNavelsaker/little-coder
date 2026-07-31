@@ -146,15 +146,188 @@ function formatInjectionBlock(packet: InjectPacket): {
 }
 
 /**
+ * Exported executeCtxInjectOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeCtxInjectOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeCtxInjectOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeCtxInjectOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const injectMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = opSpec.packetId ?? `packet_${i}`;
+      const d = (r as any).details ?? {};
+      injectMap[key] = d;
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ ctx_inject: injectMap }).text }],
+      details: {
+        injections: results.map(r => (r as any).details),
+        totalInjections: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const mode = (params.mode ?? 'json') as ToonMode;
+  const packetId = params.packetId ?? null;
+  const repoRoot = params.repoRoot || ctx.cwd;
+  const piContextDir = resolvePiContextDir(repoRoot);
+  const packetsPath = join(repoRoot, '.pi-context', 'packets.jsonl');
+
+  if (!piContextDir) {
+    const result: CtxInjectResult = {
+      packetId: '',
+      timestamp: new Date().toISOString(),
+      repoRoot,
+      gitCommit: null,
+      packetsPath,
+      found: false,
+      headingsIncluded: [],
+      source: 'ctx_inject',
+      backend: 'jsonl+nu',
+      mode,
+    };
+    const llmEncoded = encodeToon(result, { mode });
+    return {
+      content: [{ type: 'text', text: 'No .pi-context directory found. Run ctx_packet first.' }],
+      details: {
+        ...result,
+        tokenSavings: llmEncoded.tokenSavings,
+      },
+    };
+  }
+
+  const packets = readJsonl(packetsPath);
+
+  if (packets.length === 0) {
+    const result: CtxInjectResult = {
+      packetId: '',
+      timestamp: new Date().toISOString(),
+      repoRoot,
+      gitCommit: null,
+      packetsPath,
+      found: false,
+      headingsIncluded: [],
+      source: 'ctx_inject',
+      backend: 'jsonl+nu',
+      mode,
+    };
+    const llmEncoded = encodeToon(result, { mode });
+    return {
+      content: [{ type: 'text', text: 'No packets found. Run ctx_packet first.' }],
+      details: {
+        ...result,
+        tokenSavings: llmEncoded.tokenSavings,
+      },
+    };
+  }
+
+  let packet: InjectPacket | null = null;
+  if (packetId) {
+    const found = packets.find(p => (p.packetId as string) === packetId);
+    if (found) {
+      packet = {
+        packetId: found.packetId as string,
+        timestamp: found.timestamp as string,
+        repoRoot: found.repoRoot as string,
+        gitCommit: (found.gitCommit as string) ?? null,
+        sourceEventIds: found.sourceEventIds as string[],
+        summary: found.summary as string,
+        sections: found.sections as PacketSections,
+        source: found.source as string,
+        backend: found.backend as string,
+      };
+    }
+  } else {
+    const last = packets[packets.length - 1];
+    packet = {
+      packetId: last.packetId as string,
+      timestamp: last.timestamp as string,
+      repoRoot: last.repoRoot as string,
+      gitCommit: (last.gitCommit as string) ?? null,
+      sourceEventIds: last.sourceEventIds as string[],
+      summary: last.summary as string,
+      sections: last.sections as PacketSections,
+      source: last.source as string,
+      backend: last.backend as string,
+    };
+  }
+
+  if (!packet) {
+    const result: CtxInjectResult = {
+      packetId: packetId || '',
+      timestamp: new Date().toISOString(),
+      repoRoot,
+      gitCommit: null,
+      packetsPath,
+      found: false,
+      headingsIncluded: [],
+      source: 'ctx_inject',
+      backend: 'jsonl+nu',
+      mode,
+    };
+    const llmEncoded = encodeToon(result, { mode });
+    return {
+      content: [{ type: 'text', text: `Packet ${packetId} not found in packets.jsonl.` }],
+      details: {
+        ...result,
+        tokenSavings: llmEncoded.tokenSavings,
+      },
+    };
+  }
+
+  const { text: textBlock, headings: headingsIncluded } = formatInjectionBlock(packet);
+
+  const result: CtxInjectResult = {
+    packetId: packet.packetId,
+    timestamp: packet.timestamp,
+    repoRoot: packet.repoRoot,
+    gitCommit: packet.gitCommit,
+    packetsPath,
+    found: true,
+    headingsIncluded,
+    source: 'ctx_inject',
+    backend: 'jsonl+nu',
+    mode,
+  };
+  const llmEncoded = encodeToon(result, { mode });
+
+  return {
+    content: [{ type: 'text', text: textBlock }],
+    details: {
+      ...result,
+      tokenSavings: llmEncoded.tokenSavings,
+    },
+  };
+}
+
+/**
  * Register the ctx_inject tool with pi.
  */
 export function registerCtxInjectTool(pi: ExtensionAPI) {
+  const ctxInjectItemSchema = Type.Object({
+    packetId: Type.Optional(Type.String()),
+    repoRoot: Type.Optional(Type.String()),
+    mode: Type.Optional(Type.String()),
+  });
+
   const schema = Type.Object({
+    ops: Type.Optional(Type.Array(ctxInjectItemSchema, { description: 'ctx_inject operations array' })),
     packetId: Type.Optional(
-      Type.Union([
-        Type.String({ description: 'Specific packet ID to inject' }),
-        Type.Null({ description: 'Use latest packet (default)' }),
-      ], { description: 'Specific packet to inject. If null, use the last entry in packets.jsonl.' })
+      Type.String({ description: 'Packet ID to read (e.g. "abc123def456"). Defaults to latest.' })
     ),
     repoRoot: Type.Optional(
       Type.String({ description: 'Directory containing .pi-context/ (defaults to ctx.cwd)' })
@@ -173,10 +346,10 @@ export function registerCtxInjectTool(pi: ExtensionAPI) {
     description:
       'Read a ctx_packet from .pi-context/packets.jsonl and produce an '
       + 'injection-ready text block using stable compaction template headings. '
-      + 'Use before handoff, compaction, restart, or review. '
-      + 'Does not write files or mutate the active Pi session.',
+      + 'Pass ops: [{packetId?: "..."}].',
     promptSnippet: 'ctx_inject(packetId: "abc123def456")',
     promptGuidelines: [
+      'Pass ops: [{packetId?: "..."}].',
       'Use ctx_inject to produce an injection-ready text block from a ctx_packet.',
       'ctx_inject reads packets.jsonl and produces text for manual copy.',
       'ctx_inject does not write files or mutate the active Pi session.',
@@ -184,147 +357,8 @@ export function registerCtxInjectTool(pi: ExtensionAPI) {
       'ctx_inject is a manual step — automation is deferred.',
     ],
     parameters: schema,
-    async execute(_toolCallId, params: CtxInjectParams, _signal, _onUpdate, ctx) {
-      const mode = (params.mode ?? 'json') as ToonMode;
-      const packetId = params.packetId ?? null;
-
-      // Resolve repo root
-      const repoRoot = params.repoRoot || ctx.cwd;
-      const piContextDir = resolvePiContextDir(repoRoot);
-      const packetsPath = join(repoRoot, '.pi-context', 'packets.jsonl');
-
-      // Case 1: No .pi-context directory
-      if (!piContextDir) {
-        const result: CtxInjectResult = {
-          packetId: '',
-          timestamp: new Date().toISOString(),
-          repoRoot,
-          gitCommit: null,
-          packetsPath,
-          found: false,
-          headingsIncluded: [],
-          source: 'ctx_inject',
-          backend: 'jsonl+nu',
-          mode,
-        };
-        const llmEncoded = encodeToon(result, { mode });
-        return {
-          content: [{ type: 'text', text: 'No .pi-context directory found. Run ctx_packet first.' }],
-          details: {
-            ...result,
-            tokenSavings: llmEncoded.tokenSavings,
-          },
-        };
-      }
-
-      // Read packets
-      const packets = readJsonl(packetsPath);
-
-      // Case 2: No packets in store
-      if (packets.length === 0) {
-        const result: CtxInjectResult = {
-          packetId: '',
-          timestamp: new Date().toISOString(),
-          repoRoot,
-          gitCommit: null,
-          packetsPath,
-          found: false,
-          headingsIncluded: [],
-          source: 'ctx_inject',
-          backend: 'jsonl+nu',
-          mode,
-        };
-        const llmEncoded = encodeToon(result, { mode });
-        return {
-          content: [{ type: 'text', text: 'No packets found. Run ctx_packet first.' }],
-          details: {
-            ...result,
-            tokenSavings: llmEncoded.tokenSavings,
-          },
-        };
-      }
-
-      // Select packet
-      let packet: InjectPacket | null = null;
-      if (packetId) {
-        const found = packets.find(p => (p.packetId as string) === packetId);
-        if (found) {
-          packet = {
-            packetId: found.packetId as string,
-            timestamp: found.timestamp as string,
-            repoRoot: found.repoRoot as string,
-            gitCommit: (found.gitCommit as string) ?? null,
-            sourceEventIds: found.sourceEventIds as string[],
-            summary: found.summary as string,
-            sections: found.sections as PacketSections,
-            source: found.source as string,
-            backend: found.backend as string,
-          };
-        }
-      } else {
-        // Latest packet = last line
-        const last = packets[packets.length - 1];
-        packet = {
-          packetId: last.packetId as string,
-          timestamp: last.timestamp as string,
-          repoRoot: last.repoRoot as string,
-          gitCommit: (last.gitCommit as string) ?? null,
-          sourceEventIds: last.sourceEventIds as string[],
-          summary: last.summary as string,
-          sections: last.sections as PacketSections,
-          source: last.source as string,
-          backend: last.backend as string,
-        };
-      }
-
-      // Case 3: Unknown packetId
-      if (!packet) {
-        const result: CtxInjectResult = {
-          packetId: packetId || '',
-          timestamp: new Date().toISOString(),
-          repoRoot,
-          gitCommit: null,
-          packetsPath,
-          found: false,
-          headingsIncluded: [],
-          source: 'ctx_inject',
-          backend: 'jsonl+nu',
-          mode,
-        };
-        const llmEncoded = encodeToon(result, { mode });
-        return {
-          content: [{ type: 'text', text: `Packet ${packetId} not found in packets.jsonl.` }],
-          details: {
-            ...result,
-            tokenSavings: llmEncoded.tokenSavings,
-          },
-        };
-      }
-
-      // Format injection block
-      const { text: textBlock, headings: headingsIncluded } = formatInjectionBlock(packet);
-
-      const result: CtxInjectResult = {
-        packetId: packet.packetId,
-        timestamp: packet.timestamp,
-        repoRoot: packet.repoRoot,
-        gitCommit: packet.gitCommit,
-        packetsPath,
-        found: true,
-        headingsIncluded,
-        source: 'ctx_inject',
-        backend: 'jsonl+nu',
-        mode,
-      };
-      const llmEncoded = encodeToon(result, { mode });
-
-      return {
-        content: [{ type: 'text', text: textBlock }],
-        details: {
-          ...result,
-          tokenSavings: llmEncoded.tokenSavings,
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeCtxInjectOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
   });
 }

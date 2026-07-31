@@ -317,11 +317,256 @@ function parseFdOutput(stdout: string): FindEntry[] {
 }
 
 /**
+ * Exported executeFindOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeFindOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeFindOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeFindOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const findMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = opSpec.pattern ?? opSpec.op ?? `op_${i}`;
+      const d = (r as any).details ?? {};
+      findMap[key] = d.entries ?? [];
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ find: findMap }).text }],
+      details: {
+        searches: results.map(r => (r as any).details),
+        totalSearches: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const op = (params.op ?? 'glob') as 'glob' | 'recent' | 'sized';
+  const pattern = params.pattern;
+  const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
+  const type = params.type;
+  const hidden = params.hidden === true || params.hidden === 'true';
+  const followSymlinks = params.follow_symlinks === true || params.follow_symlinks === 'true';
+  const exclude = typeof params.exclude === 'string' ? [params.exclude] : (params.exclude ?? []);
+  const maxDepth = typeof params.max_depth === 'string' ? parseInt(params.max_depth, 10) : params.max_depth;
+  const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
+  const sortBy = params.sortBy;
+  const modifiedSince = params.modifiedSince;
+  const minSize = params.minSize;
+  const maxSize = params.maxSize;
+  const mode = (params.mode ?? 'toon') as ToonMode;
+
+  // Load settings
+  const { settings: findSettings, warnings: findWarnings } = loadSettings(ctx.cwd);
+  const settingsWarning = findWarnings.length > 0 ? findWarnings.join('; ') : undefined;
+
+  // Apply default excludes unless explicitly overridden
+  const allExcludes = [...findSettings.defaultExcludes, ...exclude];
+
+  // Validate search path
+  if (!existsSync(searchPath)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'find', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'not-found', path: searchPath },
+    };
+  }
+
+  // --- recent op: fd --changed-within ---
+  if (op === 'recent') {
+    if (!modifiedSince) {
+      return {
+        content: [{ type: 'text', text: error('invalid-params', 'recent op requires modifiedSince (e.g. "1h", "30min", "2d")', { tool: 'find' }).message }],
+        isError: true,
+        details: { errorType: 'invalid-params' },
+      };
+    }
+    const result = await runFd(searchPath, { modifiedSince, hidden, followSymlinks, exclude: allExcludes, maxDepth });
+    if (result.exitCode > 0) {
+      return {
+        content: [{ type: 'text', text: error('binary-failed', `fd exited ${result.exitCode}: ${result.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
+        isError: true,
+        details: { errorType: 'binary-failed', path: searchPath, exitCode: result.exitCode, stderr: result.stderr.trim() },
+      };
+    }
+    const entries = parseFdOutput(result.stdout);
+    const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
+    const totalEntries = sorted.length;
+    const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
+    const truncated = limit !== undefined && totalEntries > limit;
+    const displayed = truncated ? sorted.slice(0, limit) : sorted;
+    const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
+    return {
+      content: [{ type: 'text', text: encodeToon({ find: { [`recent:${modifiedSince}`]: contentEntries } }).text }],
+      details: {
+        op: 'recent',
+        modifiedSince,
+        totalEntries,
+        returnedEntries,
+        truncated,
+        entries: contentEntries,
+        ...(settingsWarning ? { settingsWarning } : {}),
+      },
+    };
+  }
+
+  // --- sized op: fd --size ---
+  if (op === 'sized') {
+    const result = await runFd(searchPath, {
+      pattern: pattern ?? '*',
+      type, hidden, followSymlinks, exclude: allExcludes, maxDepth,
+      minSize, maxSize,
+    });
+    if (result.exitCode > 0) {
+      return {
+        content: [{ type: 'text', text: error('binary-failed', `fd exited ${result.exitCode}: ${result.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
+        isError: true,
+        details: { errorType: 'binary-failed', path: searchPath, exitCode: result.exitCode, stderr: result.stderr.trim() },
+      };
+    }
+    const entries = parseFdOutput(result.stdout);
+    const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
+    const totalEntries = sorted.length;
+    const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
+    const truncated = limit !== undefined && totalEntries > limit;
+    const displayed = truncated ? sorted.slice(0, limit) : sorted;
+    const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
+    const sizeLabel = minSize && maxSize ? `${minSize}..${maxSize}` : minSize ? `+${minSize}` : maxSize ? `-${maxSize}` : 'any';
+    return {
+      content: [{ type: 'text', text: encodeToon({ find: { [`sized:${sizeLabel}`]: contentEntries } }).text }],
+      details: {
+        op: 'sized',
+        minSize: minSize ?? null,
+        maxSize: maxSize ?? null,
+        totalEntries,
+        returnedEntries,
+        truncated,
+        entries: contentEntries,
+        ...(settingsWarning ? { settingsWarning } : {}),
+      },
+    };
+  }
+
+  // --- glob op (default): fd --glob ---
+  const throttle = makeThrottle(500);
+  const entries: FindEntry[] = [];
+  let killedEarly = false;
+  let fdStderr = '';
+
+  const { proc, kill } = runFdStream(searchPath, { pattern, type, hidden, followSymlinks, exclude: allExcludes, maxDepth }, (rawPath) => {
+    try {
+      const stat = statSync(rawPath);
+      let type: FindEntry['type'] = 'other';
+      if (stat.isFile()) type = 'file';
+      else if (stat.isDirectory()) type = 'directory';
+      else if (stat.isSymbolicLink()) type = 'symlink';
+      else if (stat.isSocket()) type = 'socket';
+      else if (stat.isFIFO()) type = 'pipe';
+
+      const depth = (rawPath.split('/').length - 1);
+      entries.push({ path: rawPath, type, size: stat.size, mtime: stat.mtimeMs, depth });
+    } catch {
+      const depth = (rawPath.split('/').length - 1);
+      entries.push({ path: rawPath, type: 'other', depth });
+    }
+
+    if (limit !== undefined && entries.length >= limit) {
+      killedEarly = true;
+      kill();
+    }
+
+    throttle(() => {
+      _onUpdate?.({
+        content: [],
+        details: { totalEntries: entries.length, truncated: false },
+      });
+    });
+  });
+
+  const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+    proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
+    proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
+  });
+  fdStderr = stderr;
+
+  if (exitCode > 0 && !killedEarly) {
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `fd exited ${exitCode}: ${fdStderr.trim()}`, { tool: 'find', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: fdStderr.trim() },
+    };
+  }
+
+  const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
+  const totalEntries = sorted.length;
+  const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
+  const truncated = killedEarly || (limit !== undefined && totalEntries > limit);
+  const displayed = truncated ? sorted.slice(0, limit) : sorted;
+  const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
+  const searchLabel = pattern ?? '.';
+
+  return {
+    content: [{ type: 'text', text: encodeToon({ find: { [searchLabel]: contentEntries } }).text }],
+    details: {
+      op: 'glob',
+      pattern: pattern ?? '',
+      sortBy: sortBy ?? null,
+      totalEntries,
+      returnedEntries,
+      truncated,
+      entries: contentEntries,
+      ...(settingsWarning ? { settingsWarning } : {}),
+    },
+  };
+}
+
+/**
  * Register the find tool with pi.
  */
-
 export function registerFindTool(pi: ExtensionAPI) {
+  const findItemSchema = Type.Object({
+    op: Type.Optional(
+      Type.Union([
+        Type.Literal('glob', { description: 'Glob file search (default)' }),
+        Type.Literal('recent', { description: 'Recently modified files search' }),
+        Type.Literal('sized', { description: 'File size filtering search' }),
+      ])
+    ),
+    pattern: Type.Optional(Type.String({ description: 'Glob pattern to match' })),
+    path: Type.Optional(Type.String({ description: 'Root directory to search (defaults to cwd)' })),
+    type: Type.Optional(
+      Type.Union([
+        Type.Literal('f', { description: 'Regular files only' }),
+        Type.Literal('d', { description: 'Directories only' }),
+        Type.Literal('l', { description: 'Symlinks only' }),
+        Type.Literal('s', { description: 'Sockets only' }),
+        Type.Literal('x', { description: 'Executable files only' }),
+      ])
+    ),
+    hidden: Type.Optional(Type.Union([Type.Boolean(), Type.String()])),
+    follow_symlinks: Type.Optional(Type.Union([Type.Boolean(), Type.String()])),
+    exclude: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())])),
+    max_depth: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    limit: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    sortBy: Type.Optional(Type.Union([Type.Literal('name'), Type.Literal('mtime'), Type.Literal('size')])),
+    modifiedSince: Type.Optional(Type.String()),
+    minSize: Type.Optional(Type.String()),
+    maxSize: Type.Optional(Type.String()),
+  });
+
   const findSchema = Type.Object({
+    ops: Type.Optional(Type.Array(findItemSchema, { description: 'Find operations array. Single: ops: [{pattern: "*.ts"}]. Multi: ops: [{pattern: "*.ts"}, {pattern: "*.json"}]' })),
     op: Type.Optional(
       Type.Union([
         Type.Literal('glob', { description: 'Glob-based file search (default)' }),
@@ -387,13 +632,10 @@ export function registerFindTool(pi: ExtensionAPI) {
     name: 'find',
     label: 'Find',
     description:
-      'Find files and directories by glob pattern. '
-      + 'Respects .gitignore by default. '
-      + 'Supports type filtering, hidden files, symlink following, '
-      + 'exclusion patterns, depth limits, and result limiting.',
+      'Find files and directories by glob pattern. Pass ops: [{pattern, path?, type?}].',
     promptSnippet: 'Find files by glob pattern',
     promptGuidelines: [
-      'Use find to discover files and directories by glob pattern.',
+      'Pass ops: [{pattern, path?, type?}].',
       'Use type: "f" for files only, type: "d" for directories only.',
       'Use hidden: true to include hidden files/directories.',
       'Use exclude to skip unwanted patterns (e.g. "node_modules").',
@@ -401,192 +643,8 @@ export function registerFindTool(pi: ExtensionAPI) {
       'Use limit to cap the number of results returned.',
     ],
     parameters: findSchema,
-    async execute(_toolCallId, params: FindToolParams, _signal, _onUpdate, ctx) {
-      const op = (params.op ?? 'glob') as 'glob' | 'recent' | 'sized';
-      const pattern = params.pattern;
-      const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
-      const type = params.type;
-      const hidden = params.hidden === true || params.hidden === 'true';
-      const followSymlinks = params.follow_symlinks === true || params.follow_symlinks === 'true';
-      const exclude = typeof params.exclude === 'string' ? [params.exclude] : (params.exclude ?? []);
-      const maxDepth = typeof params.max_depth === 'string' ? parseInt(params.max_depth, 10) : params.max_depth;
-      const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
-      const sortBy = params.sortBy;
-      const modifiedSince = params.modifiedSince;
-      const minSize = params.minSize;
-      const maxSize = params.maxSize;
-      const mode = (params.mode ?? 'toon') as ToonMode;
-
-      // Load settings
-      const { settings: findSettings, warnings: findWarnings } = loadSettings(ctx.cwd);
-      const settingsWarning = findWarnings.length > 0 ? findWarnings.join('; ') : undefined;
-
-      // Apply default excludes unless explicitly overridden
-      const allExcludes = [...findSettings.defaultExcludes, ...exclude];
-
-      // Validate search path
-      if (!existsSync(searchPath)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'find', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'not-found', path: searchPath },
-        };
-      }
-
-      // --- recent op: fd --changed-within ---
-      if (op === 'recent') {
-        if (!modifiedSince) {
-          return {
-            content: [{ type: 'text', text: error('invalid-params', 'recent op requires modifiedSince (e.g. "1h", "30min", "2d")', { tool: 'find' }).message }],
-            isError: true,
-            details: { errorType: 'invalid-params' },
-          };
-        }
-        const result = await runFd(searchPath, { modifiedSince, hidden, followSymlinks, exclude: allExcludes, maxDepth });
-        if (result.exitCode > 0) {
-          return {
-            content: [{ type: 'text', text: error('binary-failed', `fd exited ${result.exitCode}: ${result.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
-            isError: true,
-            details: { errorType: 'binary-failed', path: searchPath, exitCode: result.exitCode, stderr: result.stderr.trim() },
-          };
-        }
-        const entries = parseFdOutput(result.stdout);
-        const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
-        const totalEntries = sorted.length;
-        const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
-        const truncated = limit !== undefined && totalEntries > limit;
-        const displayed = truncated ? sorted.slice(0, limit) : sorted;
-        const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
-        return {
-          content: [{ type: 'text', text: encodeToon({ find: { [`recent:${modifiedSince}`]: contentEntries } }).text }],
-          details: {
-            op: 'recent',
-            modifiedSince,
-            totalEntries,
-            returnedEntries,
-            truncated,
-            entries: contentEntries,
-            ...(settingsWarning ? { settingsWarning } : {}),
-          },
-        };
-      }
-
-      // --- sized op: fd --size ---
-      if (op === 'sized') {
-        const result = await runFd(searchPath, {
-          pattern: pattern ?? '*',
-          type, hidden, followSymlinks, exclude: allExcludes, maxDepth,
-          minSize, maxSize,
-        });
-        if (result.exitCode > 0) {
-          return {
-            content: [{ type: 'text', text: error('binary-failed', `fd exited ${result.exitCode}: ${result.stderr.trim()}`, { tool: 'find', path: searchPath }).message }],
-            isError: true,
-            details: { errorType: 'binary-failed', path: searchPath, exitCode: result.exitCode, stderr: result.stderr.trim() },
-          };
-        }
-        const entries = parseFdOutput(result.stdout);
-        const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
-        const totalEntries = sorted.length;
-        const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
-        const truncated = limit !== undefined && totalEntries > limit;
-        const displayed = truncated ? sorted.slice(0, limit) : sorted;
-        const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
-        const sizeLabel = minSize && maxSize ? `${minSize}..${maxSize}` : minSize ? `+${minSize}` : maxSize ? `-${maxSize}` : 'any';
-        return {
-          content: [{ type: 'text', text: encodeToon({ find: { [`sized:${sizeLabel}`]: contentEntries } }).text }],
-          details: {
-            op: 'sized',
-            minSize: minSize ?? null,
-            maxSize: maxSize ?? null,
-            totalEntries,
-            returnedEntries,
-            truncated,
-            entries: contentEntries,
-            ...(settingsWarning ? { settingsWarning } : {}),
-          },
-        };
-      }
-
-      // --- glob op (default): fd --glob ---
-      const throttle = makeThrottle(500);
-      const entries: FindEntry[] = [];
-      let killedEarly = false;
-      let fdStderr = '';
-
-      const { proc, kill } = runFdStream(searchPath, { pattern, type, hidden, followSymlinks, exclude: allExcludes, maxDepth }, (rawPath) => {
-        try {
-          const stat = statSync(rawPath);
-          let type: FindEntry['type'] = 'other';
-          if (stat.isFile()) type = 'file';
-          else if (stat.isDirectory()) type = 'directory';
-          else if (stat.isSymbolicLink()) type = 'symlink';
-          else if (stat.isSocket()) type = 'socket';
-          else if (stat.isFIFO()) type = 'pipe';
-
-          const depth = (rawPath.split('/').length - 1);
-          entries.push({ path: rawPath, type, size: stat.size, mtime: stat.mtimeMs, depth });
-        } catch {
-          const depth = (rawPath.split('/').length - 1);
-          entries.push({ path: rawPath, type: 'other', depth });
-        }
-
-        // Kill when limit reached
-        if (limit !== undefined && entries.length >= limit) {
-          killedEarly = true;
-          kill();
-        }
-
-        // Throttled progress update
-        throttle(() => {
-          _onUpdate?.({
-            content: [],
-            details: { totalEntries: entries.length, truncated: false },
-          });
-        });
-      });
-
-      // Wait for process to close (may have been killed early)
-      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
-        proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
-        proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
-      });
-      fdStderr = stderr;
-
-      if (exitCode > 0 && !killedEarly) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `fd exited ${exitCode}: ${fdStderr.trim()}`, { tool: 'find', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: fdStderr.trim() },
-        };
-      }
-
-      // Sort entries if sortBy specified
-      const sorted = sortBy ? await sortEntries(entries, sortBy) : entries;
-
-      const totalEntries = sorted.length;
-      const returnedEntries = limit !== undefined ? Math.min(totalEntries, limit) : totalEntries;
-      const truncated = killedEarly || (limit !== undefined && totalEntries > limit);
-      const displayed = truncated ? sorted.slice(0, limit) : sorted;
-
-      // --- content.text: entries JSON → TOON ---
-      const contentEntries = displayed.map(e => ({ path: e.path, type: e.type, size: e.size, mtime: e.mtime, depth: e.depth }));
-      const searchLabel = pattern ?? '.';
-      const contentToon = encodeToon({ find: { [searchLabel]: contentEntries } });
-
-      return {
-        content: [{ type: 'text', text: contentToon.text }],
-        details: {
-          op: 'glob',
-          pattern: pattern ?? '',
-          sortBy: sortBy ?? null,
-          totalEntries,
-          returnedEntries,
-          truncated,
-          entries: contentEntries,
-          ...(settingsWarning ? { settingsWarning } : {}),
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeFindOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0) as unknown as Component;

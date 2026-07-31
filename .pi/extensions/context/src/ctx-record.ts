@@ -88,15 +88,108 @@ export interface CtxRecordResult {
 }
 
 /**
+ * Exported executeCtxRecordOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeCtxRecordOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeCtxRecordOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map((op: any) => executeCtxRecordOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const recordMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = opSpec.title ?? opSpec.type ?? `record_${i}`;
+      const d = (r as any).details ?? {};
+      recordMap[key] = d;
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ ctx_record: recordMap }).text }],
+      details: {
+        records: results.map(r => (r as any).details),
+        totalRecords: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const mode = (params.mode ?? 'json') as ToonMode;
+  const type = params.type || 'note';
+  const title = params.title || '';
+  const data = params.data || {};
+  const tags = params.tags || [];
+
+  const repoRoot = resolveGitRoot(ctx.cwd) || ctx.cwd;
+  const hasGit = resolveGitRoot(ctx.cwd) !== null;
+
+  const piContextDir = resolvePiContextDir(repoRoot);
+  const eventsPath = join(piContextDir, 'events.jsonl');
+  const gitCommit = hasGit ? getGitCommit(repoRoot) : null;
+
+  const timestamp = new Date().toISOString();
+  const id = generateId(type, title, timestamp);
+  const record: CtxRecordResult = {
+    id,
+    timestamp,
+    type,
+    title,
+    data,
+    tags,
+    cwd: ctx.cwd,
+    repoRoot,
+    gitCommit,
+    path: eventsPath,
+    source: 'ctx_record',
+    backend: 'jsonl+nu',
+    mode: 'json',
+  };
+
+  appendFileSync(eventsPath, JSON.stringify(record) + '\n');
+
+  const result: CtxRecordResult = {
+    ...record,
+    mode,
+  };
+  const llmEncoded = encodeToon(result, { mode });
+  const userText = `Recorded ${type} ${id}${title ? ` — ${title}` : ''}`;
+
+  return {
+    content: [{ type: 'text', text: userText }],
+    details: {
+      ...result,
+      tokenSavings: llmEncoded.tokenSavings,
+    },
+  };
+}
+
+/**
  * Register the ctx_record tool with pi.
  */
 export function registerCtxRecordTool(pi: ExtensionAPI) {
+  const ctxRecordItemSchema = Type.Object({
+    type: Type.Optional(Type.String()),
+    title: Type.Optional(Type.String()),
+    data: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    tags: Type.Optional(Type.Array(Type.String())),
+    mode: Type.Optional(Type.String()),
+  });
+
   const schema = Type.Object({
-    type: Type.String({ description: 'Record type (e.g., decision, verified, files-changed, commands-run, blockers, handoff, next-actions)' }),
-    title: Type.Optional(Type.String({ description: 'Short title for the record' })),
-    data: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'Arbitrary structured data' })),
-    target: Type.Optional(Type.Literal('repo', { description: 'Target scope (always "repo" for now)' })),
-    tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags to categorize the record' })),
+    ops: Type.Optional(Type.Array(ctxRecordItemSchema, { description: 'ctx_record operations array' })),
+    type: Type.Optional(Type.String({ description: 'Record type (e.g., decision, blocker, verification)' })),
+    title: Type.Optional(Type.String({ description: 'Short description of the event' })),
+    data: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'Arbitrary JSON payload' })),
+    tags: Type.Optional(Type.Array(Type.String(), { description: 'Filter/search tags' })),
     mode: Type.Optional(
       Type.Union([
         Type.Literal('toon', { description: 'TOON format for LLM' }),
@@ -109,76 +202,18 @@ export function registerCtxRecordTool(pi: ExtensionAPI) {
     name: 'ctx_record',
     label: 'Context Record',
     description:
-      'Append a durable context record to .pi-context/events.jsonl. '
-      + 'Records survive Pi session restarts and provide git-native work memory. '
-      + 'Use for decisions, verified facts, files changed, commands/tests run, '
-      + 'blockers, handoff notes, and next actions.',
-    promptSnippet: 'ctx_record(type: "decision", title: "Use eza for ls", data: { rationale: "Better defaults" })',
+      'Record a structured event into .pi-context/events.jsonl. '
+      + 'Pass ops: [{type: "decision", title: "..."}].',
+    promptSnippet: 'ctx_record(type: "decision", title: "Use Islands Architecture")',
     promptGuidelines: [
-      'Use ctx_record for durable events: decisions, verified facts, files changed, commands/tests run, blockers, handoff notes, next actions.',
-      'Do not record every read/search/list result.',
+      'Pass ops: [{type: "decision", title: "..."}].',
+      'Record key decisions, verification evidence, blockers, and next actions.',
       'Prefer repo-local context (.pi-context/).',
       'Use ctx_packet before handoff, compaction, restart, or review.',
     ],
     parameters: schema,
-    async execute(_toolCallId, params: CtxRecordParams, _signal, _onUpdate, ctx) {
-      const mode = (params.mode ?? 'json') as ToonMode;
-      const type = params.type;
-      const title = params.title || '';
-      const data = params.data || {};
-      const tags = params.tags || [];
-      const target = params.target || 'repo';
-
-      // Resolve repo root — fall back to ctx.cwd when no .git is found
-      const repoRoot = resolveGitRoot(ctx.cwd) || ctx.cwd;
-      const hasGit = resolveGitRoot(ctx.cwd) !== null;
-
-      // Resolve .pi-context directory
-      const piContextDir = resolvePiContextDir(repoRoot);
-      const eventsPath = join(piContextDir, 'events.jsonl');
-
-      // Get git commit — null when no git repo
-      const gitCommit = hasGit ? getGitCommit(repoRoot) : null;
-
-      // Generate record
-      const timestamp = new Date().toISOString();
-      const id = generateId(type, title, timestamp);
-      const record: CtxRecordResult = {
-        id,
-        timestamp,
-        type,
-        title,
-        data,
-        tags,
-        cwd: ctx.cwd,
-        repoRoot,
-        gitCommit,
-        path: eventsPath,
-        source: 'ctx_record',
-        backend: 'jsonl+nu',
-        mode: 'json',
-      };
-
-      // Append to JSONL
-      appendFileSync(eventsPath, JSON.stringify(record) + '\n');
-
-      // Format output
-      const result: CtxRecordResult = {
-        ...record,
-        mode,
-      };
-      const llmEncoded = encodeToon(result, { mode });
-
-      // User text: short confirmation
-      const userText = `Recorded ${type} ${id}${title ? ` — ${title}` : ''}`;
-
-      return {
-        content: [{ type: 'text', text: userText }],
-        details: {
-          ...result,
-          tokenSavings: llmEncoded.tokenSavings,
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeCtxRecordOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
   });
 }

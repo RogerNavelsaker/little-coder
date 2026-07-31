@@ -549,11 +549,374 @@ function resolveEnvMode(
 }
 
 /**
+ * Exported executeShellOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeShellOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeShellOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeShellOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const shellMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = (opSpec.commands && opSpec.commands[0]) ?? opSpec.command ?? `cmd_${i}`;
+      const d = (r as any).details ?? {};
+      shellMap[key] = { exitCode: d.exitCode ?? 0, stdout: d.stdout ?? '', stderr: d.stderr ?? '' };
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ shell: shellMap }).text }],
+      details: {
+        runs: results.map(r => (r as any).details),
+        totalRuns: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const commands = params.commands ?? (params.command ? [params.command] : []);
+  const requestedPath = params.cwd ? (params.cwd.startsWith('@') ? params.cwd.slice(1) : params.cwd) : ctx.cwd;
+  const targetCwd = resolve(ctx.cwd, requestedPath);
+  const envMode: ShellEnvMode = (params.env ?? 'auto') as ShellEnvMode;
+  const startServices = params.start_services === true || params.start_services === 'true';
+  const mode = (params.mode ?? 'text') as 'text' | 'json' | 'nuon' | 'toon';
+  const timeoutMs = typeof params.timeout_ms === 'string' ? parseInt(params.timeout_ms, 10) : (params.timeout_ms ?? 30000);
+  const packages = params.packages ?? [];
+
+  if (!existsSync(targetCwd)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `CWD not found: ${targetCwd}`, { tool: 'shell', path: targetCwd }).message }],
+      isError: true,
+      details: {
+        cwd: targetCwd,
+        command: commands[0] ?? '',
+        shell: 'nu',
+        envRequested: envMode,
+        envResolved: 'not-found',
+        activationCommand: '',
+        packages,
+        exitCode: -1,
+        stdout: '',
+        stderr: `CWD not found: ${targetCwd}`,
+        durationMs: 0,
+        truncated: false,
+        mode,
+      },
+    };
+  }
+
+  if (commands.length > 1) {
+    const mResolved = resolveEnvMode(envMode, targetCwd);
+    const mNuConfig = resolveNuConfig();
+    const mPrefix = buildNuPrefix(mNuConfig.configPath);
+    const shellMap: Record<string, unknown> = {};
+    let anyError = false;
+    for (const cmd of commands) {
+      const nuCmd = mode === 'json' ? `${cmd} | to json`
+        : mode === 'nuon' ? `${cmd} | to nuon`
+        : cmd;
+
+      let cOut = '';
+      let cErr = '';
+      let cExit = 1;
+      let cDur = 0;
+      let cTimedOut = false;
+
+      try {
+        if (mResolved.backend === 'nu-clean') {
+          const cleanEnv: NodeJS.ProcessEnv = {
+            HOME: process.env.HOME ?? '',
+            USER: process.env.USER ?? '',
+            PATH: process.env.PATH ?? '/usr/bin:/bin',
+            TERM: process.env.TERM ?? 'xterm-256color',
+          };
+          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, cleanEnv, timeoutMs, _onUpdate as any);
+          cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
+        } else if (mResolved.backend === 'nu+direnv') {
+          const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
+          const res = await runNuStreaming(bin, ['exec', targetCwd, NU_BIN, ...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any);
+          cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
+        } else {
+          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any);
+          cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
+        }
+      } catch (err) {
+        cErr = err instanceof Error ? err.message : String(err);
+        cExit = -1;
+      }
+
+      if (cExit !== 0 || cTimedOut) anyError = true;
+      shellMap[cmd] = [{ exitCode: cExit, durationMs: cDur, stdout: cOut, stderr: cErr }];
+    }
+
+    return {
+      content: [{ type: 'text', text: encodeToon({ shell: shellMap }).text }],
+      isError: anyError,
+      details: {
+        cwd: targetCwd,
+        commands,
+        multiCommand: true,
+        totalCommands: commands.length,
+      },
+    };
+  }
+
+  const command = commands[0] ?? '';
+  const isReadonly = params.readonlyShell === true || params.readonly_shell === true || process.env.PI_READONLY_SHELL === '1';
+  if (isReadonly) {
+    if (!isBwrapAvailable()) {
+      return {
+        content: [{ type: 'text', text: error('binary-failed', 'bubblewrap (bwrap) is not available on PATH for read-only shell execution', { tool: 'shell' }).message }],
+        isError: true,
+        details: {
+          cwd: targetCwd,
+          command,
+          readonlyShell: true,
+          exitCode: -1,
+        },
+      };
+    }
+
+    const nuConfig = resolveNuConfig();
+    const bwrapArgs = buildBwrapArgs(command, targetCwd, NU_BIN);
+    const startMs = Date.now();
+    let bwrapStdout = '';
+    let bwrapStderr = '';
+    let bwrapExitCode = 1;
+    let bwrapTimedOut = false;
+
+    try {
+      const r = spawnSync('bwrap', bwrapArgs, {
+        cwd: targetCwd,
+        encoding: 'utf-8',
+        timeout: timeoutMs,
+        env: {
+          HOME: process.env.HOME ?? '',
+          PATH: '/usr/bin:/bin',
+          TERM: process.env.TERM ?? 'xterm-256color',
+        },
+      });
+      bwrapStdout = r.stdout ?? '';
+      bwrapStderr = r.stderr ?? '';
+      bwrapExitCode = r.status ?? (r.signal ? 128 : 1);
+      if (r.error && (r.error as any).code === 'ETIMEDOUT') {
+        bwrapTimedOut = true;
+      }
+    } catch (err) {
+      bwrapStderr = err instanceof Error ? err.message : String(err);
+      bwrapExitCode = -1;
+    }
+
+    const bwrapDurationMs = Date.now() - startMs;
+    const bwrapFailureSummary = buildFailureSummary(
+      bwrapExitCode,
+      bwrapStdout,
+      bwrapStderr,
+      timeoutMs,
+      bwrapDurationMs,
+      bwrapTimedOut,
+    );
+    let bwrapUserText = encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] }).text;
+    if (bwrapFailureSummary) {
+      bwrapUserText += '\n' + bwrapFailureSummary;
+    }
+
+    return {
+      content: [{ type: 'text', text: bwrapUserText }],
+      isError: bwrapExitCode !== 0 || bwrapTimedOut,
+      details: {
+        cwd: targetCwd,
+        command,
+        envResolved: 'readonly (bubblewrap)',
+        configResolved: nuConfig.configSource,
+        exitCode: bwrapExitCode,
+        stdout: bwrapStdout,
+        stderr: bwrapStderr,
+        durationMs: bwrapDurationMs,
+        truncated: false,
+        timedOut: bwrapTimedOut,
+        readonlyShell: true,
+        sandbox: 'bubblewrap',
+        sandboxArgs: ['--die-with-parent', '--bind', targetCwd, '--tmpfs', '/tmp', '--clearenv', '--unshare-all'],
+      },
+    };
+  }
+
+  const { backend, activationCommand, envResolved } = resolveEnvMode(envMode, targetCwd);
+  const nuConfig = resolveNuConfig();
+
+  let stdout = '';
+  let stderr = '';
+  let exitCode = 1;
+  let durationMs = 0;
+  let timedOut = false;
+
+  const nuArgsBase = buildNuPrefix(nuConfig.configPath);
+  const nuCommand = mode === 'json' ? `${command} | to json`
+    : mode === 'nuon' ? `${command} | to nuon`
+    : command;
+
+  try {
+    if (backend === 'nu-clean') {
+      const cleanEnv: NodeJS.ProcessEnv = {
+        HOME: process.env.HOME ?? '',
+        USER: process.env.USER ?? '',
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        TERM: process.env.TERM ?? 'xterm-256color',
+      };
+      const result = await runNuStreaming(
+        NU_BIN,
+        [...nuArgsBase, '-c', nuCommand],
+        targetCwd,
+        cleanEnv,
+        timeoutMs,
+        _onUpdate as any,
+      );
+      stdout = result.stdout;
+      stderr = result.stderr;
+      exitCode = result.exitCode;
+      durationMs = result.durationMs;
+      timedOut = result.timedOut;
+    } else if (backend === 'nu+direnv') {
+      const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
+      const result = await runNuStreaming(
+        bin,
+        ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand],
+        targetCwd,
+        { ...process.env },
+        timeoutMs,
+        _onUpdate as any,
+      );
+      stdout = result.stdout;
+      stderr = result.stderr;
+      exitCode = result.exitCode;
+      durationMs = result.durationMs;
+      timedOut = result.timedOut;
+    } else {
+      const result = await runNuStreaming(
+        NU_BIN,
+        [...nuArgsBase, '-c', nuCommand],
+        targetCwd,
+        { ...process.env },
+        timeoutMs,
+        _onUpdate as any,
+      );
+      stdout = result.stdout;
+      stderr = result.stderr;
+      exitCode = result.exitCode;
+      durationMs = result.durationMs;
+      timedOut = result.timedOut;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `nu execution failed: ${msg}`, { tool: 'shell', details: { command } }).message }],
+      isError: true,
+      details: {
+        cwd: targetCwd,
+        envResolved,
+        configResolved: nuConfig.configSource,
+        exitCode: -1,
+        stdout: '',
+        stderr: msg,
+        durationMs: 0,
+        truncated: false,
+        timedOut: false,
+      },
+    };
+  }
+
+  const { settings, warnings } = loadSettings(ctx.cwd);
+  const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
+  const maxLines = settings.shellMaxVisibleLines;
+  const maxBytes = settings.shellMaxVisibleBytes;
+  const headLines = settings.shellHeadLines;
+  const tailLines = settings.shellTailLines;
+  const saveFull = settings.shellSaveFullOutput;
+
+  const failureSummary = buildFailureSummary(exitCode, stdout, stderr, timeoutMs, durationMs, timedOut);
+
+  const stdoutExceeds = stdout.length > maxBytes || stdout.split('\n').length > maxLines;
+  const stderrExceeds = stderr.length > maxBytes || stderr.split('\n').length > maxLines;
+  const stdoutTruncated = stdoutExceeds;
+  const stderrTruncated = stderrExceeds;
+
+  let stdoutPreview = stdout;
+  if (stdoutTruncated) {
+    const lines = stdout.split('\n');
+    const head = lines.slice(0, headLines).join('\n');
+    const tail = lines.slice(-tailLines).join('\n');
+    stdoutPreview = `[oversized: ${lines.length} lines, ${stdout.length} bytes — head ${headLines} lines + tail ${tailLines} lines]\n${head}\n... [${lines.length - headLines - tailLines} lines omitted] ...\n${tail}`;
+  }
+
+  let stderrPreview = stderr;
+  if (stderrTruncated) {
+    const lines = stderr.split('\n');
+    const head = lines.slice(0, headLines).join('\n');
+    const tail = lines.slice(-tailLines).join('\n');
+    stderrPreview = `[oversized: ${lines.length} lines, ${stderr.length} bytes — head ${headLines} lines + tail ${tailLines} lines]\n${head}\n... [${lines.length - headLines - tailLines} lines omitted] ...\n${tail}`;
+  }
+
+  let fullOutputPath: string | undefined;
+  if (saveFull && (stdoutTruncated || stderrTruncated)) {
+    try {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'pi-shell-'));
+      const tmpFile = join(tmpDir, `shell-${Date.now()}.txt`);
+      writeFileSync(tmpFile, `=== stdout ===\n${stdout}\n=== stderr ===\n${stderr}`, 'utf-8');
+      fullOutputPath = tmpFile;
+    } catch { /* ignore */ }
+  }
+
+  let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] }).text;
+  if (failureSummary) userText += '\n' + failureSummary;
+
+  return {
+    content: [{ type: 'text', text: userText }],
+    isError: exitCode !== 0 || timedOut,
+    details: {
+      cwd: targetCwd,
+      command,
+      envResolved,
+      configResolved: nuConfig.configSource,
+      exitCode,
+      stdout: stdoutTruncated ? stdoutPreview : stdout,
+      stderr: stderrTruncated ? stderrPreview : stderr,
+      durationMs,
+      truncated: stdoutTruncated || stderrTruncated,
+      timedOut,
+      ...(fullOutputPath ? { fullOutputPath } : {}),
+      ...(settingsWarning ? { settingsWarning } : {}),
+    },
+  };
+}
+
+/**
  * Register the shell tool with pi.
  */
 export function registerShellTool(pi: ExtensionAPI) {
+  const shellItemSchema = Type.Object({
+    command: Type.Optional(Type.String({ description: 'Single command string' })),
+    commands: Type.Optional(Type.Array(Type.String(), { description: 'Nushell commands array' })),
+    cwd: Type.Optional(Type.String()),
+    env: Type.Optional(Type.String()),
+    timeout_ms: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    readonlyShell: Type.Optional(Type.Boolean()),
+  });
+
   const shellSchema = Type.Object({
-    commands: Type.Array(Type.String(), { description: 'Nushell commands to execute. Single: ["cmd"]. Multi: ["cmd1","cmd2",...] — share cwd/env/timeout.' }),
+    ops: Type.Optional(Type.Array(shellItemSchema, { description: 'Shell operations array. Single: ops: [{command: "echo hi"}]. Multi: ops: [{command: "echo 1"}, {command: "echo 2"}]' })),
+    commands: Type.Optional(Type.Array(Type.String(), { description: 'Nushell commands to execute. Single: ["cmd"]. Multi: ["cmd1","cmd2",...] — share cwd/env/timeout.' })),
+    command: Type.Optional(Type.String({ description: 'Single Nushell command' })),
     cwd: Type.Optional(Type.String({ description: 'Working directory for command execution' })),
     env: Type.Optional(
       Type.Union([
@@ -601,28 +964,20 @@ export function registerShellTool(pi: ExtensionAPI) {
     name: 'shell',
     label: 'Shell',
     description:
-      'Execute commands with structured result envelopes. '
-      + 'Supports environment modes (auto, current, none, flox, flox-default, flox-temp, direnv, clean). '
-      + 'Returns exit code, stdout, stderr, duration, and truncation metadata.',
+      'Execute commands with structured result envelopes. Pass ops: [{command: "..."}].',
     promptSnippet: 'Execute commands with environment modes',
     promptGuidelines: [
+      'Pass ops: [{command: "..."}].',
       'shell executes Nushell syntax, not POSIX/bash. Use Nu pipeline operators (|) and Nu commands.',
       'Prefer find, grep, ls, read, edit, and write tools for file discovery and file work — not shell.',
       'Avoid bash redirection syntax: 2>/dev/null and 2>&1 do not work in Nushell.',
       'In Nushell, redirect stdout+stderr with out+err> or o+e>. Redirect stdout with out>. Redirect stderr with err>.',
       'Use shell for command execution, verification, package managers, git commands, and structured data pipelines.',
-      'Use env: "clean" for minimal environment (no flox/direnv).',
-      'Use env: "flox-default" to use the default flox stack.',
-      'Use env: "auto" to auto-detect active environments.',
-      'Use timeout_ms to set command timeout.',
-      'Report non-zero exits and timeouts as evidence, not as hidden failures.',
-      'Oversized output is bounded: head/tail preview with full output saved to temp file.',
-      'Use readonlyShell: true to run shell inside the Bubblewrap read-only sandbox when a read-only command execution boundary is needed.',
     ],
     parameters: shellSchema,
     renderCall(args, theme, _context) {
       const params = args as Partial<ShellToolParams>;
-      const command = oneLine(params.commands?.[0], 110);
+      const command = oneLine(params.commands?.[0] || (params as any).command, 110);
       const env = params.env ? ` env=${params.env}` : '';
       const cwd = params.cwd ? ` cwd=${params.cwd}` : '';
       const mode = params.mode && params.mode !== 'text' ? ` mode=${params.mode}` : '';
@@ -657,7 +1012,6 @@ export function registerShellTool(pi: ExtensionAPI) {
         text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
       }
 
-      // Phase 21: auto mode shows fuller view when expanded; compact forces compact
       const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
       const isAuto = displayParam === undefined || displayParam === 'auto';
       const isCompact = displayParam === 'compact';
@@ -666,7 +1020,6 @@ export function registerShellTool(pi: ExtensionAPI) {
       if (showFull && details) {
         if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
         if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
-        // Nu shell already produces pretty table output for structured data — show it in full.
         if (details.stdout) text += `\n${details.stdout}`;
         if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
         if (details.truncated) {
@@ -677,330 +1030,8 @@ export function registerShellTool(pi: ExtensionAPI) {
 
       return new Text(text, 0, 0);
     },
-    async execute(_toolCallId, params: ShellToolParams, _signal, _onUpdate, ctx) {
-      const requestedPath = params.cwd ? (params.cwd.startsWith('@') ? params.cwd.slice(1) : params.cwd) : ctx.cwd;
-      const targetCwd = resolve(ctx.cwd, requestedPath);
-      const envMode: ShellEnvMode = (params.env ?? 'auto') as ShellEnvMode;
-      const startServices = params.start_services === true || params.start_services === 'true';
-      const mode = (params.mode ?? 'text') as 'text' | 'json' | 'nuon' | 'toon';
-      const timeoutMs = typeof params.timeout_ms === 'string' ? parseInt(params.timeout_ms, 10) : (params.timeout_ms ?? 30000);
-      const packages = params.packages ?? [];
-
-      // Validate target cwd
-      if (!existsSync(targetCwd)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `CWD not found: ${targetCwd}`, { tool: 'shell', path: targetCwd }).message }],
-          isError: true,
-          details: {
-            cwd: targetCwd,
-            command: params.commands[0] ?? '',
-            shell: 'nu',
-            envRequested: envMode,
-            envResolved: 'not-found',
-            activationCommand: '',
-            packages,
-            exitCode: -1,
-            stdout: '',
-            stderr: `CWD not found: ${targetCwd}`,
-            durationMs: 0,
-            truncated: false,
-            mode,
-          },
-        };
-      }
-
-      // Multi-command: run each sequentially, combine into one labeled TOON block
-      if (params.commands.length > 1) {
-        const mResolved = resolveEnvMode(envMode, targetCwd);
-        const mNuConfig = resolveNuConfig();
-        const mPrefix = buildNuPrefix(mNuConfig.configPath);
-        const shellMap: Record<string, unknown> = {};
-        let anyError = false;
-        for (const cmd of params.commands) {
-          const nuCmd = mode === 'json' ? `${cmd} | to json`
-            : mode === 'nuon' ? `${cmd} | to nuon`
-            : mode === 'toon' ? `${cmd} | to json | tru`
-            : `${cmd} | to text`;
-          const r = runNuCommand([...mPrefix, '-c', nuCmd], targetCwd, timeoutMs);
-          shellMap[cmd] = [{ exitCode: r.exitCode, durationMs: r.durationMs, stdout: r.stdout.trimEnd(), stderr: r.stderr.trimEnd() }];
-          if (r.exitCode !== 0) anyError = true;
-        }
-        return {
-          content: [{ type: 'text', text: encodeToon({ shell: shellMap }).text }],
-          isError: anyError,
-          details: { cwd: targetCwd, envResolved: mResolved.envResolved, commands: params.commands },
-        };
-      }
-
-      // Single command
-      const command = params.commands[0] ?? '';
-
-      // Build the nu command with mode-based output formatting
-      // Pipe through to text/json/toon for clean output
-      let nuCommand = command;
-      if (mode === 'json') {
-        nuCommand = `${nuCommand} | to json`;
-      } else if (mode === 'nuon') {
-        nuCommand = `${nuCommand} | to nuon`;
-      } else if (mode === 'toon') {
-        nuCommand = `${nuCommand} | to json | tru`;
-      } else {
-        // text mode: pipe through to text for clean output
-        nuCommand = `${nuCommand} | to text`;
-      }
-
-      // Resolve environment mode (determines backend and execution path)
-      const resolved = resolveEnvMode(envMode, targetCwd);
-      const { backend, activationCommand, envResolved } = resolved;
-
-      // Resolve Nushell config for backend tool execution
-      const nuConfig = resolveNuConfig();
-
-      // ---- Bubblewrap read-only shell (Phase 22 PoC) ----
-      // PI_READONLY_SHELL=1 is set by pi-dev for readonly/reviewer profiles,
-      // enforcing the sandbox for every call regardless of tool param.
-      const forceReadonly = process.env.PI_READONLY_SHELL === '1';
-      if (params.readonly_shell || params.readonlyShell || forceReadonly) {
-        const bwrapResult = runBwrapSandbox(
-          nuCommand,
-          targetCwd,
-          timeoutMs,
-          NU_BIN,
-        );
-
-        // Handle bwrap not available
-        if (bwrapResult.bwrapError) {
-          return {
-            content: [{ type: 'text', text: error('unknown', bwrapResult.bwrapError, { tool: 'shell', details: { readonly: true } }).message }],
-            isError: true,
-            details: {
-              cwd: targetCwd,
-              command,
-              envResolved: 'readonly (bubblewrap)',
-              configResolved: nuConfig.configSource,
-              exitCode: -1,
-              stdout: '',
-              stderr: bwrapResult.bwrapError,
-              durationMs: bwrapResult.durationMs,
-              truncated: false,
-              timedOut: false,
-              readonlyShell: true,
-              sandbox: 'bubblewrap',
-            },
-          };
-        }
-
-        const { stdout: bwrapStdout, stderr: bwrapStderr, exitCode: bwrapExitCode, durationMs: bwrapDurationMs, timedOut: bwrapTimedOut } = bwrapResult;
-        const failureSummary = buildFailureSummary(bwrapExitCode, bwrapStdout, bwrapStderr, timeoutMs, bwrapDurationMs, bwrapTimedOut);
-        const bwrapToon = encodeToon({ shell: [{ exitCode: bwrapExitCode, durationMs: bwrapDurationMs, stdout: bwrapStdout, stderr: bwrapStderr }] }).text;
-        let bwrapUserText = bwrapToon;
-        if (failureSummary) bwrapUserText += '\n' + failureSummary;
-
-        return {
-          content: [{ type: 'text', text: bwrapUserText }],
-          isError: bwrapExitCode !== 0 || bwrapTimedOut,
-          details: {
-            cwd: targetCwd,
-            command,
-            envResolved: 'readonly (bubblewrap)',
-            configResolved: nuConfig.configSource,
-            exitCode: bwrapExitCode,
-            stdout: bwrapStdout,
-            stderr: bwrapStderr,
-            durationMs: bwrapDurationMs,
-            truncated: false,
-            timedOut: bwrapTimedOut,
-            readonlyShell: true,
-            sandbox: 'bubblewrap',
-            sandboxArgs: ['--die-with-parent', '--bind', targetCwd, '--tmpfs', '/tmp', '--clearenv', '--unshare-all'],
-          },
-        };
-      }
-
-      // Execute based on resolved backend (streaming)
-      let stdout = '';
-      let stderr = '';
-      let exitCode = 1;
-      let durationMs = 0;
-      let timedOut = false;
-
-      const nuArgsBase = buildNuPrefix(nuConfig.configPath);
-
-      try {
-        if (backend === 'nu-clean') {
-          const cleanEnv: NodeJS.ProcessEnv = {
-            HOME: process.env.HOME ?? '',
-            USER: process.env.USER ?? '',
-            PATH: process.env.PATH ?? '/usr/bin:/bin',
-            TERM: process.env.TERM ?? 'xterm-256color',
-          };
-          const result = await runNuStreaming(
-            NU_BIN,
-            [...nuArgsBase, '-c', nuCommand],
-            targetCwd,
-            cleanEnv,
-            timeoutMs,
-            _onUpdate as any,
-          );
-          stdout = result.stdout;
-          stderr = result.stderr;
-          exitCode = result.exitCode;
-          durationMs = result.durationMs;
-          timedOut = result.timedOut;
-        } else if (backend === 'nu+direnv') {
-          const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
-          const result = await runNuStreaming(
-            bin,
-            ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand],
-            targetCwd,
-            { ...process.env },
-            timeoutMs,
-            _onUpdate as any,
-          );
-          stdout = result.stdout;
-          stderr = result.stderr;
-          exitCode = result.exitCode;
-          durationMs = result.durationMs;
-          timedOut = result.timedOut;
-        } else if (backend === 'nu+flox') {
-          const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-          const result = await runNuStreaming(
-            bin,
-            ['activate', '-d', targetCwd, '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand],
-            targetCwd,
-            { ...process.env },
-            timeoutMs,
-            _onUpdate as any,
-          );
-          stdout = result.stdout;
-          stderr = result.stderr;
-          exitCode = result.exitCode;
-          durationMs = result.durationMs;
-          timedOut = result.timedOut;
-        } else if (backend === 'nu+flox-default') {
-          const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-          const result = await runNuStreaming(
-            bin,
-            ['activate', '-d', '/home/rona', '--no-start-services', '--', NU_BIN, ...nuArgsBase, '-c', nuCommand],
-            targetCwd,
-            { ...process.env },
-            timeoutMs,
-            _onUpdate as any,
-          );
-          stdout = result.stdout;
-          stderr = result.stderr;
-          exitCode = result.exitCode;
-          durationMs = result.durationMs;
-          timedOut = result.timedOut;
-        } else {
-          // nu (current, none, auto with no detection) — plain nu
-          const result = await runNuStreaming(
-            NU_BIN,
-            [...nuArgsBase, '-c', nuCommand],
-            targetCwd,
-            { ...process.env },
-            timeoutMs,
-            _onUpdate as any,
-          );
-          stdout = result.stdout;
-          stderr = result.stderr;
-          exitCode = result.exitCode;
-          durationMs = result.durationMs;
-          timedOut = result.timedOut;
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `nu execution failed: ${msg}`, { tool: 'shell', details: { command } }).message }],
-          isError: true,
-          details: {
-            cwd: targetCwd,
-            envResolved,
-            configResolved: nuConfig.configSource,
-            exitCode: -1,
-            stdout: '',
-            stderr: msg,
-            durationMs: 0,
-            truncated: false,
-            timedOut: false,
-          },
-        };
-      }
-
-      // Phase 20: Load settings for shell guards
-      const { settings, warnings } = loadSettings(ctx.cwd);
-      const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
-      const maxLines = settings.shellMaxVisibleLines;
-      const maxBytes = settings.shellMaxVisibleBytes;
-      const headLines = settings.shellHeadLines;
-      const tailLines = settings.shellTailLines;
-      const saveFull = settings.shellSaveFullOutput;
-
-      // Phase 19: Visible failure summary in content.text
-      // Phase 20: Oversized output head/tail preview + full output save
-      const failureSummary = buildFailureSummary(exitCode, stdout, stderr, timeoutMs, durationMs, timedOut);
-
-      // Determine if output exceeds visible budgets
-      const stdoutExceeds = stdout.length > maxBytes || stdout.split('\n').length > maxLines;
-      const stderrExceeds = stderr.length > maxBytes || stderr.split('\n').length > maxLines;
-      const stdoutTruncated = stdoutExceeds;
-      const stderrTruncated = stderrExceeds;
-
-      // Build head/tail preview for oversized stdout
-      let stdoutPreview = stdout;
-      if (stdoutTruncated) {
-        const lines = stdout.split('\n');
-        const head = lines.slice(0, headLines).join('\n');
-        const tail = lines.slice(-tailLines).join('\n');
-        stdoutPreview = `[oversized: ${lines.length} lines, ${stdout.length} bytes — head ${headLines} lines + tail ${tailLines} lines]\n${head}\n... [${lines.length - headLines - tailLines} lines omitted] ...\n${tail}`;
-      }
-
-      // Build head/tail preview for oversized stderr
-      let stderrPreview = stderr;
-      if (stderrTruncated) {
-        const lines = stderr.split('\n');
-        const head = lines.slice(0, headLines).join('\n');
-        const tail = lines.slice(-tailLines).join('\n');
-        stderrPreview = `[oversized: ${lines.length} lines, ${stderr.length} bytes — head ${headLines} lines + tail ${tailLines} lines]\n${head}\n... [${lines.length - headLines - tailLines} lines omitted] ...\n${tail}`;
-      }
-
-      // Save full output to temp file when enabled
-      let fullOutputPath: string | undefined;
-      if (saveFull && (stdoutTruncated || stderrTruncated)) {
-        try {
-          const tmpDir = mkdtempSync(join(tmpdir(), 'pi-shell-'));
-          const tmpFile = join(tmpDir, `shell-${Date.now()}.txt`);
-          writeFileSync(tmpFile, `=== stdout ===\n${stdout}\n=== stderr ===\n${stderr}`, 'utf-8');
-          fullOutputPath = tmpFile;
-        } catch {
-          // If saving fails, silently continue — the preview is still available
-        }
-      }
-
-      // Build content.text: TOON-encoded shell result for LLM consumption.
-      // renderResult handles display-mode branching for the TUI card.
-      const display = (params.display ?? 'auto') as DisplayMode;
-      let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] }).text;
-      if (failureSummary) userText += '\n' + failureSummary;
-
-      return {
-        content: [{ type: 'text', text: userText }],
-        isError: exitCode !== 0 || timedOut,
-        details: {
-          cwd: targetCwd,
-          command,
-          envResolved,
-          configResolved: nuConfig.configSource,
-          exitCode,
-          stdout: stdoutTruncated ? stdoutPreview : stdout,
-          stderr: stderrTruncated ? stderrPreview : stderr,
-          durationMs,
-          truncated: stdoutTruncated || stderrTruncated,
-          timedOut,
-          ...(fullOutputPath ? { fullOutputPath } : {}),
-          ...(settingsWarning ? { settingsWarning } : {}),
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeShellOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
   });
 }

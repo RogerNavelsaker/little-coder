@@ -1,23 +1,17 @@
+/**
+ * Basic tools extension — Universal Op[] schema.
+ *
+ * All basic-tools now use a single `{ops: Op[]}` discriminated union schema.
+ * Each op has a `type` discriminator and tool-specific params.
+ *
+ * Supported ops: read, grep, edit, write, find, ls, shell, ast_search
+ */
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { registerReadTool } from './src/read.js';
-import { registerEditTool } from './src/edit.js';
-import { registerGrepTool } from './src/grep.js';
-import { registerFindTool } from './src/find.js';
-import { registerLsTool } from './src/ls.js';
-import { registerShellTool } from './src/shell.js';
-import { registerWriteTool } from './src/write.js';
-import { registerAstSearchTool } from './src/ast-search.js';
+import { registerUnifiedTool } from './src/unified.js';
 import { registerFileCheckpointExtension } from './src/file-checkpoint.js';
 
 export default function basicToolsExtension(pi: ExtensionAPI): void {
-  registerReadTool(pi);
-  registerEditTool(pi);
-  registerGrepTool(pi);
-  registerFindTool(pi);
-  registerLsTool(pi);
-  registerShellTool(pi);
-  registerWriteTool(pi);
-  registerAstSearchTool(pi);
+  registerUnifiedTool(pi);
   registerFileCheckpointExtension(pi);
 
   pi.on('resources_discover', async () => {

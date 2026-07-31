@@ -157,13 +157,150 @@ export interface CtxPacketResult {
   path: string;
   backend: 'jsonl+nu';
   mode: ToonMode;
+  totalEventsProcessed?: number;
+  filteredCount?: number;
+  eventTypesIncluded?: string[];
+}
+
+/**
+ * Exported executeCtxPacketOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeCtxPacketOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeCtxPacketOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map((op: any) => executeCtxPacketOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const packetMap: Record<string, unknown> = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const opSpec = params.ops[i];
+      const key = opSpec.limit ? `limit_${opSpec.limit}` : `packet_${i}`;
+      const d = (r as any).details ?? {};
+      packetMap[key] = d;
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ ctx_packet: packetMap }).text }],
+      details: {
+        packets: results.map(r => (r as any).details),
+        totalPackets: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const mode = (params.mode ?? 'json') as ToonMode;
+  const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : (params.limit ?? 50);
+  const includeTypes = params.includeTypes;
+
+  const repoRoot = resolveGitRoot(ctx.cwd) || ctx.cwd;
+  const piContextDir = resolvePiContextDir(repoRoot);
+  
+  if (!piContextDir) {
+    return { content: [{ type: 'text', text: 'No .pi-context directory found.' }] };
+  }
+
+  const eventsPath = join(piContextDir, 'events.jsonl');
+  const packetsPath = join(piContextDir, 'packets.jsonl');
+
+  const records = readJsonl(eventsPath);
+
+  let filtered = records;
+  if (includeTypes && includeTypes.length > 0) {
+    const allowed = new Set(includeTypes);
+    filtered = filtered.filter(r => allowed.has(r.type as string));
+  }
+
+  if (limit > 0 && filtered.length > limit) {
+    filtered = filtered.slice(-limit);
+  }
+
+  const sections = generatePacketSections(filtered);
+
+  const packetId = generatePacketId(filtered);
+  const timestamp = new Date().toISOString();
+  const gitCommit = getGitCommit(repoRoot);
+  const sourceEventIds = filtered.map(r => r.id as string).filter(Boolean);
+
+  const totalEventsProcessed = records.length;
+  const eventTypesIncluded = [...new Set(filtered.map(r => r.type as string))];
+
+  const totalEventsFormatted =
+    sections.recentDecisions.length
+    + sections.recentVerification.length
+    + sections.filesChanged.length
+    + sections.commandsTestsRun.length
+    + sections.blockers.length
+    + sections.nextActions.length
+    + Object.values(sections.otherEvents).reduce((a, b) => a + b.length, 0);
+
+  const summary = `${totalEventsFormatted} structured items from ${filtered.length} events`;
+
+  const packetLine: Record<string, unknown> = {
+    packetId,
+    timestamp,
+    repoRoot,
+    gitCommit,
+    sourceEventIds,
+    summary,
+    sections,
+    source: 'ctx_packet',
+    backend: 'jsonl+nu',
+  };
+
+  try {
+    appendFileSync(packetsPath, JSON.stringify(packetLine) + '\n', 'utf-8');
+  } catch {
+    // Return with found=false if write fails
+  }
+
+  const result: CtxPacketResult = {
+    packetId,
+    timestamp,
+    repoRoot,
+    gitCommit,
+    sourceEventIds,
+    summary,
+    totalEventsProcessed,
+    filteredCount: filtered.length,
+    eventTypesIncluded,
+    sections,
+    path: packetsPath,
+    backend: 'jsonl+nu',
+    mode,
+  };
+  const llmEncoded = encodeToon(result, { mode });
+
+  return {
+    content: [{ type: 'text', text: `Context packet generated and saved: ${packetId}\nSummary: ${summary}\nPath: ${packetsPath}` }],
+    details: {
+      ...result,
+      tokenSavings: llmEncoded.tokenSavings,
+    },
+  };
 }
 
 /**
  * Register the ctx_packet tool with pi.
  */
 export function registerCtxPacketTool(pi: ExtensionAPI) {
+  const ctxPacketItemSchema = Type.Object({
+    limit: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    includeTypes: Type.Optional(Type.Array(Type.String())),
+    mode: Type.Optional(Type.String()),
+  });
+
   const schema = Type.Object({
+    ops: Type.Optional(Type.Array(ctxPacketItemSchema, { description: 'ctx_packet operations array' })),
     limit: Type.Optional(
       Type.Union([
         Type.Number({ description: 'Maximum number of recent records to include' }),
@@ -184,134 +321,11 @@ export function registerCtxPacketTool(pi: ExtensionAPI) {
     label: 'Context Packet',
     description:
       'Generate a deterministic context packet from recent .pi-context records. '
-      + 'Reads events.jsonl, extracts structured sections (decisions, verification, '
-      + 'files changed, commands/tests, blockers, next actions), and writes packets.jsonl. '
-      + 'Use before handoff, compaction, restart, or review.',
+      + 'Pass ops: [{limit?: 30}].',
     promptSnippet: 'ctx_packet(limit: 30, includeTypes: ["decision", "blocker"])',
-    promptGuidelines: [
-      'Use ctx_packet before handoff, compaction, restart, or review.',
-      'ctx_packet is deterministic — no LLM summarization.',
-      'Use includeTypes to filter to specific record types.',
-      'ctx_packet does not replace Pi session state.',
-      '.pi-context is durable git-native work memory.',
-    ],
     parameters: schema,
-    async execute(_toolCallId, params: CtxPacketParams, _signal, _onUpdate, ctx) {
-      const mode = (params.mode ?? 'json') as ToonMode;
-      const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit || 50;
-      const includeTypes = params.includeTypes || [];
-
-      // Resolve repo root — fall back to ctx.cwd when no .git is found
-      const repoRoot = resolveGitRoot(ctx.cwd) || ctx.cwd;
-      const hasGit = resolveGitRoot(ctx.cwd) !== null;
-
-      // Resolve .pi-context directory
-      const piContextDir = resolvePiContextDir(repoRoot);
-      if (!piContextDir) {
-        // Missing store returns empty packet, not error
-        const timestamp = new Date().toISOString();
-        const packetId = generatePacketId([]);
-        const emptyResult: CtxPacketResult = {
-          packetId,
-          timestamp,
-          repoRoot,
-          gitCommit: hasGit ? getGitCommit(repoRoot) : null,
-          sourceEventIds: [],
-          summary: 'No events found.',
-          sections: {
-            recentDecisions: [],
-            recentVerification: [],
-            filesChanged: [],
-            commandsTestsRun: [],
-            blockers: [],
-            nextActions: [],
-            otherEvents: {},
-          },
-          path: join(repoRoot, 'packets.jsonl'),
-          backend: 'jsonl+nu',
-          mode,
-        };
-        const llmEncoded = encodeToon(emptyResult, { mode });
-        return {
-          content: [{ type: 'text', text: `Empty packet: ${packetId} — No events found.` }],
-          details: {
-            ...emptyResult,
-            tokenSavings: llmEncoded.tokenSavings,
-          },
-        };
-      }
-
-      const eventsPath = join(piContextDir, 'events.jsonl');
-      const packetsPath = join(piContextDir, 'packets.jsonl');
-
-      // Read recent records
-      let allRecords = readJsonl(eventsPath);
-      const totalRecords = allRecords.length;
-      allRecords = allRecords.slice(-limit);
-
-      // Filter by includeTypes
-      const filteredRecords = includeTypes.length > 0
-        ? allRecords.filter(r => includeTypes.includes((r.type as string) || ''))
-        : allRecords;
-
-      // Generate sections
-      const sections = generatePacketSections(filteredRecords);
-
-      // Build summary
-      const summaryParts: string[] = [];
-      if (sections.recentDecisions.length > 0) summaryParts.push(`Decisions: ${sections.recentDecisions.length}`);
-      if (sections.recentVerification.length > 0) summaryParts.push(`Verified: ${sections.recentVerification.length}`);
-      if (sections.filesChanged.length > 0) summaryParts.push(`Files changed: ${sections.filesChanged.length}`);
-      if (sections.commandsTestsRun.length > 0) summaryParts.push(`Commands/tests: ${sections.commandsTestsRun.length}`);
-      if (sections.blockers.length > 0) summaryParts.push(`Blockers: ${sections.blockers.length}`);
-      if (sections.nextActions.length > 0) summaryParts.push(`Next actions: ${sections.nextActions.length}`);
-      const summary = summaryParts.length > 0
-        ? `Summary: ${summaryParts.join(', ')}. Total events: ${totalRecords}.`
-        : 'No events found.';
-
-      // Source event IDs
-      const sourceEventIds = filteredRecords.map(r => r.id as string).filter(Boolean);
-
-      // Generate packet
-      const timestamp = new Date().toISOString();
-      const packetId = generatePacketId(filteredRecords);
-      const packet = {
-        packetId,
-        timestamp,
-        repoRoot,
-        gitCommit: hasGit ? getGitCommit(repoRoot) : null,
-        sourceEventIds,
-        summary,
-        sections,
-        source: 'ctx_packet',
-        backend: 'jsonl+nu',
-      };
-
-      // Append to packets.jsonl
-      appendFileSync(packetsPath, JSON.stringify(packet) + '\n');
-
-      // Format output
-      const result: CtxPacketResult = {
-        ...packet,
-        path: packetsPath,
-        backend: 'jsonl+nu',
-        mode,
-      };
-      const llmEncoded = encodeToon(result, { mode });
-
-      // User text: readable summary
-      const userLines = [`Context packet ${packetId}:`, ``, summary];
-      if (sections.recentDecisions.length > 0) userLines.push(`\nDecisions:`, ...sections.recentDecisions.slice(-5));
-      if (sections.blockers.length > 0) userLines.push(`\nBlockers:`, ...sections.blockers.slice(-5));
-      if (sections.nextActions.length > 0) userLines.push(`\nNext actions:`, ...sections.nextActions.slice(-5));
-
-      return {
-        content: [{ type: 'text', text: userLines.join('\n') }],
-        details: {
-          ...result,
-          tokenSavings: llmEncoded.tokenSavings,
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeCtxPacketOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
   });
 }

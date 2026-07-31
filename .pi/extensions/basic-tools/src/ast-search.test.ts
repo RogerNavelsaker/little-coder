@@ -43,4 +43,15 @@ describe("ast_search tool", () => {
     expect(result.isError).toBe(true);
     expect(result.details.errorType).toBe("not-found");
   });
+
+  test("ops array parameter support", async () => {
+    const { result } = await invokeTool(registerAstSearchTool, {
+      ops: [
+        { pattern: "export function $A($B)", path: `${CWD}/src` },
+        { pattern: "import $A from $B", path: `${CWD}/src` },
+      ],
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.details.totalSearches).toBe(2);
+  });
 });

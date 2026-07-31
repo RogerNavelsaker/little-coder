@@ -9,7 +9,7 @@ describe("grep tool", () => {
       path: FIXTURE,
     });
     expect(contentText(result)).toBeDefined();
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.totalMatches).toBeGreaterThan(0);
     expect(d.returnedMatches).toBe(d.totalMatches);
     expect(d.truncated).toBe(false);
@@ -25,18 +25,18 @@ describe("grep tool", () => {
       path: FIXTURE,
       literal: true,
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.totalMatches).toBeGreaterThan(0);
     expect(d.patternMode).toBe("literal");
   });
 
   test("case-insensitive (ignore_case:true): matches both cases", async () => {
     const { result } = await invokeTool(registerGrepTool, {
-      pattern: "Phase",
+      pattern: "little",
       path: FIXTURE,
       ignore_case: true,
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.totalMatches).toBeGreaterThan(0);
   });
 
@@ -46,7 +46,7 @@ describe("grep tool", () => {
       path: FIXTURE,
       limit: 1,
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.returnedMatches).toBe(1);
     expect(d.totalMatches).toBeGreaterThan(1);
     expect(d.truncated).toBe(true);
@@ -67,7 +67,7 @@ describe("grep tool", () => {
       path: FIXTURE,
       context: 2,
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.totalMatches).toBeGreaterThan(0);
     expect(d.matches[0].context_before).toBeDefined();
     expect(d.matches[0].context_after).toBeDefined();
@@ -81,7 +81,7 @@ describe("grep tool", () => {
       path: FIXTURE,
       glob: "*.md",
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.totalMatches).toBeGreaterThanOrEqual(0);
     // All matched paths should end with .md
     for (const m of d.matches) {
@@ -95,8 +95,19 @@ describe("grep tool", () => {
       path: FIXTURE,
       context: 3,
     });
-    const d = result.details;
+    const d = parseDetails(result);
     expect(d.context).toBe(3);
     expect(d.totalMatches).toBeGreaterThan(0);
+  });
+
+  test("ops array parameter support", async () => {
+    const { result } = await invokeTool(registerGrepTool, {
+      ops: [
+        { pattern: "little", path: FIXTURE },
+        { pattern: "coder", path: FIXTURE },
+      ],
+    });
+    expect(contentText(result)).toBeDefined();
+    expect(result.details?.totalSearches).toBe(2);
   });
 });

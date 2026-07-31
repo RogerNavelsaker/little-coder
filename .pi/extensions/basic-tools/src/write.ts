@@ -130,7 +130,7 @@ function computeDiff(oldContent: string, newContent: string): string {
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     });
-    if (result.status !== 0 || !result.stdout || result.stdout.length === 0) return '';
+    if (result.status === null || result.status > 1 || !result.stdout || result.stdout.length === 0) return '';
     return result.stdout.toString().trim();
   } catch {
     return '';
@@ -311,6 +311,58 @@ async function executeSingleFileWrite(
 }
 
 /**
+ * Exported executeWriteOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeWriteOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  const files: WriteFileSpec[] =
+    params.ops ??
+    params.files ??
+    (params.path ? [{ path: params.path, content: params.content, if_exists: params.if_exists, create_dirs: params.create_dirs }] : []);
+
+  if (!files || files.length === 0) {
+    return {
+      content: [{ type: 'text', text: error('invalid-params', 'ops[] or files[] is required (e.g. ops: [{path, content}])', { tool: 'write' }).message }],
+      isError: true,
+      details: { errorType: 'invalid-params' },
+    };
+  }
+
+  if (files.length === 1) {
+    return executeSingleFileWrite(files[0], ctx) as any;
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  for (const spec of files) {
+    const r = await executeSingleFileWrite(spec, ctx);
+    results.push(r);
+  }
+
+  const allOk = results.every(r => !(r as any).isError);
+  const writeMap: Record<string, unknown> = {};
+  for (const r of results) {
+    const d = (r as any).details ?? {};
+    if (d.path) {
+      writeMap[d.path] = d.afterAnchors ?? [];
+    }
+  }
+
+  return {
+    content: [{ type: 'text' as const, text: encodeToon({ write: writeMap }).text }],
+    details: {
+      files: results.map(r => (r as any).details),
+      totalFiles: files.length,
+    },
+    ...(!allOk ? { isError: true } : {}),
+  };
+}
+
+/**
  * Register the write tool with pi.
  */
 export function registerWriteTool(pi: ExtensionAPI) {
@@ -329,9 +381,12 @@ export function registerWriteTool(pi: ExtensionAPI) {
   });
 
   const writeSchema = Type.Object({
-    files: Type.Array(writeFileSpecSchema, {
-      description: 'Files to write. Single: files: [{path, content}]. Multi: files: [{path, content}, {path, content}].',
-    }),
+    ops: Type.Optional(Type.Array(writeFileSpecSchema, { description: 'Write operations array. Single: ops: [{path, content}]. Multi: ops: [{path, content}, ...]' })),
+    files: Type.Optional(Type.Array(writeFileSpecSchema, { description: 'Files to write (alias for ops)' })),
+    path: Type.Optional(Type.String({ description: 'File path (direct parameter)' })),
+    content: Type.Optional(Type.String({ description: 'Content (direct parameter)' })),
+    if_exists: Type.Optional(Type.Union([Type.Literal('overwrite'), Type.Literal('error'), Type.Literal('append')])),
+    create_dirs: Type.Optional(Type.Union([Type.Boolean(), Type.String()])),
     display: Type.Optional(Type.Union([
       Type.Literal('compact', { description: 'Compact: 1-5 short visible lines (default)' }),
       Type.Literal('table', { description: 'Markdown table via renderResult' }),
@@ -343,50 +398,18 @@ export function registerWriteTool(pi: ExtensionAPI) {
     name: 'write',
     label: 'Write',
     description:
-      'Create or overwrite files. Always pass files[]. '
-      + 'Single: files: [{path, content}]. Multi: files: [{path, content}, ...].',
+      'Create or overwrite files. Pass ops: [{path, content, if_exists?, create_dirs?}].',
     promptSnippet: 'Write files (create, overwrite, append)',
     promptGuidelines: [
       'Prefer edit for small changes to existing files.',
-      'Always pass files: [{path, content, if_exists?, create_dirs?}].',
-      'Single write: files: [{path: "src/foo.ts", content: "..."}].',
-      'Multi-write: files: [{path: "a.ts", content: "..."}, {path: "b.ts", content: "..."}].',
+      'Pass ops: [{path, content, if_exists?, create_dirs?}].',
+      'Single write: ops: [{path: "src/foo.ts", content: "..."}].',
+      'Multi-write: ops: [{path: "a.ts", content: "..."}, {path: "b.ts", content: "..."}].',
       'Use if_exists: "append" to append; if_exists: "error" to guard.',
     ],
     parameters: writeSchema,
-    async execute(_toolCallId, params: WriteToolParams, _signal, _onUpdate, ctx) {
-      if (!params.files || params.files.length === 0) {
-        return {
-          content: [{ type: 'text', text: error('invalid-params', 'files[] is required (e.g. files: [{path, content}])', { tool: 'write' }).message }],
-          isError: true,
-          details: { errorType: 'invalid-params' },
-        };
-      }
-
-      if (params.files.length === 1) {
-        return executeSingleFileWrite(params.files[0], ctx) as any;
-      }
-
-      // Multi-file: apply each, collect results
-      const results: Array<Record<string, unknown>> = [];
-      for (const spec of params.files) {
-        const r = await executeSingleFileWrite(spec, ctx);
-        results.push(r);
-      }
-
-      const allOk = results.every(r => !(r as any).isError);
-      const writeMap: Record<string, unknown> = {};
-      for (const r of results) {
-        const d = (r as any).details ?? {};
-        writeMap[d.path ?? ''] = [{ created: d.created, overwritten: d.overwritten, appended: d.appended, bytesWritten: d.bytesWritten, linesWritten: d.linesWritten, diff: d.diff ?? '' }];
-      }
-      return {
-        content: [{ type: 'text' as const, text: encodeToon({ write: writeMap }).text }],
-        details: {
-          files: results.map(r => (r as any).details),
-        },
-        ...(allOk ? {} : { isError: true }),
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeWriteOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
 
     renderResult(result, { expanded }, theme, _context) {

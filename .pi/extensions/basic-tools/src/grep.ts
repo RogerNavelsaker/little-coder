@@ -212,40 +212,249 @@ const LINEHASH_BIN = resolveLinehashBin();
  */
 
 /**
+ * Exported executeGrepOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeGrepOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeGrepOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeGrepOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const grepMap: Record<string, unknown> = {};
+    for (const r of results) {
+      const d = (r as any).details ?? {};
+      grepMap[d.query ?? ''] = d.matches ?? [];
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ grep: grepMap }).text }],
+      details: {
+        searches: results.map(r => (r as any).details),
+        totalSearches: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const pattern = params.pattern;
+  const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
+  const literal = params.literal === true || params.literal === 'true';
+  const ignoreCase = params.ignore_case === true || params.ignore_case === 'true';
+  const includeExcluded = params.include_excluded === true || params.include_excluded === 'true';
+  const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
+  const context = typeof params.context === 'string' ? parseInt(params.context, 10) : params.context;
+  const glob = params.glob;
+
+  // Load settings
+  const { settings, warnings } = loadSettings(ctx.cwd);
+  const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
+
+  // Apply default excludes unless include_excluded is true
+  const excludes = includeExcluded ? [] : settings.defaultExcludes;
+
+  // Validate search path
+  if (!existsSync(searchPath)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'grep', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'not-found', path: searchPath },
+    };
+  }
+
+  // Validate pattern
+  if (!pattern) {
+    return {
+      content: [{ type: 'text', text: error('invalid-params', 'pattern is required', { tool: 'grep' }).message }],
+      isError: true,
+      details: { errorType: 'invalid-params' },
+    };
+  }
+
+  // Stream rg output with throttled onUpdate
+  const throttle = makeThrottle(500);
+  const matches: GrepMatch[] = [];
+  const searchedPathsSet = new Set<string>();
+  let killedEarly = false;
+  let rgStderr = '';
+  let pendingContextBefore: string[] | undefined;
+
+  const { proc, kill } = runRgStream(pattern, searchPath, { literal, ignoreCase, excludes, context, glob }, (line) => {
+    let parsed: { type: string; data: unknown };
+    try {
+      parsed = JSON.parse(line);
+    } catch { return; }
+
+    if (parsed.type === 'begin') {
+      const path = (parsed.data as { path?: { text?: string } }).path?.text;
+      if (path) searchedPathsSet.add(path);
+    } else if (parsed.type === 'match') {
+      const m = parseRgMatchLine(line);
+      if (m) {
+        if (pendingContextBefore) {
+          m.context_before = pendingContextBefore;
+          pendingContextBefore = undefined;
+        }
+        matches.push(m);
+
+        if (limit !== undefined && matches.length >= limit) {
+          killedEarly = true;
+          kill();
+        }
+
+        throttle(() => {
+          _onUpdate?.({
+            content: [],
+            details: { totalMatches: matches.length, truncated: false },
+          });
+        });
+      }
+    } else if (parsed.type === 'context') {
+      const data = (parsed.data as {
+        path?: { text?: string };
+        line_number?: number;
+        lines?: { text?: string };
+      });
+      const ctxLine = data.lines?.text;
+      if (ctxLine !== undefined) {
+        const last = matches[matches.length - 1];
+        if (last) {
+          if (!last.context_after) last.context_after = [];
+          last.context_after.push(ctxLine);
+        } else {
+          if (!pendingContextBefore) pendingContextBefore = [];
+          pendingContextBefore.push(ctxLine);
+        }
+      }
+    }
+  });
+
+  const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+    proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
+    proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
+  });
+  rgStderr = stderr;
+
+  if (exitCode > 1) {
+    return {
+      content: [{ type: 'text', text: error('binary-failed', `rg exited ${exitCode}: ${rgStderr.trim()}`, { tool: 'grep', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: rgStderr.trim() },
+    };
+  }
+
+  const totalMatches = matches.length;
+  const returnedMatches = limit !== undefined ? Math.min(totalMatches, limit) : totalMatches;
+  const truncated = killedEarly || (limit !== undefined && totalMatches > limit);
+  const displayedMatches = truncated ? matches.slice(0, limit) : matches;
+
+  // Enrich displayed matches with anchors (batch on final set)
+  const matchesByFile = new Map<string, GrepMatch[]>();
+  const fileLines = new Map<string, Set<number>>();
+
+  for (const m of displayedMatches) {
+    if (!matchesByFile.has(m.path)) {
+      matchesByFile.set(m.path, []);
+      fileLines.set(m.path, new Set());
+    }
+    matchesByFile.get(m.path)!.push(m);
+    fileLines.get(m.path)!.add(m.line);
+  }
+
+  const fileAnchors = new Map<string, Map<number, string>>();
+  for (const [filePath, lineSet] of fileLines) {
+    fileAnchors.set(filePath, await getAnchorsForLines(filePath, lineSet));
+  }
+
+  for (const m of displayedMatches) {
+    const anchors = fileAnchors.get(m.path);
+    if (anchors) {
+      const anchor = anchors.get(m.line);
+      if (anchor !== undefined) {
+        m.anchor = anchor;
+      } else {
+        m.anchor_error = `linehash did not return anchor for line ${m.line}`;
+      }
+    } else {
+      m.anchor_error = 'linehash failed for this file';
+    }
+  }
+
+  // --- content.text: matches JSON → TOON ---
+  const contentMatches = displayedMatches.map(m => ({ path: m.path, line: m.line, text: m.text, anchor: m.anchor ?? null }));
+  const contentToon = encodeToon({ grep: { [pattern]: contentMatches } });
+
+  return {
+    content: [{ type: 'text', text: contentToon.text }],
+    details: {
+      query: pattern,
+      cwd: ctx.cwd,
+      patternMode: literal ? 'literal' : 'regex',
+      searchedPaths: [...searchedPathsSet],
+      truncated,
+      totalMatches,
+      returnedMatches,
+      matches: displayedMatches.map(m => ({ path: m.path, line: m.line, anchor: m.anchor ?? null, text: m.text, context_before: m.context_before ?? null, context_after: m.context_after ?? null })),
+      context,
+      ...(settingsWarning ? { settingsWarning } : {}),
+    },
+  };
+}
+
+/**
  * Register the grep tool with pi.
  */
 export function registerGrepTool(pi: ExtensionAPI) {
-  const grepSchema = Type.Object({
-    pattern: Type.String({ description: 'Search pattern (regex or literal)' }),
-    path: Type.Optional(Type.String({ description: 'File or directory to search (defaults to cwd)' })),
-    literal: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Treat pattern as literal string (not regex)' }),
-        Type.String({ description: 'Treat pattern as literal string (not regex)' }),
-      ], { description: 'If true, use rg -F for literal matching' })
-    ),
-    ignore_case: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Case-insensitive search' }),
-        Type.String({ description: 'Case-insensitive search' }),
-      ], { description: 'If true, use rg -i for case-insensitive matching' })
-    ),
-    limit: Type.Optional(
-      Type.Union([
-        Type.Number({ description: 'Maximum number of matches to return' }),
-        Type.String({ description: 'Maximum number of matches to return' }),
-      ], { description: 'Limit the number of matches returned' })
-    ),
-    context: Type.Optional(
-      Type.Union([
-        Type.Number({ description: 'Number of context lines before and after each match (rg -B N -A N)' }),
-        Type.String({ description: 'Number of context lines before and after each match (rg -B N -A N)' }),
-      ], { description: 'Show surrounding context lines' })
-    ),
-    glob: Type.Optional(
-      Type.String({ description: 'Glob pattern to scope search (rg --glob <pattern>)' })
-    ),
+  const grepItemSchema = Type.Object({
+    pattern: Type.String({ description: 'Text or regex pattern to search for' }),
+    path: Type.Optional(Type.String({ description: 'File or directory path to search (defaults to cwd)' })),
+    literal: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Treat pattern as literal string instead of regex' }),
+      Type.String({ description: 'Treat pattern as literal string instead of regex' }),
+    ])),
+    ignore_case: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Case-insensitive search' }),
+      Type.String({ description: 'Case-insensitive search' }),
+    ])),
+    context: Type.Optional(Type.Union([
+      Type.Number({ description: 'Lines of surrounding context (-B/-A)' }),
+      Type.String({ description: 'Lines of surrounding context (-B/-A)' }),
+    ])),
+    glob: Type.Optional(Type.String({ description: 'Glob pattern to filter files (e.g. "*.ts")' })),
+    limit: Type.Optional(Type.Union([
+      Type.Number({ description: 'Maximum total matches to return' }),
+      Type.String({ description: 'Maximum total matches to return' }),
+    ])),
+  });
 
+  const grepSchema = Type.Object({
+    ops: Type.Optional(Type.Array(grepItemSchema, { description: 'Grep operations array. Single: ops: [{pattern: "foo"}]. Multi: ops: [{pattern: "a"}, {pattern: "b"}]' })),
+    pattern: Type.Optional(Type.String({ description: 'Text or regex pattern to search for' })),
+    path: Type.Optional(Type.String({ description: 'File or directory path to search (defaults to cwd)' })),
+    literal: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Treat pattern as literal string instead of regex' }),
+      Type.String({ description: 'Treat pattern as literal string instead of regex' }),
+    ])),
+    ignore_case: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Case-insensitive search' }),
+      Type.String({ description: 'Case-insensitive search' }),
+    ])),
+    context: Type.Optional(Type.Union([
+      Type.Number({ description: 'Lines of surrounding context (-B/-A)' }),
+      Type.String({ description: 'Lines of surrounding context (-B/-A)' }),
+    ])),
+    glob: Type.Optional(Type.String({ description: 'Glob pattern to filter files (e.g. "*.ts")' })),
+    limit: Type.Optional(Type.Union([
+      Type.Number({ description: 'Maximum total matches to return' }),
+      Type.String({ description: 'Maximum total matches to return' }),
+    ])),
     display: Type.Optional(
       Type.Union([
         Type.Literal('auto', { description: 'Auto: compact by default, fuller when expanded (default)' }),
@@ -260,184 +469,19 @@ export function registerGrepTool(pi: ExtensionAPI) {
     name: 'grep',
     label: 'Grep',
     description:
-      'Search text and regex patterns across files. '
-      + 'Returns structured matches with line anchors for follow-up edits. '
-      + 'Supports regex (default) and literal mode, case-insensitive search, '
-      + 'and result limiting. Applies default excludes unless include_excluded: true.',
+      'Search text and regex patterns across files. Pass ops: [{pattern, path?, glob?}].',
     promptSnippet: 'Search text and regex patterns across files',
     promptGuidelines: [
-      'Use grep for text and regex search across files.',
+      'Pass ops: [{pattern, path?, glob?}].',
       'Use literal: true for exact string matching (no regex).',
       'Use ignore_case: true for case-insensitive search.',
       'Use limit to cap the number of results.',
       'Use context: N to show N lines of surrounding context (rg -B N -A N).',
       'Use glob: "*.ext" to scope search to specific file patterns.',
-      'Use returned line anchors when a match will be edited.',
-      'Use include_excluded: true only when you need to search excluded directories.',
-      'For broad searches (e.g. ~/.pi/agent), use a targeted path or limit to avoid overflow.',
     ],
     parameters: grepSchema,
-    async execute(_toolCallId, params: GrepToolParams, _signal, _onUpdate, ctx) {
-      const pattern = params.pattern;
-      const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
-      const literal = params.literal === true || params.literal === 'true';
-      const ignoreCase = params.ignore_case === true || params.ignore_case === 'true';
-      const includeExcluded = params.include_excluded === true || params.include_excluded === 'true';
-      const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : params.limit;
-      const context = typeof params.context === 'string' ? parseInt(params.context, 10) : params.context;
-      const glob = params.glob;
-      const mode = (params.mode ?? 'toon') as ToonMode;
-
-      // Load settings
-      const { settings, warnings } = loadSettings(ctx.cwd);
-      const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
-
-      // Apply default excludes unless include_excluded is true
-      const excludes = includeExcluded ? [] : settings.defaultExcludes;
-
-      // Validate search path
-      if (!existsSync(searchPath)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'grep', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'not-found', path: searchPath },
-        };
-      }
-
-      // Stream rg output with throttled onUpdate
-      const throttle = makeThrottle(500);
-      const matches: GrepMatch[] = [];
-      const searchedPathsSet = new Set<string>();
-      let killedEarly = false;
-      let rgStderr = '';
-      let pendingContextBefore: string[] | undefined;
-
-      const { proc, kill } = runRgStream(pattern, searchPath, { literal, ignoreCase, excludes, context, glob }, (line) => {
-        let parsed: { type: string; data: unknown };
-        try {
-          parsed = JSON.parse(line);
-        } catch { return; }
-
-        if (parsed.type === 'begin') {
-          const path = (parsed.data as { path?: { text?: string } }).path?.text;
-          if (path) searchedPathsSet.add(path);
-        } else if (parsed.type === 'match') {
-          const m = parseRgMatchLine(line);
-          if (m) {
-            // Attach pending context_before from preceding context lines
-            if (pendingContextBefore) {
-              m.context_before = pendingContextBefore;
-              pendingContextBefore = undefined;
-            }
-            matches.push(m);
-
-            // Kill when limit reached
-            if (limit !== undefined && matches.length >= limit) {
-              killedEarly = true;
-              kill();
-            }
-
-            // Throttled progress update
-            throttle(() => {
-              _onUpdate?.({
-                content: [],
-                details: { totalMatches: matches.length, truncated: false },
-              });
-            });
-          }
-        } else if (parsed.type === 'context') {
-          const data = (parsed.data as {
-            path?: { text?: string };
-            line_number?: number;
-            lines?: { text?: string };
-          });
-          const ctxLine = data.lines?.text;
-          if (ctxLine !== undefined) {
-            const last = matches[matches.length - 1];
-            if (last) {
-              // context_after → previous match
-              if (!last.context_after) last.context_after = [];
-              last.context_after.push(ctxLine);
-            } else {
-              // context_before → pending for next match
-              if (!pendingContextBefore) pendingContextBefore = [];
-              pendingContextBefore.push(ctxLine);
-            }
-          }
-        }
-      });
-
-      // Wait for process to close
-      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
-        proc.on('close', (code) => resolve({ exitCode: code ?? 1, stderr: '' }));
-        proc.on('error', () => resolve({ exitCode: 1, stderr: 'process error' }));
-      });
-      rgStderr = stderr;
-
-      if (exitCode > 1) {
-        return {
-          content: [{ type: 'text', text: error('binary-failed', `rg exited ${exitCode}: ${rgStderr.trim()}`, { tool: 'grep', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'binary-failed', path: searchPath, exitCode, stderr: rgStderr.trim() },
-        };
-      }
-
-      const totalMatches = matches.length;
-      const returnedMatches = limit !== undefined ? Math.min(totalMatches, limit) : totalMatches;
-      const truncated = killedEarly || (limit !== undefined && totalMatches > limit);
-      const displayedMatches = truncated ? matches.slice(0, limit) : matches;
-
-      // Enrich displayed matches with anchors (batch on final set)
-      const matchesByFile = new Map<string, GrepMatch[]>();
-      const fileLines = new Map<string, Set<number>>();
-
-      for (const m of displayedMatches) {
-        if (!matchesByFile.has(m.path)) {
-          matchesByFile.set(m.path, []);
-          fileLines.set(m.path, new Set());
-        }
-        matchesByFile.get(m.path)!.push(m);
-        fileLines.get(m.path)!.add(m.line);
-      }
-
-      const fileAnchors = new Map<string, Map<number, string>>();
-      for (const [filePath, lineSet] of fileLines) {
-        fileAnchors.set(filePath, await getAnchorsForLines(filePath, lineSet));
-      }
-
-      for (const m of displayedMatches) {
-        const anchors = fileAnchors.get(m.path);
-        if (anchors) {
-          const anchor = anchors.get(m.line);
-          if (anchor !== undefined) {
-            m.anchor = anchor;
-          } else {
-            m.anchor_error = `linehash did not return anchor for line ${m.line}`;
-          }
-        } else {
-          m.anchor_error = 'linehash failed for this file';
-        }
-      }
-
-      // --- content.text: matches JSON → TOON ---
-      const contentMatches = displayedMatches.map(m => ({ path: m.path, line: m.line, text: m.text, anchor: m.anchor ?? null }));
-      const contentToon = encodeToon({ grep: { [pattern]: contentMatches } });
-
-      return {
-        content: [{ type: 'text', text: contentToon.text }],
-        details: {
-          query: pattern,
-          cwd: ctx.cwd,
-          patternMode: literal ? 'literal' : 'regex',
-          searchedPaths: [...searchedPathsSet],
-          truncated,
-          totalMatches,
-          returnedMatches,
-          matches: displayedMatches.map(m => ({ path: m.path, line: m.line, anchor: m.anchor ?? null, text: m.text, context_before: m.context_before ?? null, context_after: m.context_after ?? null })),
-          context,
-          ...(settingsWarning ? { settingsWarning } : {}),
-        },
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeGrepOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0) as unknown as Component;

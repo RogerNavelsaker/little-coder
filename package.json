@@ -30,11 +30,19 @@
   "scripts": {
     "pi": "pi",
     "dev": "bun bin/little-coder.ts",
-    "test": "find .pi -name '*.test.ts' | xargs -I{} bun test ./{}",
+    "test": "find .pi scripts -name '*.test.ts' | sed 's|^|./|' | xargs -n 1 bun test",
+    "test:coverage": "bun test .pi/extensions/**/*.test.ts --coverage --coverage-dir=coverage",
     "typecheck": "tsc --noEmit",
     "build": "bun build --compile --bytecode --minify --format=esm bin/little-coder.ts --outfile dist/little-coder",
     "build:release": "bun scripts/build-release.ts",
-    "postinstall": "bun scripts/patch-pi.ts"
+    "postinstall": "bun scripts/patch-pi.ts",
+    "check:tool-contracts": "bun run scripts/check-tool-contracts.ts",
+    "check:clean": "bun run scripts/check-repo-cleanliness.ts",
+    "check:ci-parity": "bun run scripts/check-ci-parity.ts",
+    "check:precommit": "bun run check:clean && bun run typecheck && bun run check:tool-contracts",
+    "check:prepush": "bun install --frozen-lockfile && bun run verify:ci",
+    "check:all": "bun run check:clean && bun run typecheck && bun run check:tool-contracts && bun run test && bun run check:ci-parity",
+    "verify:ci": "bun run build && bun run check:all && git diff --exit-code"
   },
   "dependencies": {},
   "devDependencies": {

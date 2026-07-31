@@ -242,10 +242,235 @@ function buildNativeLsText(
 }
 
 /**
+ * Execute the ls operation.
+ */
+export async function executeLsOp(
+  _toolCallId: string,
+  params: LsToolParams & { ops?: LsToolParams[] },
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeLsOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map(op => executeLsOp(_toolCallId, op, _signal, _onUpdate, ctx))
+    );
+    const allOk = results.every(r => !(r as any).isError);
+    const lsMap: Record<string, unknown> = {};
+    for (const r of results) {
+      const d = (r as any).details ?? {};
+      lsMap[d.path ?? ''] = d.entries ?? [];
+    }
+    return {
+      content: [{ type: 'text' as const, text: encodeToon({ ls: lsMap }).text }],
+      details: {
+        directories: results.map(r => (r as any).details),
+        totalDirectories: params.ops.length,
+      },
+      ...(!allOk ? { isError: true } : {}),
+    };
+  }
+
+  const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
+  const all = params.all === true || params.all === 'true';
+  const long = params.long === true || params.long === 'true';
+  const dirsFirst = params.dirs_first !== false && params.dirs_first !== 'false'; // default true
+  const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : (params.limit ?? 200);
+  const treeMode = params.tree === true || params.tree === 'true';
+  const treeDepth = typeof params.depth === 'string' ? parseInt(params.depth, 10) : (params.depth ?? 3);
+  const mode = (params.mode ?? 'toon') as ToonMode;
+
+  // Load settings
+  const { settings, warnings } = loadSettings(ctx.cwd);
+  const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
+
+  // Use settings budget as the default limit if no explicit limit
+  const effectiveLimit = params.limit !== undefined ? limit : settings.lsMaxEntries;
+
+  // Validate search path
+  if (!existsSync(searchPath)) {
+    return {
+      content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'ls', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'not-found', path: searchPath },
+    };
+  }
+
+  // Check if path is a file (not a directory)
+  const stat = statSync(searchPath);
+  if (stat.isFile()) {
+    return {
+      content: [{ type: 'text', text: error('invalid-params', `${searchPath} is a file, not a directory. Use read tool for file contents.`, { tool: 'ls', path: searchPath }).message }],
+      isError: true,
+      details: { errorType: 'invalid-params', path: searchPath, isFile: true },
+    };
+  }
+
+  let entries: LsEntry[];
+  let backend: LsResult['backend'];
+  let command: string[];
+
+  // Try nu first for structured metadata
+  const nuResult = runNuLs(searchPath, all, dirsFirst);
+  if (nuResult && nuResult.entries.length > 0) {
+    // Sort if needed (nu ls doesn't guarantee dirs-first)
+    if (dirsFirst) {
+      nuResult.entries.sort((a, b) => {
+        const aIsDir = a.type === 'directory' ? 0 : 1;
+        const bIsDir = b.type === 'directory' ? 0 : 1;
+        return (aIsDir - bIsDir) || a.name.localeCompare(b.name);
+      });
+    }
+
+    entries = nuResult.entries;
+
+    // Determine backend: eza+nu if eza available, else nu-native
+    const ezaAvailable = runEzaDisplay(searchPath, all, long, dirsFirst) !== null;
+    if (ezaAvailable) {
+      backend = 'eza+nu';
+      command = [EZA_BIN, '--color', 'never', ...(long ? ['--long'] : []), ...(all ? ['--all'] : []), ...(dirsFirst ? ['--group-directories-first'] : []), searchPath];
+    } else {
+      backend = 'nu-native';
+      command = [NU_BIN, '-c', `ls${all ? ' -a' : ''} '${searchPath}' | select name type size modified`];
+    }
+  } else {
+    // Fallback to native fs
+    backend = 'native-fallback';
+    command = ['ls', ...(all ? ['-a'] : []), ...(long ? ['-l'] : []), searchPath];
+
+    const rawEntries = readdirSync(searchPath, { withFileTypes: true });
+    entries = rawEntries
+      .filter(e => all || !e.name.startsWith('.'))
+      .map(e => {
+        const fullPath = resolve(searchPath, e.name);
+        let entryStat: Stats;
+        try {
+          entryStat = statSync(fullPath);
+        } catch {
+          entryStat = {
+            isFile: () => false,
+            isDirectory: () => false,
+            isSymbolicLink: () => true,
+            isSocket: () => false,
+            isFIFO: () => false,
+            mtime: new Date(0),
+            size: BigInt(0),
+          } as unknown as Stats;
+        }
+
+        let type: LsEntry['type'] = 'other';
+        if (entryStat.isFile()) type = 'file';
+        else if (entryStat.isDirectory()) type = 'directory';
+        else if (entryStat.isSymbolicLink()) type = 'symlink';
+        else if (entryStat.isSocket()) type = 'socket';
+        else if (entryStat.isFIFO()) type = 'pipe';
+
+        return {
+          name: e.name,
+          path: fullPath,
+          type,
+          size: entryStat.size,
+          modified: new Date(entryStat.mtime).toISOString().replace('T', ' ').substring(0, 19),
+          depth: 1,
+        };
+      });
+
+    // Sort: dirs first if requested
+    if (dirsFirst) {
+      entries.sort((a, b) => {
+        const aIsDir = a.type === 'directory' ? 0 : 1;
+        const bIsDir = b.type === 'directory' ? 0 : 1;
+        return (aIsDir - bIsDir) || a.name.localeCompare(b.name);
+      });
+    } else {
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }
+
+  const totalEntries = entries.length;
+  const truncated = totalEntries > effectiveLimit;
+  const displayed = entries.slice(0, effectiveLimit);
+
+  // --- details: structured metadata for agents + renderResult ---
+  const displayedEntries = displayed.map(e => ({
+    name: e.name,
+    path: e.path,
+    type: e.type,
+    size: e.size,
+    modified: e.modified,
+  }));
+  const detailsObj = {
+    path: searchPath,
+    entries: displayedEntries,
+    totalEntries,
+    returnedEntries: displayed.length,
+    truncated,
+    all,
+    tree: treeMode,
+    ...(settingsWarning ? { settingsWarning } : {}),
+  };
+
+  // --- content.text: TOON-encoded for LLM (tree text in tree mode) ---
+  let llmContentText: string;
+  if (treeMode) {
+    const treeArgs = [
+      '--tree', '--color=never',
+      '--level', String(treeDepth),
+      '--group-directories-first',
+      ...(all ? ['--all'] : []),
+      searchPath,
+    ];
+    const treeOut = spawnSync(EZA_BIN, treeArgs, { encoding: 'utf-8', timeout: 10000 });
+    llmContentText = treeOut.status === 0 && treeOut.stdout
+      ? treeOut.stdout.trimEnd()
+      : encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
+  } else {
+    llmContentText = encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
+  }
+
+  return {
+    content: [{ type: 'text', text: llmContentText }],
+    details: detailsObj,
+  };
+}
+
+/**
  * Register the ls tool with pi.
  */
 export function registerLsTool(pi: ExtensionAPI) {
+  const lsItemSchema = Type.Object({
+    path: Type.Optional(Type.String({ description: 'Directory to list (defaults to cwd)' })),
+    all: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Include hidden files/directories (dotfiles)' }),
+      Type.String({ description: 'Include hidden files/directories (dotfiles)' }),
+    ], { description: 'Show hidden entries (default: false)' })),
+    long: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Include size and modified time' }),
+      Type.String({ description: 'Include size and modified time' }),
+    ], { description: 'Show detailed info (default: false)' })),
+    dirs_first: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'List directories before files' }),
+      Type.String({ description: 'List directories before files' }),
+    ], { description: 'Directories first (default: true)' })),
+    limit: Type.Optional(Type.Union([
+      Type.Number({ description: 'Maximum number of entries to return' }),
+      Type.String({ description: 'Maximum number of entries to return' }),
+    ], { description: 'Limit results (default: 200)' })),
+    tree: Type.Optional(Type.Union([
+      Type.Boolean({ description: 'Show recursive tree view via eza --tree' }),
+      Type.String({ description: 'Show recursive tree view via eza --tree' }),
+    ], { description: 'Tree view: shows full recursive directory structure (default: false)' })),
+    depth: Type.Optional(Type.Union([
+      Type.Number({ description: 'Max depth for tree view (default: 3)' }),
+      Type.String({ description: 'Max depth for tree view (default: 3)' }),
+    ], { description: 'Max recursion depth for tree mode (default: 3)' })),
+  });
+
   const lsSchema = Type.Object({
+    ops: Type.Optional(Type.Array(lsItemSchema, { description: 'List operations array. Single: ops: [{path: "."}]. Multi: ops: [{path: "src"}, {path: "test"}]' })),
     path: Type.Optional(Type.String({ description: 'Directory to list (defaults to cwd)' })),
     all: Type.Optional(Type.Union([
       Type.Boolean({ description: 'Include hidden files/directories (dotfiles)' }),
@@ -299,168 +524,8 @@ export function registerLsTool(pi: ExtensionAPI) {
       'Use limit to cap the number of entries returned in flat mode.',
     ],
     parameters: lsSchema,
-    async execute(_toolCallId, params: LsToolParams, _signal, _onUpdate, ctx) {
-      const searchPath = params.path ? resolve(ctx.cwd, params.path.startsWith('@') ? params.path.slice(1) : params.path) : ctx.cwd;
-      const all = params.all === true || params.all === 'true';
-      const long = params.long === true || params.long === 'true';
-      const dirsFirst = params.dirs_first !== false && params.dirs_first !== 'false'; // default true
-      const limit = typeof params.limit === 'string' ? parseInt(params.limit, 10) : (params.limit ?? 200);
-      const treeMode = params.tree === true || params.tree === 'true';
-      const treeDepth = typeof params.depth === 'string' ? parseInt(params.depth, 10) : (params.depth ?? 3);
-      const mode = (params.mode ?? 'toon') as ToonMode;
-
-      // Load settings
-      const { settings, warnings } = loadSettings(ctx.cwd);
-      const settingsWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
-
-      // Use settings budget as the default limit if no explicit limit
-      const effectiveLimit = params.limit !== undefined ? limit : settings.lsMaxEntries;
-
-      // Validate search path
-      if (!existsSync(searchPath)) {
-        return {
-          content: [{ type: 'text', text: error('not-found', `Path not found: ${searchPath}`, { tool: 'ls', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'not-found', path: searchPath },
-        };
-      }
-
-      // Check if path is a file (not a directory)
-      const stat = statSync(searchPath);
-      if (stat.isFile()) {
-        return {
-          content: [{ type: 'text', text: error('invalid-params', `${searchPath} is a file, not a directory. Use read tool for file contents.`, { tool: 'ls', path: searchPath }).message }],
-          isError: true,
-          details: { errorType: 'invalid-params', path: searchPath, isFile: true },
-        };
-      }
-
-      let entries: LsEntry[];
-      let backend: LsResult['backend'];
-      let command: string[];
-
-      // Try nu first for structured metadata
-      const nuResult = runNuLs(searchPath, all, dirsFirst);
-      if (nuResult && nuResult.entries.length > 0) {
-        // Sort if needed (nu ls doesn't guarantee dirs-first)
-        if (dirsFirst) {
-          nuResult.entries.sort((a, b) => {
-            const aIsDir = a.type === 'directory' ? 0 : 1;
-            const bIsDir = b.type === 'directory' ? 0 : 1;
-            return (aIsDir - bIsDir) || a.name.localeCompare(b.name);
-          });
-        }
-
-        entries = nuResult.entries;
-
-        // Determine backend: eza+nu if eza available, else nu-native
-        const ezaAvailable = runEzaDisplay(searchPath, all, long, dirsFirst) !== null;
-        if (ezaAvailable) {
-          backend = 'eza+nu';
-          command = [EZA_BIN, '--color', 'never', ...(long ? ['--long'] : []), ...(all ? ['--all'] : []), ...(dirsFirst ? ['--group-directories-first'] : []), searchPath];
-        } else {
-          backend = 'nu-native';
-          command = [NU_BIN, '-c', `ls${all ? ' -a' : ''} '${searchPath}' | select name type size modified`];
-        }
-      } else {
-        // Fallback to native fs
-        backend = 'native-fallback';
-        command = ['ls', ...(all ? ['-a'] : []), ...(long ? ['-l'] : []), searchPath];
-
-        const rawEntries = readdirSync(searchPath, { withFileTypes: true });
-        entries = rawEntries
-          .filter(e => all || !e.name.startsWith('.'))
-          .map(e => {
-            const fullPath = resolve(searchPath, e.name);
-            let entryStat: Stats;
-            try {
-              entryStat = statSync(fullPath);
-            } catch {
-              entryStat = {
-                isFile: () => false,
-                isDirectory: () => false,
-                isSymbolicLink: () => true,
-                isSocket: () => false,
-                isFIFO: () => false,
-                mtime: new Date(0),
-                size: BigInt(0),
-              } as unknown as Stats;
-            }
-
-            let type: LsEntry['type'] = 'other';
-            if (entryStat.isFile()) type = 'file';
-            else if (entryStat.isDirectory()) type = 'directory';
-            else if (entryStat.isSymbolicLink()) type = 'symlink';
-            else if (entryStat.isSocket()) type = 'socket';
-            else if (entryStat.isFIFO()) type = 'pipe';
-
-            return {
-              name: e.name,
-              path: fullPath,
-              type,
-              size: entryStat.size,
-              modified: new Date(entryStat.mtime).toISOString().replace('T', ' ').substring(0, 19),
-              depth: 1,
-            };
-          });
-
-        // Sort: dirs first if requested
-        if (dirsFirst) {
-          entries.sort((a, b) => {
-            const aIsDir = a.type === 'directory' ? 0 : 1;
-            const bIsDir = b.type === 'directory' ? 0 : 1;
-            return (aIsDir - bIsDir) || a.name.localeCompare(b.name);
-          });
-        } else {
-          entries.sort((a, b) => a.name.localeCompare(b.name));
-        }
-      }
-
-      const totalEntries = entries.length;
-      const truncated = totalEntries > effectiveLimit;
-      const displayed = entries.slice(0, effectiveLimit);
-
-      // --- details: structured metadata for agents + renderResult ---
-      const displayedEntries = displayed.map(e => ({
-        name: e.name,
-        path: e.path,
-        type: e.type,
-        size: e.size,
-        modified: e.modified,
-      }));
-      const detailsObj = {
-        path: searchPath,
-        entries: displayedEntries,
-        totalEntries,
-        returnedEntries: displayed.length,
-        truncated,
-        all,
-        tree: treeMode,
-        ...(settingsWarning ? { settingsWarning } : {}),
-      };
-
-      // --- content.text: TOON-encoded for LLM (tree text in tree mode) ---
-      let llmContentText: string;
-      if (treeMode) {
-        const treeArgs = [
-          '--tree', '--color=never',
-          '--level', String(treeDepth),
-          '--group-directories-first',
-          ...(all ? ['--all'] : []),
-          searchPath,
-        ];
-        const treeOut = spawnSync(EZA_BIN, treeArgs, { encoding: 'utf-8', timeout: 10000 });
-        llmContentText = treeOut.status === 0 && treeOut.stdout
-          ? treeOut.stdout.trimEnd()
-          : encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
-      } else {
-        llmContentText = encodeToon({ ls: { [searchPath]: displayedEntries } }).text;
-      }
-
-      return {
-        content: [{ type: 'text', text: llmContentText }],
-        details: detailsObj,
-      };
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeLsOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0) as unknown as Component;

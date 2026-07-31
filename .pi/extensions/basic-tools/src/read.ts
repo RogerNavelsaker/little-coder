@@ -306,25 +306,69 @@ async function executeMultiRead(
 }
 
 /**
+ * Exported executeReadOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeReadOp(
+  toolCallIdOrFiles: string | ReadFileSpec[],
+  paramsOrCwd?: ReadToolParams | string,
+  signalOrParams?: AbortSignal | ReadToolParams,
+  onUpdate?: (update: unknown) => void,
+  ctx?: { cwd: string }
+) {
+  let files: ReadFileSpec[] = [];
+  let cwd = process.cwd();
+  let params: any = {};
+
+  if (Array.isArray(toolCallIdOrFiles)) {
+    files = toolCallIdOrFiles;
+    if (typeof paramsOrCwd === 'string') cwd = paramsOrCwd;
+    if (typeof signalOrParams === 'object' && signalOrParams && !('aborted' in signalOrParams)) {
+      params = signalOrParams as ReadToolParams;
+    }
+  } else {
+    params = (paramsOrCwd as ReadToolParams) ?? {};
+    cwd = ctx?.cwd ?? process.cwd();
+    files = params.ops ?? params.files ?? (params.path ? [{ path: params.path, offset: params.offset, limit: params.limit, after_anchor: params.after_anchor }] : []);
+  }
+
+  if (!files || files.length === 0) {
+    return {
+      content: [{ type: 'text', text: error('invalid-params', 'ops[] or files[] is required (e.g. ops: [{path: "src/foo.ts"}])', { tool: 'read' }).message }],
+      isError: true,
+      details: { errorType: 'invalid-params' },
+    };
+  }
+
+  return executeMultiRead(files, cwd, params);
+}
+
+/**
  * Register the read tool with pi.
  *
  * @param pi - Pi extension API
  * @param options - Optional configuration
  */
 export function registerReadTool(pi: ExtensionAPI, options: ReadToolOptions = {}) {
+  const readOpSchema = Type.Object({
+    path: Type.String({ description: 'File path to read (relative or absolute)' }),
+    offset: Type.Optional(Type.Union([
+      Type.Number({ description: 'Start line (1-indexed)' }),
+      Type.String({ description: 'Start line (1-indexed)' }),
+    ])),
+    limit: Type.Optional(Type.Union([
+      Type.Number({ description: 'Max lines to read' }),
+      Type.String({ description: 'Max lines to read' }),
+    ])),
+    after_anchor: Type.Optional(Type.String({ description: 'Anchor hash to start after (exclusive)' })),
+  });
+
   const readSchema = Type.Object({
-    files: Type.Array(Type.Object({
-      path: Type.String({ description: 'File path to read (relative or absolute)' }),
-      offset: Type.Optional(Type.Union([
-        Type.Number({ description: 'Start line (1-indexed)' }),
-        Type.String({ description: 'Start line (1-indexed)' }),
-      ])),
-      limit: Type.Optional(Type.Union([
-        Type.Number({ description: 'Max lines to read' }),
-        Type.String({ description: 'Max lines to read' }),
-      ])),
-      after_anchor: Type.Optional(Type.String({ description: 'Anchor hash to start after (exclusive)' })),
-    }), { description: 'Files to read. Single read: [{path}]. Multi-read: [{path}, {path}, ...].' }),
+    ops: Type.Optional(Type.Array(readOpSchema, { description: 'Read operations array. Single: ops: [{path: "foo.ts"}]. Multi: ops: [{path: "a.ts"}, {path: "b.ts"}]' })),
+    files: Type.Optional(Type.Array(readOpSchema, { description: 'Files to read (alias for ops)' })),
+    path: Type.Optional(Type.String({ description: 'File path (direct single parameter)' })),
+    offset: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    limit: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+    after_anchor: Type.Optional(Type.String()),
     display: Type.Optional(
       Type.Union([
         Type.Literal('auto', { description: 'Auto: compact by default, fuller when expanded (default)' }),
@@ -340,26 +384,18 @@ export function registerReadTool(pi: ExtensionAPI, options: ReadToolOptions = {}
     label: 'Read',
     description:
       'Read file contents with line anchors for change detection and follow-up edits. '
-      + 'Always pass files[]. Single read: files: [{path}]. Multi-read: files: [{path}, {path}, ...].',
+      + 'Pass ops: [{path, offset?, limit?, after_anchor?}].',
     promptSnippet: 'Read files with line anchors',
     promptGuidelines: [
-      'Always pass files: [{path, offset?, limit?, after_anchor?}].',
-      'Single read: files: [{path: "src/foo.ts"}].',
-      'Multi-read: files: [{path: "src/a.ts"}, {path: "src/b.ts"}].',
+      'Pass ops: [{path, offset?, limit?, after_anchor?}].',
+      'Single read: ops: [{path: "src/foo.ts"}].',
+      'Multi-read: ops: [{path: "src/a.ts"}, {path: "src/b.ts"}].',
       'Use offset/limit per file for large files.',
       'Keep returned anchors for follow-up edits.',
     ],
     parameters: readSchema,
-    async execute(_toolCallId, params: ReadToolParams, _signal, _onUpdate, ctx) {
-      if (!params.files || params.files.length === 0) {
-        return {
-          content: [{ type: 'text', text: error('invalid-params', 'files[] is required (e.g. files: [{path: "src/foo.ts"}])', { tool: 'read' }).message }],
-          isError: true,
-          details: { errorType: 'invalid-params' },
-        };
-      }
-      return executeMultiRead(params.files, ctx.cwd, params) as any;
-
+    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
+      return executeReadOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
     },
     renderResult(result, { expanded, isPartial }, theme, _context) {
       if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0) as unknown as Component;

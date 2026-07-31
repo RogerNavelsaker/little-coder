@@ -56,7 +56,24 @@ const ABORT_MARKER_PATCH = {
     "                }",
 };
 
-export const PATCHES = [ABORT_MARKER_PATCH];
+const BOX_RENDER_PATCH = {
+  rel: "node_modules/@earendil-works/pi-tui/dist/components/box.js",
+  applied: "little-coder patch: check child.render function existence in box component",
+  find:
+    "        // Render all children\n" +
+    "        const childLines = [];\n" +
+    "        for (const child of this.children) {\n" +
+    "            const lines = child.render(contentWidth);",
+  replace:
+    "        // Render all children\n" +
+    "        // little-coder patch: check child.render function existence in box component\n" +
+    "        const childLines = [];\n" +
+    "        for (const child of this.children) {\n" +
+    "            if (!child || typeof child.render !== \"function\") continue;\n" +
+    "            const lines = child.render(contentWidth);",
+};
+
+export const PATCHES = [ABORT_MARKER_PATCH, BOX_RENDER_PATCH];
 
 export function resolvePiRoot(piRootOverride) {
   if (piRootOverride && existsSync(join(piRootOverride, "package.json"))) {

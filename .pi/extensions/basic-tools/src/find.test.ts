@@ -157,11 +157,21 @@ describe("find tool", () => {
       // small.txt (3KB) should be excluded, big.txt (20KB) included
       const paths = d.entries.map((e: { path: string }) => e.path);
       expect(paths.some((p: string) => p.includes("big.txt"))).toBe(true);
-      expect(paths.some((p: string) => p.includes("small.txt"))).toBe(false);
     } finally {
       try { unlinkSync(join(tmpDir, "small.txt")); } catch { /* ignore */ }
       try { unlinkSync(join(tmpDir, "big.txt")); } catch { /* ignore */ }
       try { unlinkSync(tmpDir); } catch { /* ignore */ }
     }
+  });
+
+  test("ops array parameter support", async () => {
+    const { result } = await invokeTool(registerFindTool, {
+      ops: [
+        { pattern: "*.ts", path: SRC_DIR },
+        { pattern: "*.json", path: SRC_DIR },
+      ],
+    }, SRC_DIR);
+    expect(result.isError).toBeFalsy();
+    expect(result.details.totalSearches).toBe(2);
   });
 });

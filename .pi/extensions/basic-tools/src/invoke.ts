@@ -23,6 +23,7 @@ import { registerFindTool } from "./find.js";
 import { registerLsTool } from "./ls.js";
 import { registerShellTool } from "./shell.js";
 import { registerAstSearchTool } from "./ast-search.js";
+import { registerUnifiedTool } from "./unified.js";
 import { captureFile, diffAgainstCheckpoint } from "./file-checkpoint.js";
 
 const TOOL_REGISTRY: Record<string, Parameters<typeof registerReadTool>[0]> = {
@@ -35,6 +36,8 @@ const TOOL_REGISTRY: Record<string, Parameters<typeof registerReadTool>[0]> = {
   shell: registerShellTool,
   "ast-search": registerAstSearchTool,
   ast_search: registerAstSearchTool,
+  "basic-tools": registerUnifiedTool,
+  basic_tools: registerUnifiedTool,
 };
 
 const TOOLS = Object.keys(TOOL_REGISTRY).sort().join(", ");

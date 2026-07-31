@@ -305,4 +305,15 @@ describe("shell tool", () => {
       expect(text).toContain("boom");
     });
   });
+
+  test("ops array parameter support", async () => {
+    const { result } = await invokeTool(registerShellTool, {
+      ops: [
+        { command: "echo op1" },
+        { command: "echo op2" },
+      ],
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.details.totalRuns).toBe(2);
+  });
 });
