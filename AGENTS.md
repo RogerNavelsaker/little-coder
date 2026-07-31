@@ -150,25 +150,34 @@ bun run build:release                # full release: launcher + pi binary + data
 Current patches:
 - Suppress bare "Operation aborted" assistant-message marker (harness interventions surface their own line; ESC is self-evident).
 
-## Planner / Editor / Tester
+## Agent Execution & Coordination (herdr + burrow + plot)
 
-Zellij session: `pi-tool-upgrade`, agents tab.
+Agent process management, background execution, sandboxing, and inter-agent communication are handled via **`herdr`**, **`burrow`**, and **`plot`** (replacing Zellij / tmux pane multiplexing):
 
-| Pane | Role |
-|---|---|
-| `terminal_0` | planner (Claude Code) |
-| `terminal_1` | editor: `pi -ne -e npm:pi-continue -e npm:pi-schedule-prompt -e npm:@josephyoung/pi-file-reference` |
-| `terminal_2` | tester: `pi` (plain) |
-
-### Scripts (relative to repo root)
-
-| Script | Who | Purpose |
+| Tool | Alias | Role |
 |---|---|---|
-| `scripts/send` | planner | dispatch prompt to editor or tester pane |
-| `scripts/dump` | planner | capture pane output (ANSI or `--plain`) |
-| `scripts/log` | planner | inspect Pi session logs |
-| `scripts/report` | editor, tester | send report back to planner |
-| `.pi/extensions/basic-tools/src/invoke.ts` | planner, editor | drive any basic-tool deterministically; print all three output channels |
+| **`herdr`** | `hrd` | Daemon harness & process manager for agent processes, background tasks, and agent-to-agent IPC. |
+| **`burrow`** | `bw` | OS-isolated sandbox runtime using `bwrap` (Bubblewrap) for executing untrusted agent code & background tasks. |
+| **`plot`** | `pt` | Typed, queryable coordination object layer binding Seeds issues (`sd`), Mulch records (`ml`), agent prompts, runs, and PRs. |
+
+### Agent Roles
+
+| Worker | Role & Command |
+|---|---|
+| `planner` | Lead orchestrator (Claude Code / AGY CLI). Manages plots (`pt`), issues (`sd`), and dispatches worker agents. |
+| `editor` | Code modification agent running via `herdr`: `pi -ne -e npm:pi-continue -e npm:pi-schedule-prompt -e npm:@josephyoung/pi-file-reference` inside a `burrow` (`bw`) sandbox. |
+| `tester` | Verification agent running via `herdr`: `pi` (plain) inside a `burrow` (`bw`) sandbox. |
+
+### Tooling & Management Scripts (relative to repo root)
+
+| Script / Command | Purpose |
+|---|---|
+| `herdr spawn <role> <cmd>` | Launch a background agent worker or task inside a `burrow` sandbox |
+| `herdr send <role> <msg>` | Dispatch prompt or instruction to a running worker agent |
+| `herdr dump <role>` | Capture plain text or ANSI output stream from a background worker |
+| `herdr log <role>` | Inspect structured session logs |
+| `plot create / plot query` | Bind run results, issues, and records into a tracked coordination plot (`pt`) |
+| `.pi/extensions/basic-tools/src/invoke.ts` | Drive basic-tools deterministically for ground-truth verification |
 
 ### Tool inspection layer — `invoke.ts`
 
@@ -195,18 +204,19 @@ bun .pi/extensions/basic-tools/src/invoke.ts find '{"path":"src","type":"file","
 
 Supported tools: `read, edit, write, grep, find, ls, shell, ast-search`.
 
-```nu
-# Dispatch
-nu scripts/send editor '<prompt>'
-nu scripts/send tester '<prompt>'
-nu scripts/send new editor          # reset pane
-nu scripts/send reload tester       # /reload after AGENTS.md change
-nu scripts/send toggle tester       # toggle last tool card
-# Capture
-nu scripts/dump tester              # full ANSI
-nu scripts/dump tester --plain      # plain text
-# Report back
-nu scripts/report "EDITOR REPORT: status=done; files=...; tests=...; result=...; blockers=none"
+```sh
+# Herdr IPC commands
+herdr send editor '<prompt>'
+herdr send tester '<prompt>'
+herdr restart editor                # reset worker
+herdr reload tester                 # reload context after AGENTS.md change
+
+# Herdr output inspection
+herdr dump tester                   # full output stream
+herdr log tester                    # structured logs
+
+# Report back via Herdr IPC
+herdr report "EDITOR REPORT: status=done; files=...; tests=...; result=...; blockers=none"
 ```
 
 ### Report formats
@@ -220,21 +230,20 @@ nu scripts/report "EDITOR REPORT: status=done; files=...; tests=...; result=...;
 Sequential, never parallel: **editor → wait for `EDITOR REPORT` → tester → wait for `TESTER REPORT` → next task**.
 
 1. Pick next ticket: `sd ready --priority=0..3` (Backlog hidden).
-2. `sd update <id> --status=in_progress`.
-3. Dispatch to editor with substrate refs (`ml prime --files <paths>`, `sd show <id>`) and explicit acceptance: files to edit, tests to add, `bun run typecheck && bun test <file>` command.
-4. Wait for `EDITOR REPORT` in planner pane. Do not dispatch tester before it arrives.
-5. After editor reports done on extension code, tester must reload artifacts. `/reload` only re-reads context/settings — it does **not** re-import extension modules or refresh tool schemas. Rules:
-   - Extension `.ts` source edited (schema, handler, display) → `nu scripts/send new tester` (fresh pi process re-imports the module).
-   - `AGENTS.md` or `skills/` changed (no code change) → `nu scripts/send reload tester`.
-   - Both changed → `reload` then `new`.
+2. `sd update <id> --status=in_progress`. Bind to plot: `pt link <plot-id> <id>`.
+3. Dispatch to editor via `herdr` with substrate refs (`ml prime --files <paths>`, `sd show <id>`) and explicit acceptance: files to edit, tests to add, `bun run typecheck && bun test <file>` command inside `burrow`.
+4. Wait for `EDITOR REPORT` via `herdr`. Do not dispatch tester before it arrives.
+5. After editor reports done on extension code, tester must reload artifacts. Rules:
+   - Extension `.ts` source edited (schema, handler, display) → `herdr restart tester` (fresh pi process re-imports the module).
+   - `AGENTS.md` or `skills/` changed (no code change) → `herdr reload tester`.
+   - Both changed → `reload` then `restart`.
    - Pure prompt-only test (no code change) → no reload needed.
-6. Dispatch tester with the exact exercise (tool call + inputs + expected shape). Tester runs, then `nu scripts/report "TESTER REPORT: ..."`.
+6. Dispatch tester via `herdr` with the exact exercise (tool call + inputs + expected shape). Tester runs, then `herdr report "TESTER REPORT: ..."`.
 7. Planner inspects (in order of trust):
-   - `bun .pi/extensions/basic-tools/src/invoke.ts <tool> '<json>'` → **deterministic ground truth**. Drives the tool exactly as pi would and prints details JSON, content.text (LLM-visible TOON), collapsed render, and expanded render. Use this first when a tester report looks wrong — the tester model may pass an unexpected param shape and misreport schema.
-   - `nu scripts/dump tester` (with ANSI) → check tester-pane rendering, color/highlight, transparency artifacts.
-   - `nu scripts/dump tester --plain` → check tester-visible response text.
-   - Pi session logs: `nu scripts/log tester` for structured tool calls in the tester run.
-8. On pass: `sd close <id>`, record insight (`ml record ...`), `sd sync && ml sync`. On fail: dispatch fix to editor with the dump excerpt as evidence.
+   - `bun .pi/extensions/basic-tools/src/invoke.ts <tool> '<json>'` → **deterministic ground truth**.
+   - `herdr dump tester` → check output stream, rendering, colors, diffs.
+   - `herdr log tester` → inspect structured session logs.
+8. On pass: `sd close <id>`, record insight (`ml record ...`), sync plot (`pt sync`), `sd sync && ml sync`. On fail: dispatch fix to editor with dump excerpt as evidence.
 
 ### Session hygiene
 

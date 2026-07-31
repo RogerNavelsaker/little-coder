@@ -7,6 +7,16 @@
         "pkg-path": "bun",
         "pkg-group": "bun"
       },
+      "burrow": {
+        "flake": "github:RogerNavelsaker/nixpkg-burrow",
+        "outputs": [
+          "out",
+          "bw"
+        ]
+      },
+      "bwrap": {
+        "pkg-path": "bubblewrap"
+      },
       "canopy": {
         "flake": "github:RogerNavelsaker/nixpkg-canopy",
         "outputs": [
@@ -22,6 +32,13 @@
         "outputs": [
           "out",
           "ml"
+        ]
+      },
+      "plot": {
+        "flake": "github:RogerNavelsaker/nixpkg-plot",
+        "outputs": [
+          "out",
+          "pt"
         ]
       },
       "seeds": {
@@ -77,6 +94,37 @@
       },
       "system": "x86_64-linux",
       "group": "bun",
+      "priority": 5
+    },
+    {
+      "attr_path": "bubblewrap",
+      "broken": false,
+      "derivation": "/nix/store/zd1awgzpcx11d73y6c3vziscq7x0px13-bubblewrap-0.11.2.drv",
+      "description": "Unprivileged sandboxing tool",
+      "install_id": "bwrap",
+      "license": "LGPL-2.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+      "name": "bubblewrap-0.11.2",
+      "pname": "bubblewrap",
+      "rev": "0954f7ee2f6bb3dc7d4e3d0d8bcb8fd4bde4cfc5",
+      "rev_count": 1043649,
+      "rev_date": "2026-07-29T09:51:10Z",
+      "scrape_date": "2026-07-30T05:58:15.454990Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.11.2",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/0r1dbvjaw434ni15i65bgx21xm1n9wpj-bubblewrap-0.11.2-dev",
+        "out": "/nix/store/82xr5pn0n6dcviw1jyjrf0fz8kq1g7ds-bubblewrap-0.11.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
       "priority": 5
     },
     {
@@ -208,6 +256,60 @@
       "name": "trellis-0.2.1-r2",
       "pname": "trellis",
       "version": "0.2.1-r2",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "burrow",
+      "locked-url": "github:RogerNavelsaker/nixpkg-burrow/75971739fbbb6a0400f8902daffe77746150e92b?narHash=sha256-HvUa0QZmPzZG4KY13qSm0oa7Ve3m/In4D8Xhp/x3oIc%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/burrow-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/jjm5k171bba79b9x0dansm3g4r6nksm0-burrow-0.3.15-r1.drv",
+      "outputs": {
+        "bw": "/nix/store/6zv23h7kwkfs09r7cszxf3ibavarj8xm-burrow-0.3.15-r1-bw",
+        "out": "/nix/store/gn63v7xqa29940inkqpg6vww13w989ab-burrow-0.3.15-r1"
+      },
+      "output-names": [
+        "out",
+        "bw"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "burrow-0.3.15-r1",
+      "pname": "burrow",
+      "version": "0.3.15-r1",
+      "broken": false,
+      "unfree": false,
+      "priority": 5
+    },
+    {
+      "install_id": "plot",
+      "locked-url": "github:RogerNavelsaker/nixpkg-plot/82affee73fc1a85403f4f9d81c951c307a69f2ec?narHash=sha256-nhoBPf5c5IUTmHAGW9fZuYGzyT/aySCRJxkABFaDnso%3D",
+      "flake-description": "Nix packaging scaffold for @os-eco/plot-cli",
+      "locked-flake-attr-path": "packages.x86_64-linux.default",
+      "derivation": "/nix/store/23x6hj80gvma9nrhrnjywa63v7143pl0-plot-0.4.1-r1.drv",
+      "outputs": {
+        "out": "/nix/store/i1144vv6vvfshszr3s4cz4n9yfhgd73d-plot-0.4.1-r1",
+        "pt": "/nix/store/zvb4imnq9f55rvp339y4ywf426pkc46w-plot-0.4.1-r1-pt"
+      },
+      "output-names": [
+        "out",
+        "pt"
+      ],
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
+      "system": "x86_64-linux",
+      "name": "plot-0.4.1-r1",
+      "pname": "plot",
+      "version": "0.4.1-r1",
       "broken": false,
       "unfree": false,
       "priority": 5
