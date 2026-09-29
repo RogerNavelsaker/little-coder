@@ -24,7 +24,7 @@ function resolveBool(v: unknown, fallback: boolean): boolean {
 
 /**
  * Resolve the linehash binary path.
- * LINEHASH_BIN env var overrides; otherwise resolves from PATH (flox-provided).
+ * LINEHASH_BIN env var overrides; otherwise resolves from PATH.
  */
 function resolveLinehashBin(): string {
   if (process.env.LINEHASH_BIN) return process.env.LINEHASH_BIN;

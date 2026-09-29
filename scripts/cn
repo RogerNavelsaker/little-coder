@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if ! command -v canopy >/dev/null 2>&1; then
-	echo "Canopy CLI is not on PATH. Run through dx/flox." >&2
+	echo "Canopy CLI is not on PATH. Run through devenv shell or direnv." >&2
 	exit 1
 fi
 

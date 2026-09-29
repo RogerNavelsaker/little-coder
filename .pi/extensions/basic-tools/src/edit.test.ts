@@ -3,7 +3,7 @@ import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Use PATH-resolved linehash (flox-provided) — no hardcoded paths
+// Use PATH-resolved linehash — no hardcoded paths
 // LINEHASH_BIN env var can override for dev/test if needed
 
 import { registerEditTool } from "./edit.js";

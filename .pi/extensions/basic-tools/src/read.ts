@@ -54,7 +54,7 @@ function executeCommand(cmd: string, args: string[]): Promise<{ stdout: string; 
  * Priority:
  * 1. LINEHASH_BIN env var
  * 2. 'linehash' in PATH (via which)
- * 3. Fallback to common flox path
+ * 3. Fallback to system-managed binary path
  *
  * @returns Absolute path to linehash binary
  * @throws Error if binary not found
@@ -76,12 +76,8 @@ function resolveLinehashBin(): string {
     // which not available or failed, continue to fallback
   }
 
-  // 3. Common flox paths
-  const fallbackPaths = [
-    '/home/rona/.flox/run/x86_64-linux.default.run/bin/linehash',
-    '/home/rona/.flox/run/bin/linehash',
-    '/run/current-system/sw/bin/linehash',
-  ];
+  // 3. System-managed binary path
+  const fallbackPaths = ['/run/current-system/sw/bin/linehash'];
 
   for (const path of fallbackPaths) {
     if (existsSync(path)) {

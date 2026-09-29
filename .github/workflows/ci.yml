@@ -13,20 +13,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
+        if: env.ACT == 'true'
         with:
           bun-version: 1.3.13
 
-      - run: bun install --frozen-lockfile
-
-      - uses: flox/install-flox-action@v2
+      - uses: cachix/install-nix-action@v31
         if: env.ACT != 'true'
 
-      - name: Verify via Flox (verify:ci)
+      - uses: cachix/cachix-action@v16
         if: env.ACT != 'true'
-        uses: flox/activate-action@v1
         with:
-          command: bun run verify:ci
+          name: devenv
+
+      - name: Install devenv
+        if: env.ACT != 'true'
+        shell: bash
+        run: nix profile add nixpkgs#devenv
+
+      - name: Verify in devenv
+        if: env.ACT != 'true'
+        run: devenv shell -- bash -e -c 'bun install --frozen-lockfile && bun run verify:ci'
 
       - name: Verify in Act runner
         if: env.ACT == 'true'
-        run: bun run verify:ci
+        run: bun install --frozen-lockfile && bun run verify:ci

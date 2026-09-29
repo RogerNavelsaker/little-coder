@@ -1,0 +1,17 @@
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  linehash:
+    url: github:RogerNavelsaker/nixpkg-linehash/2175affcf7a576fe25b6f8f2d8e87f04fe2db359
+  burrow:
+    url: github:RogerNavelsaker/nixpkg-burrow/249c53ca4ab1f31abb47c46ea0ca87d8f1b4ab92
+  canopy:
+    url: github:RogerNavelsaker/nixpkg-canopy/ee0a9d1236104119ef8d7d6cf8314fcd32e54c1e
+  mulch:
+    url: github:RogerNavelsaker/nixpkg-mulch/2f568070456411f9597ebd7a43cfff274e39ca2d
+  plot:
+    url: github:RogerNavelsaker/nixpkg-plot/82affee73fc1a85403f4f9d81c951c307a69f2ec
+  seeds:
+    url: github:RogerNavelsaker/nixpkg-seeds/78c4d926209cc7c205b600de5ecb94c1d0e6bdb5
+  trellis:
+    url: github:RogerNavelsaker/nixpkg-trellis/318dfe958ead7adce51c32260a7d8f4c4481e17a

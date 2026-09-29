@@ -42,11 +42,7 @@ function resolveLinehashBin(): string {
     const p = execSync('which linehash 2>/dev/null || true', { encoding: 'utf-8' }).trim();
     if (p) return p;
   } catch { /* continue */ }
-  const fallbacks = [
-    '/home/rona/.flox/run/x86_64-linux.default.run/bin/linehash',
-    '/home/rona/.flox/run/bin/linehash',
-    '/run/current-system/sw/bin/linehash',
-  ];
+  const fallbacks = ['/run/current-system/sw/bin/linehash'];
   for (const f of fallbacks) {
     if (existsSync(f)) return f;
   }

@@ -15,7 +15,7 @@ import { join, dirname } from 'path';
 
 // ---- Built-in defaults ----
 
-const DEFAULT_EXCLUDES = ['.git/**', 'node_modules/**', '.direnv/**', '.flox/**', '.cache/**'];
+const DEFAULT_EXCLUDES = ['.git/**', 'node_modules/**', '.direnv/**', '.cache/**'];
 
 export interface Settings {
   /** Default glob patterns to exclude from grep/find (generic, not session logs) */

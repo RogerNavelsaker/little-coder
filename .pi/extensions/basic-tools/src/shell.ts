@@ -2,8 +2,7 @@
  * `shell` tool — Nushell-backed command execution with environment mode handling.
  *
  * Replaces bash-style command execution with structured Nushell execution.
- * Supports environment modes: auto, current, none, flox, flox-default,
- * flox-temp (deferred), direnv, clean.
+ * Supports environment modes: auto, current, none, direnv, clean.
  *
  * Phase 19: Shell Runtime Dogfood Fix
  * - Visible failure summary in content.text for nonzero exits, timeouts,
@@ -92,7 +91,7 @@ function runBwrapSandbox(
       exitCode: -1,
       durationMs: Date.now() - start,
       timedOut: false,
-      bwrapError: 'bubblewrap (bwrap) not found — install with: flox install bubblewrap || nix-shell -p bubblewrap',
+      bwrapError: 'bubblewrap (bwrap) not found — add it to the devenv or Nix environment',
     };
   }
 
@@ -269,16 +268,6 @@ function resolveDirenvBin(): string {
   return 'direnv';
 }
 
-function resolveFloxBin(): string {
-  if (process.env.FLOX_BIN) return process.env.FLOX_BIN;
-  try {
-    const { execSync } = require('child_process');
-    const p = execSync('which flox 2>/dev/null || true', { encoding: 'utf-8' }).trim();
-    if (p) return p;
-  } catch { /* continue */ }
-  return 'flox';
-}
-
 function resolveTruBin(): string {
   if (process.env.TRU_BIN) return process.env.TRU_BIN;
   try {
@@ -291,35 +280,18 @@ function resolveTruBin(): string {
 
 const NU_BIN = resolveNuBin();
 const DIRENV_BIN = resolveDirenvBin();
-const FLOX_BIN = resolveFloxBin();
 const TRU_BIN = resolveTruBin();
 
 // ---- Mode types ----
 
-export type ShellEnvMode =
-  | 'auto'
-  | 'current'
-  | 'none'
-  | 'flox'
-  | 'flox-default'
-  | 'flox-temp'
-  | 'direnv'
-  | 'clean';
+export type ShellEnvMode = 'auto' | 'current' | 'none' | 'direnv' | 'clean';
 
-export type ShellBackend =
-  | 'nu'
-  | 'nu+direnv'
-  | 'nu+flox'
-  | 'nu+flox-default'
-  | 'nu+flox-temp'
-  | 'nu-clean';
+export type ShellBackend = 'nu' | 'nu+direnv' | 'nu-clean';
 
 export interface ShellToolParams {
   commands: string[];
   cwd?: string;
   env?: ShellEnvMode;
-  packages?: string[];
-  start_services?: boolean | string;
   mode?: 'text' | 'json' | 'nuon' | 'toon';
   timeout_ms?: number | string;
   display?: DisplayMode;
@@ -330,24 +302,16 @@ export interface ShellToolParams {
 
 // ---- Helpers ----
 
-function detectActiveEnv(): { flox: boolean; direnv: boolean; floxName?: string; direnvDir?: string } {
+function detectActiveEnv(): { direnv: boolean; direnvDir?: string } {
   const env = process.env;
-  const flox = Boolean(env.FLOX_ACTIVE_ENVIRONMENTS) || Boolean(env.FLOX_ENVIRONMENT_NAME);
-  const direnv = Boolean(env.DIRENV_DIR) || Boolean(env.DIRENV_WATCHES);
   return {
-    flox,
-    direnv,
-    floxName: env.FLOX_ENVIRONMENT_NAME,
+    direnv: Boolean(env.DIRENV_DIR) || Boolean(env.DIRENV_WATCHES),
     direnvDir: env.DIRENV_DIR,
   };
 }
 
 function hasEnvrc(dirPath: string): boolean {
   return existsSync(resolve(dirPath, '.envrc'));
-}
-
-function hasFlox(dirPath: string): boolean {
-  return existsSync(resolve(dirPath, '.flox'));
 }
 
 function runNuCommand(
@@ -446,77 +410,37 @@ function runNuStreaming(
 function resolveEnvMode(
   mode: ShellEnvMode,
   targetCwd: string,
-): { backend: ShellBackend; activationCommand: string; packages: string[]; envResolved: string } {
+): { backend: ShellBackend; activationCommand: string; envResolved: string } {
   const detected = detectActiveEnv();
 
   switch (mode) {
     case 'current':
-    case 'none': {
+    case 'none':
       return {
         backend: 'nu',
         activationCommand: '',
-        packages: [],
-        envResolved: detected.flox ? `current (flox: ${detected.floxName})` : 'current (none)',
+        envResolved: 'current (inherited environment)',
       };
-    }
-    case 'clean': {
+    case 'clean':
       return {
         backend: 'nu-clean',
         activationCommand: '',
-        packages: [],
         envResolved: 'clean (HOME, USER, PATH, TERM only)',
       };
-    }
     case 'direnv': {
       const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
       return {
         backend: 'nu+direnv',
         activationCommand: `${bin} exec ${targetCwd} nu -c`,
-        packages: [],
         envResolved: `direnv exec ${targetCwd}`,
       };
     }
-    case 'flox': {
-      const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-      return {
-        backend: 'nu+flox',
-        activationCommand: `${bin} activate -d ${targetCwd} --no-start-services -- nu -c`,
-        packages: [],
-        envResolved: `flox activate -d ${targetCwd}`,
-      };
-    }
-    case 'flox-default': {
-      const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-      return {
-        backend: 'nu+flox-default',
-        activationCommand: `${bin} activate -d /home/rona --no-start-services -- nu -c`,
-        packages: [],
-        envResolved: 'flox activate -d /home/rona (default)',
-      };
-    }
-    case 'flox-temp': {
-      return {
-        backend: 'nu+flox-temp',
-        activationCommand: '# DEFERRED: flox activate has no -p flag; requires temp .flox manifest',
-        packages: [],
-        envResolved: 'flox-temp (deferred — no -p flag in flox activate)',
-      };
-    }
     case 'auto':
-    default: {
-      if (detected.flox) {
-        return {
-          backend: 'nu',
-          activationCommand: '',
-          packages: [],
-          envResolved: `auto (already in flox: ${detected.floxName})`,
-        };
-      }
+    default:
       if (detected.direnv) {
         return {
           backend: 'nu',
           activationCommand: '',
-          packages: [],
           envResolved: `auto (already in direnv: ${detected.direnvDir})`,
         };
       }
@@ -525,26 +449,14 @@ function resolveEnvMode(
         return {
           backend: 'nu+direnv',
           activationCommand: `${bin} exec ${targetCwd} nu -c`,
-          packages: [],
           envResolved: `auto (found .envrc in ${targetCwd})`,
-        };
-      }
-      if (hasFlox(targetCwd)) {
-        const bin = isBinaryAvailable(FLOX_BIN) ? FLOX_BIN : 'flox';
-        return {
-          backend: 'nu+flox',
-          activationCommand: `${bin} activate -d ${targetCwd} --no-start-services -- nu -c`,
-          packages: [],
-          envResolved: `auto (found .flox in ${targetCwd})`,
         };
       }
       return {
         backend: 'nu',
         activationCommand: '',
-        packages: [],
-        envResolved: 'auto (no flox/direnv detected, plain nu)',
+        envResolved: 'auto (no direnv detected, plain nu)',
       };
-    }
   }
 }
 
@@ -588,10 +500,8 @@ export async function executeShellOp(
   const requestedPath = params.cwd ? (params.cwd.startsWith('@') ? params.cwd.slice(1) : params.cwd) : ctx.cwd;
   const targetCwd = resolve(ctx.cwd, requestedPath);
   const envMode: ShellEnvMode = (params.env ?? 'auto') as ShellEnvMode;
-  const startServices = params.start_services === true || params.start_services === 'true';
   const mode = (params.mode ?? 'text') as 'text' | 'json' | 'nuon' | 'toon';
   const timeoutMs = typeof params.timeout_ms === 'string' ? parseInt(params.timeout_ms, 10) : (params.timeout_ms ?? 30000);
-  const packages = params.packages ?? [];
 
   if (!existsSync(targetCwd)) {
     return {
@@ -604,7 +514,6 @@ export async function executeShellOp(
         envRequested: envMode,
         envResolved: 'not-found',
         activationCommand: '',
-        packages,
         exitCode: -1,
         stdout: '',
         stderr: `CWD not found: ${targetCwd}`,
@@ -920,24 +829,13 @@ export function registerShellTool(pi: ExtensionAPI) {
     cwd: Type.Optional(Type.String({ description: 'Working directory for command execution' })),
     env: Type.Optional(
       Type.Union([
-        Type.Literal('auto', { description: 'Auto-detect: check for active flox/direnv, then .envrc/.flox' }),
+        Type.Literal('auto', { description: 'Auto-detect active direnv or use .envrc when available' }),
         Type.Literal('current', { description: 'Use inherited environment directly' }),
         Type.Literal('none', { description: 'Use inherited environment directly (alias for current)' }),
-        Type.Literal('flox', { description: 'Activate flox env at cwd' }),
-        Type.Literal('flox-default', { description: 'Activate flox default env (/home/rona)' }),
-        Type.Literal('flox-temp', { description: 'Temporary flox activation with packages (deferred)' }),
         Type.Literal('direnv', { description: 'Use direnv exec for cwd' }),
         Type.Literal('clean', { description: 'Minimal env: HOME, USER, PATH, TERM only' }),
       ], { description: 'Environment mode for command execution' })
     ),
-    packages: Type.Optional(Type.Array(Type.String(), { description: 'Packages to install for flox-temp mode' })),
-    start_services: Type.Optional(
-      Type.Union([
-        Type.Boolean({ description: 'Start flox services on activation' }),
-        Type.String({ description: 'Start flox services on activation' }),
-      ], { description: 'Start flox services (default: false)' })
-    ),
-
     timeout_ms: Type.Optional(
       Type.Union([
         Type.Number({ description: 'Timeout in milliseconds' }),

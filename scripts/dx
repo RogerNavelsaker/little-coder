@@ -4,11 +4,7 @@ set -euo pipefail
 export DIRENV_LOG_FORMAT=""
 export QUIET=1
 
-repo="$(
-  git rev-parse --show-toplevel 2>/dev/null ||
-    { [ -n "${FLOX_ENV_PROJECT:-}" ] && printf '%s\n' "$FLOX_ENV_PROJECT"; } ||
-    pwd
-)"
+repo="$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
 if [ "${1:-}" = "-d" ] && [ -n "${2:-}" ]; then
   repo="$(realpath "$2")"
@@ -35,7 +31,6 @@ case "$cmd" in
 	      command_path="$repo/scripts/$command_path"
 	    fi
 	    cd -- "$repo"
-	    export FLOX_ENV_PROJECT="$repo"
 	    exec "$real_direnv" exec "$repo" "$command_path" "${@:2}"
     ;;
 esac

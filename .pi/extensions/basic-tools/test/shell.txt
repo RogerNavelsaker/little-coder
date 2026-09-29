@@ -9,7 +9,7 @@
   "details": {
     "cwd": "/home/rona/.pi/agent/pi-structural-tools",
     "command": "echo hello",
-    "envResolved": "auto (no flox/direnv detected, plain nu)",
+    "envResolved": "auto (no direnv detected, plain nu)",
     "configResolved": "clean (no config)",
     "exitCode": 0,
     "stdout": "hello\n",
@@ -29,6 +29,6 @@ exit 0 8ms hello
 
 ── expanded ──
 exit 0 8ms hello
-env: auto (no flox/direnv detected, plain nu)
+env: auto (no direnv detected, plain nu)
 hello
 

@@ -1,10 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { registerShellTool } from "./shell.js";
-import { invokeTool, contentText, FIXTURE, CWD } from "./test-helpers.js";
+import { invokeTool, contentText, FIXTURE } from "./test-helpers.js";
 
 const DIRENV_FIXTURE = `/tmp/pi-shell-test-direnv-${process.pid}`;
-const FLOX_FIXTURE   = `${CWD}/test-fixtures/flox-test`; // not used in active tests
 
 beforeAll(() => {
   mkdirSync(DIRENV_FIXTURE, { recursive: true });
@@ -36,6 +35,13 @@ const metaPi = {
 registerShellTool(metaPi);
 
 describe("shell tool", () => {
+  test("schema exposes only supported environment controls", () => {
+    const modes = registeredSchema.properties.env.anyOf.map((entry: any) => entry.const);
+    expect(modes).toEqual(["auto", "current", "none", "direnv", "clean"]);
+    expect(registeredSchema.properties.packages).toBeUndefined();
+    expect(registeredSchema.properties.start_services).toBeUndefined();
+  });
+
   // ---- Basic execution ----
   describe("basic execution", () => {
     test("echo hello: exitCode=0, stdout contains hello", async () => {
@@ -102,7 +108,7 @@ describe("shell tool", () => {
       expect(result.details.stdout).toContain("rona");
     });
 
-    test("env:clean strips FLOX_ENVIRONMENT_NAME and DIRENV_DIR", async () => {
+    test("env:clean returns a minimal environment", async () => {
       const { result } = await invokeTool(registerShellTool, {
         commands: ["echo clean-env"],
         env: "clean",

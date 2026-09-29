@@ -33,11 +33,7 @@ function resolveLinehashBin(): string {
     const whichPath = execSync('which linehash 2>/dev/null || true', { encoding: 'utf-8' }).trim();
     if (whichPath) return whichPath;
   } catch { /* continue */ }
-  const fallbackPaths = [
-    '/home/rona/.flox/run/x86_64-linux.default.run/bin/linehash',
-    '/home/rona/.flox/run/bin/linehash',
-    '/run/current-system/sw/bin/linehash',
-  ];
+  const fallbackPaths = ['/run/current-system/sw/bin/linehash'];
   for (const path of fallbackPaths) {
     if (existsSync(path)) return path;
   }

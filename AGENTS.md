@@ -16,7 +16,7 @@ ml prime architecture tools   # compact priming prompt
 ```
 
 Grove stores: `.seeds/` `.mulch/` `.trellis/` `.canopy/`
-Flox env provides: `seeds` (`sd`), `mulch` (`ml`), `trellis` (`tl`), `canopy` (`cn`), `bun`.
+The devenv environment provides the project CLIs, aliases, and Bun.
 
 Repo root: `/home/rona/Repositories/.ru/RogerNavelsaker/little-coder` (only path; no `~/projects/little-coder`).
 
@@ -106,31 +106,31 @@ Three repos must stay in sync for every linehash change. Skipping any step leave
 | Repo | Path | Role |
 |---|---|---|
 | **linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/linehash` | Rust source. Provides anchored reads, edit, diff, fuzzy matching, patch-apply. |
-| **nixpkg-linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/nixpkg-linehash` | Nix package wrapper. Pinned in `.flox/env/manifest.toml` as `linehash.flake = "github:RogerNavelsaker/nixpkg-linehash"`. |
-| **little-coder** | this repo | Consumer. Flox env exposes `linehash` on PATH. |
+| **nixpkg-linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/nixpkg-linehash` | Nix package wrapper. Pinned by commit in `devenv.yaml`. |
+| **little-coder** | this repo | Consumer. The devenv environment exposes `linehash` on PATH. |
 
 #### Sync chain (run for EVERY linehash change)
 
 ```
-linehash source  →  push  →  nixpkg-linehash bumps input rev  →  push  →  little-coder flox update
+linehash source  →  push  →  nixpkg-linehash bumps input rev  →  push  →  little-coder updates devenv input pin
 ```
 
 Concrete steps:
 
-1. **linehash repo** — edit Rust source. Run `cargo build --release` (use `CC=/usr/bin/gcc` inside the flox env; the flox cc wrapper rejects `-m64`). Run tests. `git commit` + `git push` to GitHub. Note the new commit SHA.
-2. **nixpkg-linehash repo** — update the linehash flake input to the new commit: `nix flake lock --update-input linehash` (or `nix flake update` for all inputs). `git commit` + `git push`. The flake on GitHub is what flox resolves.
-3. **little-coder repo** — `flox update` (or `flox update -i linehash`) to refresh the env to the latest nixpkg-linehash. Verify with `<new-subcommand> --help` against the `linehash` binary on PATH. **Never reference linehash by absolute path** in extension code — call `linehash` from PATH only.
+1. **linehash repo** — edit Rust source. Run `cargo build --release` in the project devenv. Run tests. `git commit` + `git push` to GitHub. Note the new commit SHA.
+2. **nixpkg-linehash repo** — update the linehash flake input to the new commit: `nix flake lock --update-input linehash` (or `nix flake update` for all inputs). `git commit` + `git push`.
+3. **little-coder repo** — bump the `linehash` commit in `devenv.yaml`, then run `devenv update` to refresh `devenv.lock`. Verify with `<new-subcommand> --help` against the `linehash` binary on PATH. **Never reference linehash by absolute path** in extension code — call `linehash` from PATH only.
 
 #### Verification gate (before declaring a cross-repo task done)
 
 - `linehash <new-subcommand> --help` succeeds from a fresh shell in little-coder.
-- `which linehash` resolves through flox, not `~/.local/bin` or `~/.cargo`.
+- `which linehash` resolves through the devenv profile, not `~/.local/bin` or `~/.cargo`.
 - Extension `LINEHASH_BIN` resolver finds it via `which linehash`, no hardcoded paths.
 - Invoke harness (`bun .pi/extensions/basic-tools/src/invoke.ts ...`) produces the expected behavior end-to-end, not just unit tests.
 
 #### Failure mode to watch for
 
-Editor builds locally, tests pass against the local-built binary, but flox env still serves the OLD binary because steps 2 or 3 were skipped. Symptom: invoke smoke fails with "unrecognized subcommand" or silent fallback to the previous implementation. Fix: walk the chain again from step 2.
+Editor builds locally, tests pass against the local-built binary, but the devenv lock still serves the OLD binary because steps 2 or 3 were skipped. Symptom: invoke smoke fails with "unrecognized subcommand" or silent fallback to the previous implementation. Fix: walk the chain again from step 2.
 
 ## Dev commands
 
@@ -150,15 +150,27 @@ bun run build:release                # full release: launcher + pi binary + data
 Current patches:
 - Suppress bare "Operation aborted" assistant-message marker (harness interventions surface their own line; ESC is self-evident).
 
-## Agent Execution & Coordination (herdr + burrow + plot)
+## Agent Execution & Coordination (herdr + burrow + plot + terrarium + worktrunk)
 
-Agent process management, background execution, sandboxing, and inter-agent communication are handled via **`herdr`**, **`burrow`**, and **`plot`** (replacing Zellij / tmux pane multiplexing):
+Agent process management, background execution, sandboxing, isolation, and inter-agent communication are handled via **`herdr`**, **`burrow`**, **`plot`**, **`terrarium`**, and **`worktrunk`**:
 
 | Tool | Alias | Role |
 |---|---|---|
-| **`herdr`** | `hrd` | Daemon harness & process manager for agent processes, background tasks, and agent-to-agent IPC. |
+| **`herdr`** | `hrd` | Daemon harness & process manager for agent processes, background tasks, tabs/panes, and agent-to-agent IPC. |
 | **`burrow`** | `bw` | OS-isolated sandbox runtime using `bwrap` (Bubblewrap) for executing untrusted agent code & background tasks. |
 | **`plot`** | `pt` | Typed, queryable coordination object layer binding Seeds issues (`sd`), Mulch records (`ml`), agent prompts, runs, and PRs. |
+| **`terrarium`** | `tr` | Isolated filesystem and environment runtime wrapper for non-interactive execution sessions. |
+| **`worktrunk`** | `wt` | Workspace worktree manager providing isolated branches/workspaces for concurrent agent execution. |
+
+### Sub-Tasks & Sub-Agents Dispatch Patterns
+
+1. **Sub-Tasks (Shell / Background Execution)**
+   - Run sub-tasks non-interactively using standard shell or background process execution inside `burrow` (`bw`) or `terrarium` (`tr`).
+   - Use `herdr agent start` or `herdr` task management for commands that need background output tracking and logging without opening interactive prompt loops.
+
+2. **Sub-Agents (Non-Interactive Headless Agents)**
+   - Dispatch sub-agents in headless / non-interactive mode (`pi -ne -p "..."` or `agy --print "..."` / `agy -p "..."`) to eliminate TUI prompt input overhead.
+   - For sub-agents spawned via `herdr`, target specific non-interactive sub-agent commands or use `invoke_subagent` for detached background execution.
 
 ### Agent Roles
 
