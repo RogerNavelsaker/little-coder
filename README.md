@@ -82,7 +82,7 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 - **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline` as workspace CLIs.
 - **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
 - **`web-tools`** (`little-coder-6ebe`): Web research CLIs:
-  - `ddgr`: Low-token search API querying.
+  - `ddgr`: Low-token search API querying (override: `SEARXNG_URL`, default `https://searxng.naco.casa`).
   - `flyscrape` + `curl`: High-speed article extraction (Defuddle/Readability) to Markdown/TOON (override: `CRAWL4AI_URL`).
   - `aria2c` + `yt-dlp`: Fast multi-connection download and media/stream extraction.
 - **`docs-tools`** (`little-coder-5030`): Document processing CLI (`docling.nu`):

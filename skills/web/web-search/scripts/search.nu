@@ -9,8 +9,14 @@ def main [
   --format (-f): string = "toon"
   --output (-o): path
   --timeout: int = 30
-  --searxng-url: string = "https://searxng.naco.casa"
+  --searxng-url: string = ""
 ] {
+  let effective_searxng_url = if ($searxng_url | is-not-empty) {
+    $searxng_url
+  } else {
+    ($env.SEARXNG_URL? | default "https://searxng.naco.casa")
+  }
+
   mut args = [
     "--json"
     "--np"
@@ -31,7 +37,7 @@ def main [
 
   let searxng = (^curl --fail --silent --show-error --location --max-time ($timeout | into string)
     --get --data-urlencode $"q=($query)" --data-urlencode "format=json"
-    $"($searxng_url)/search" | complete)
+    $"($effective_searxng_url)/search" | complete)
   let result = if $searxng.exit_code == 0 and ($searxng.stdout | str trim | is-not-empty) {
     {exit_code: 0, stdout: $searxng.stdout, stderr: ""}
   } else {
