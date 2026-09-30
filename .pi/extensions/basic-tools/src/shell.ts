@@ -13,12 +13,29 @@
 import { Type } from '@sinclair/typebox';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { resolve, join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 import { error } from './output.js';
 import { encodeToon } from './toon.js';
 import { makeThrottle } from './display.js';
+
+// ---- Container environment detection ----
+
+export function isContainerEnvironment(): boolean {
+  if (process.env.WARREN_RUNTIME === 'docker' || process.env.WARREN_RUNTIME === 'container') return true;
+  if (existsSync('/.dockerenv') || existsSync('/run/.containerenv')) return true;
+  if (process.env.container === 'docker' || process.env.container === 'podman' || process.env.container === 'oci') return true;
+  try {
+    if (existsSync('/proc/1/cgroup')) {
+      const cgroup = readFileSync('/proc/1/cgroup', 'utf-8');
+      if (cgroup.includes('docker') || cgroup.includes('containerd') || cgroup.includes('kubepods')) {
+        return true;
+      }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
 
 // ---- Bubblewrap read-only shell helpers ----
 
@@ -582,10 +599,10 @@ export async function executeShellOp(
 
   const command = commands[0] ?? '';
   const isReadonly = params.readonlyShell === true || params.readonly_shell === true || process.env.PI_READONLY_SHELL === '1';
-  if (isReadonly) {
+  if (isReadonly && !isContainerEnvironment()) {
     if (!isBwrapAvailable()) {
       return {
-        content: [{ type: 'text', text: error('binary-failed', 'bubblewrap (bwrap) is not available on PATH for read-only shell execution', { tool: 'shell' }).message }],
+        content: [{ type: 'text', text: error('binary-failed', 'bubblewrap (bwrap) is not available on PATH for read-only shell execution', { tool: 'sh' }).message }],
         isError: true,
         details: {
           cwd: targetCwd,
@@ -795,7 +812,7 @@ export async function executeShellOp(
     details: {
       cwd: targetCwd,
       command,
-      envResolved,
+      envResolved: (isReadonly && isContainerEnvironment()) ? 'readonly (container)' : envResolved,
       configResolved: nuConfig.configSource,
       exitCode,
       stdout: stdoutTruncated ? stdoutPreview : stdout,
@@ -803,6 +820,7 @@ export async function executeShellOp(
       durationMs,
       truncated: stdoutTruncated || stderrTruncated,
       timedOut,
+      ...(isReadonly && isContainerEnvironment() ? { readonlyShell: true, sandbox: 'container' } : {}),
       ...(fullOutputPath ? { fullOutputPath } : {}),
       ...(settingsWarning ? { settingsWarning } : {}),
     },
@@ -858,91 +876,96 @@ export function registerShellTool(pi: ExtensionAPI) {
     ),
   });
 
-  pi.registerTool({
-    name: 'shell',
-    label: 'Shell',
-    description:
-      'Execute commands with structured result envelopes. Pass ops: [{command: "..."}].',
-    promptSnippet: 'Execute commands with environment modes',
-    promptGuidelines: [
-      'Pass ops: [{command: "..."}].',
-      'shell executes Nushell syntax, not POSIX/bash. Use Nu pipeline operators (|) and Nu commands.',
-      'Prefer find, grep, ls, read, edit, and write tools for file discovery and file work — not shell.',
-      'Avoid bash redirection syntax: 2>/dev/null and 2>&1 do not work in Nushell.',
-      'In Nushell, redirect stdout+stderr with out+err> or o+e>. Redirect stdout with out>. Redirect stderr with err>.',
-      'Use shell for command execution, verification, package managers, git commands, and structured data pipelines.',
-    ],
-    parameters: shellSchema,
-    renderCall(args, theme, _context) {
-      const params = args as Partial<ShellToolParams>;
-      const command = oneLine(params.commands?.[0] || (params as any).command, 110);
-      const env = params.env ? ` env=${params.env}` : '';
-      const cwd = params.cwd ? ` cwd=${params.cwd}` : '';
-      const mode = params.mode && params.mode !== 'text' ? ` mode=${params.mode}` : '';
-      let text = theme.fg('toolTitle', theme.bold('shell '));
-      text += theme.fg('accent', command || '(empty command)');
-      if (env || cwd || mode) {
-        text += theme.fg('dim', `${env}${cwd}${mode}`);
-      }
-      return new Text(text, 0, 0);
-    },
-    renderResult(result, { expanded, isPartial }, theme, _context) {
-      if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0);
-
-      const details = (result as {
-        details?: {
-          exitCode?: number;
-          durationMs?: number;
-          stdout?: string;
-          stderr?: string;
-          backend?: string;
-          envResolved?: string;
-          truncated?: boolean;
-          fullOutputPath?: string;
-        };
-      }).details;
-      const exitCode = details?.exitCode;
-      const output = oneLine(details?.stderr || details?.stdout, 140);
-      const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
-      const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
-      let text = `${status}${duration}`;
-      if (output) {
-        text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
-      }
-
-      const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-      const isAuto = displayParam === undefined || displayParam === 'auto';
-      const isCompact = displayParam === 'compact';
-      const showFull = expanded && !isCompact && isAuto;
-
-      if (showFull && details) {
-        if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
-        if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
-        if (details.stdout) text += `\n${details.stdout}`;
-        if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
-        if (details.truncated) {
-          const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
-          text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
+  function createShellTool(toolName: string, toolLabel: string) {
+    return {
+      name: toolName,
+      label: toolLabel,
+      description:
+        'Execute Nushell commands with structured result envelopes. Pass ops: [{command: "..."}] or command: "..." directly.',
+      promptSnippet: 'Execute Nushell commands and CLI tools',
+      promptGuidelines: [
+        'Pass ops: [{command: "..."}] or command: "..." directly.',
+        'sh executes Nushell syntax, not POSIX/bash. Use Nu pipeline operators (|) and Nu commands.',
+        'Prefer find, grep, ls, read, edit, and write tools for file discovery and file work.',
+        'Prefer native CLI tools available in the devenv (e.g. search.nu, fetch.nu, docling.nu, rg, fd, etc.).',
+        'Avoid bash redirection syntax: 2>/dev/null and 2>&1 do not work in Nushell. Use out+err> or o+e>.',
+        'Use sh for command execution, verification, package managers, git commands, and structured data pipelines.',
+      ],
+      parameters: shellSchema,
+      renderCall(args: any, theme: any, _context: any) {
+        const params = args as Partial<ShellToolParams>;
+        const command = oneLine(params.commands?.[0] || (params as any).command, 110);
+        const env = params.env ? ` env=${params.env}` : '';
+        const cwd = params.cwd ? ` cwd=${params.cwd}` : '';
+        const mode = params.mode && params.mode !== 'text' ? ` mode=${params.mode}` : '';
+        let text = theme.fg('toolTitle', theme.bold(`${toolName} `));
+        text += theme.fg('accent', command || '(empty command)');
+        if (env || cwd || mode) {
+          text += theme.fg('dim', `${env}${cwd}${mode}`);
         }
-      }
+        return new Text(text, 0, 0);
+      },
+      renderResult(result: any, { expanded, isPartial }: any, theme: any, _context: any) {
+        if (isPartial) return new Text(theme.fg('warning', 'Running...'), 0, 0);
 
-      return new Text(text, 0, 0);
-    },
-    async execute(toolCallId, params: any, signal, onUpdate, ctx) {
-      return executeShellOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
-    },
-  });
+        const details = (result as {
+          details?: {
+            exitCode?: number;
+            durationMs?: number;
+            stdout?: string;
+            stderr?: string;
+            backend?: string;
+            envResolved?: string;
+            truncated?: boolean;
+            fullOutputPath?: string;
+          };
+        }).details;
+        const exitCode = details?.exitCode;
+        const output = oneLine(details?.stderr || details?.stdout, 140);
+        const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
+        const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
+        let text = `${status}${duration}`;
+        if (output) {
+          text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
+        }
+
+        const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
+        const isAuto = displayParam === undefined || displayParam === 'auto';
+        const isCompact = displayParam === 'compact';
+        const showFull = expanded && !isCompact && isAuto;
+
+        if (showFull && details) {
+          if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
+          if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
+          if (details.stdout) text += `\n${details.stdout}`;
+          if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
+          if (details.truncated) {
+            const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
+            text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
+          }
+        }
+
+        return new Text(text, 0, 0);
+      },
+      async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
+        return executeShellOp(toolCallId, params, signal, onUpdate as any, ctx) as any;
+      },
+    };
+  }
+
+  pi.registerTool(createShellTool('sh', 'sh'));
+  pi.registerTool(createShellTool('shell', 'Shell'));
 }
 
 /**
- * Register the shell tool result hook.
+ * Register the shell/sh tool result hook.
  * Override isError for nonzero exits and timeouts.
  * (Pi agent loop ignores execute-level isError; hook is the real card-color path)
  * Call this from your extension after registerShellTool(pi).
  */
 export function registerShellResultHook(pi: ExtensionAPI) {
   pi.on('tool_result', async (event) => {
-    if (event.toolName !== 'shell') return undefined;
+    if (event.toolName !== 'shell' && event.toolName !== 'sh') return undefined;
     const details = event.details as { exitCode?: number; timedOut?: boolean } | undefined;
     const exitCode = details?.exitCode;
     const timedOut = details?.timedOut;
@@ -955,3 +978,4 @@ export function registerShellResultHook(pi: ExtensionAPI) {
     return undefined;
   });
 }
+

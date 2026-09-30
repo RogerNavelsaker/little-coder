@@ -19,8 +19,12 @@ export const mockTheme: MockTheme = {
   bold: (t) => t,
 };
 
-export const CWD = "/home/rona/Repositories/.ru/RogerNavelsaker/little-coder/.pi/extensions/basic-tools";
-export const FIXTURE = "/home/rona/Repositories/.ru/RogerNavelsaker/little-coder/README.md";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const CWD = resolve(__dirname, "..");
+export const FIXTURE = resolve(__dirname, "../../../../README.md");
 
 // --- Tool invocation ---
 

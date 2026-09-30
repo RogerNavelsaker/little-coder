@@ -20,6 +20,7 @@ export const OpKind = Type.Union([
   Type.Literal('write'),
   Type.Literal('find'),
   Type.Literal('ls'),
+  Type.Literal('sh'),
   Type.Literal('shell'),
   Type.Literal('ast_search'),
 ], { description: 'Op type discriminator' });
@@ -246,7 +247,7 @@ export const LsOp = Type.Object({
 // --- Shell op ---
 
 export const ShellOp = Type.Object({
-  type: Type.Literal('shell'),
+  type: Type.Union([Type.Literal('sh'), Type.Literal('shell')]),
   command: Type.String({ description: 'Command to execute' }),
   env_mode: Type.Optional(Type.Union([
     Type.Literal('auto'),

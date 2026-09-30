@@ -9,14 +9,18 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { registerUnifiedTool } from './src/unified.js';
 import { registerFileCheckpointExtension } from './src/file-checkpoint.js';
+import { registerShellTool, registerShellResultHook } from './src/shell.js';
 
 export default function basicToolsExtension(pi: ExtensionAPI): void {
   registerUnifiedTool(pi);
+  registerShellTool(pi);
+  registerShellResultHook(pi);
   registerFileCheckpointExtension(pi);
 
   pi.on('resources_discover', async () => {
     const active = pi.getActiveTools() as string[];
-    if (!active.includes('bash') || !active.includes('shell')) return;
+    if (!active.includes('bash') || (!active.includes('shell') && !active.includes('sh'))) return;
     pi.setActiveTools(active.filter(n => n !== 'bash'));
   });
 }
+

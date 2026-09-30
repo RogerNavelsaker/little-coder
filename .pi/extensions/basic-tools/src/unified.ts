@@ -45,8 +45,9 @@ async function dispatchOp(
       return executeFindOp(toolCallId, op as Extract<Op, { type: 'find' }>, signal, onUpdate, ctx);
     case 'ls':
       return executeLsOp(toolCallId, op as Extract<Op, { type: 'ls' }>, signal, onUpdate, ctx);
+    case 'sh':
     case 'shell':
-      return executeShellOp(toolCallId, op as Extract<Op, { type: 'shell' }>, signal, onUpdate, ctx);
+      return executeShellOp(toolCallId, op as any, signal, onUpdate, ctx);
     case 'ast_search':
       return executeAstSearchOp(toolCallId, op as Extract<Op, { type: 'ast_search' }>, signal, onUpdate, ctx);
     default:

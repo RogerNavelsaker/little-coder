@@ -9,6 +9,11 @@ in
     bubblewrap
     direnv
     nushell
+    ddgr
+    curl
+    aria2
+    yt-dlp
+    inputs.flyscrape.packages.${system}.default
     inputs.linehash.packages.${system}.default
     inputs.burrow.packages.${system}.default
     inputs.burrow.packages.${system}.default.bw
@@ -23,6 +28,7 @@ in
     inputs.trellis.packages.${system}.default
     inputs.trellis.packages.${system}.default.tl
   ];
+
 
   env.NODE_ENV = "development";
 

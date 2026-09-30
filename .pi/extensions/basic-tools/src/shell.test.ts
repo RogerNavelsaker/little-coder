@@ -127,13 +127,24 @@ describe("shell tool", () => {
     });
 
     test("env:auto in direnv-test fixture detects .envrc", async () => {
-      const { result } = await invokeTool(registerShellTool, {
-        commands: ["echo auto-test"],
-        env: "auto",
-      }, DIRENV_FIXTURE);
-      expect(result.details.exitCode).toBe(0);
-      expect(result.details.envResolved).toContain(".envrc");
+      const origDirenv = process.env.DIRENV_DIR;
+      const origWatches = process.env.DIRENV_WATCHES;
+      delete process.env.DIRENV_DIR;
+      delete process.env.DIRENV_WATCHES;
+      try {
+        const { result } = await invokeTool(registerShellTool, {
+          commands: ["echo auto-test"],
+          env: "auto",
+        }, DIRENV_FIXTURE);
+        expect(result.details.exitCode).toBe(0);
+        expect(result.details.envResolved).toContain(".envrc");
+      } finally {
+        if (origDirenv) process.env.DIRENV_DIR = origDirenv;
+        if (origWatches) process.env.DIRENV_WATCHES = origWatches;
+      }
     });
+
+
   });
 
   // ---- Output budgets (Phase 20) ----
@@ -228,7 +239,25 @@ describe("shell tool", () => {
         else process.env.PI_READONLY_SHELL = orig;
       }
     });
+
+    test("WARREN_RUNTIME=docker bypasses bwrap and records container sandbox", async () => {
+      const orig = process.env.WARREN_RUNTIME;
+      try {
+        process.env.WARREN_RUNTIME = "docker";
+        const { result } = await invokeTool(registerShellTool, {
+          commands: ["echo container-test"],
+          readonlyShell: true,
+        });
+        expect(result.details.readonlyShell).toBe(true);
+        expect(result.details.sandbox).toBe("container");
+        expect(result.details.envResolved).toBe("readonly (container)");
+      } finally {
+        if (orig === undefined) delete process.env.WARREN_RUNTIME;
+        else process.env.WARREN_RUNTIME = orig;
+      }
+    });
   });
+
 
   // ---- Schema exposure ----
   describe("schema", () => {
@@ -322,4 +351,12 @@ describe("shell tool", () => {
     expect(result.isError).toBeFalsy();
     expect(result.details.totalRuns).toBe(2);
   });
+
+  test("registers both 'sh' and 'shell' tools", () => {
+    const registered: string[] = [];
+    registerShellTool({ registerTool: (t: any) => { registered.push(t.name); } } as any);
+    expect(registered).toContain("sh");
+    expect(registered).toContain("shell");
+  });
 });
+
