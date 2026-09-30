@@ -45,21 +45,41 @@ little-coder/
 ├── .pi/
 │   ├── settings.json
 │   └── extensions/
-│       ├── _shared/            # shared TypeScript helpers
-│       ├── basic-tools/        # index.ts + src/
-│       ├── context/            # index.ts + src/
-│       └── pi-file-reference -> ../../vendor/pi-file-reference/extensions
-├── vendor/
-│   └── pi-file-reference/      # vendored @josephyoung/pi-file-reference v0.1.7
-├── scripts/
-│   ├── build-release.ts        # builds all release artifacts
-│   └── patch-pi.ts             # patches pi dist (baked into pi binary at build time)
-├── skills/
-├── models.json
-├── install.sh
-├── flake.nix
+│       ├── _shared/            # shared TypeScript helpers (linehash, toon, display, intervention)
+│       ├── basic-tools/        # universal Op[] schema (read, edit, write, grep, find, ls, shell, ast_search)
+│       ├── context/            # ephemeral session scratchpads (ctx_record, ctx_packet, ctx_inject)
+│       └── pi-file-reference   # @filepath reference injection
+├── flake.nix                   # pure Nix flake packaging & dockerTools image
 └── package.json                # devDependencies only
 ```
+
+### Current Extensions Runtime Mechanics
+
+1. **`basic-tools`**:
+   - **Schema**: Single `{ops: Op[]}` discriminated union. Small models reliably output a single unified tool call with multiple operations instead of managing many disparate tool interfaces.
+   - **Linehash Integration**: Line reads and edits utilize 4-character hex anchors (`xxhash32`). Edits match anchored lines with fuzzy fallback, avoiding hallucinated line-number drift.
+   - **TOON Encoding**: Tool results returned to the LLM are serialized via `@toon-format/toon`, saving 30–50% tokens compared to raw JSON.
+   - **Shell Execution**: Shell executes in **Nushell (`nu`)**, not POSIX/bash. Nushell syntax rules apply (e.g. `out+err>|`, `;` sequence, `^` escaping).
+   - **Bash Tool Suppression**: On startup, `pi.getActiveTools()` filters out Pi's built-in `bash` tool to force Nushell tool calls.
+
+2. **`context`**:
+   - Ephemeral session memory (`ctx_record`, `ctx_packet`, `ctx_inject`). Distinct from persistent repository stores (`.seeds/`, `.mulch/`, `.trellis/`). Used by models as an in-session scratchpad.
+
+3. **`pi-file-reference`**:
+   - Automatically intercepts `@path/to/file` references in prompts and expands file contents.
+
+### Planned Extensions Roadmap (Seeds Tracking)
+
+| Extension / Domain | Tracked Seed | Description & Exported Tools |
+|---|---|---|
+| **`extra-tools`** | `little-coder-cbcc` | Advanced agent utilities: `repo_map`, `scratchpad`, `session`, `outline`. |
+| **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
+| **`model-router`** | `little-coder-5767` | Model routing and `model_switch` tool for dynamic multi-model pipelines. |
+| **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control`, `source`. |
+| **`docs-tools`** | `little-coder-5030` | Document parsing & OCR: `doc_read`, `doc_ocr`, `doc_extract` via docling. |
+| **`grove`** | `little-coder-bd7f` | Direct agent tools for `.seeds/`, `.mulch/`, `.trellis/`, and `.canopy/`. |
+| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser`, `write-guard`, `read-guard`, `quality-monitor`. |
+| **`security`** | `little-coder-5e37` | `permission-gate` extension for sandbox access control. |
 
 ### Build flow (build-release.ts)
 

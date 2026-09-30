@@ -58,35 +58,30 @@ little-coder packages the tailored Pi scaffold into a deterministic Nix derivati
 | `warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage`. |
 | `data.tar.gz` | Cross-platform: compiled extensions, AGENTS.md, skills, config. |
 
-### How it works
+### Extensions Mechanics
 
-`little-coder install` downloads `data.tar.gz` + the platform pi binary into `~/.little-coder/`. At launch the launcher:
+1. **`basic-tools`**:
+   - **Unified Schema**: Exposes a single `{ops: Op[]}` discriminated union covering `read`, `edit`, `write`, `grep`, `find`, `ls`, `shell`, and `ast_search`.
+   - **Linehash Integration**: Employs 4-char hex anchors (`xxhash32`) to anchor file edits, eliminate drift, and perform fuzzy matching.
+   - **TOON Output**: Encodes LLM-facing results with `@toon-format/toon`, saving 30–50% tokens compared to JSON.
+   - **Nushell (`nu`) Execution**: Shell commands execute strictly in Nushell syntax; the built-in POSIX `bash` tool is suppressed.
 
-1. Finds extensions under `~/.little-coder/.pi/extensions/*/index.js`.
-2. Spawns `~/.little-coder/vendor/pi/pi-<os>-<cpu>` with `--no-extensions --no-context-files --system-prompt AGENTS.md --extension <each index.js>`.
+2. **`context`**:
+   - In-session ephemeral scratchpad (`ctx_record`, `ctx_packet`, `ctx_inject`).
 
-No bun, no node_modules, no global pi. Extensions are self-contained ESM bundles (all deps — typebox, toon, diff, pi-tui — inlined at build time).
+3. **`pi-file-reference`**:
+   - Automatic `@filepath` prompt expansion.
 
-### Installed data dir
+### Extensions Roadmap
 
-```
-~/.little-coder/
-├── .pi/
-│   ├── settings.json
-│   └── extensions/
-│       ├── basic-tools/
-│       │   └── index.js      # read, edit, write, grep, find, ls, shell, ast_search, revert_file
-│       ├── context/
-│       │   └── index.js      # ctx_record, ctx_packet, ctx_inject
-│       └── pi-file-reference/
-│           └── index.js      # @filepath reference injection in AGENTS.md
-├── vendor/
-│   └── pi/
-│       └── pi-<os>-<cpu>    # compiled pi runtime (patches baked in)
-├── AGENTS.md                 # system prompt
-├── models.json               # model compatibility table
-└── skills/                   # skill-inject knowledge base
-```
+- **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline`.
+- **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
+- **`model-router`** (`little-coder-5767`): Dynamic model routing and `model_switch`.
+- **`web-tools`** (`little-coder-6ebe`): Web research suite (`fetch`, `search`, `control`, `source`).
+- **`docs-tools`** (`little-coder-5030`): Document processing (`doc_read`, `doc_ocr`, `doc_extract` via docling).
+- **`grove`** (`little-coder-bd7f`): Direct agent operations for `.seeds/`, `.mulch/`, `.trellis/`, and `.canopy/`.
+- **`quality-stack`** (`little-coder-c0da`): Output parsing, read/write guards, and quality monitoring.
+- **`security`** (`little-coder-5e37`): Permission gate and sandbox isolation.
 
 ### Source layout
 
