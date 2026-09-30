@@ -9,14 +9,59 @@ import { Type } from '@sinclair/typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 
-export const recapSchema = Type.Object({
-  message: Type.String({
+export const recapItemSchema = Type.Object({
+  message: Type.Optional(Type.String({
     description: 'Concise narration of progress, plan checkpoint, or major intent transition.',
-  }),
+  })),
+});
+
+export const recapSchema = Type.Object({
+  ops: Type.Optional(Type.Array(recapItemSchema, { description: 'Recap operations array' })),
+  message: Type.Optional(Type.String({
+    description: 'Concise narration of progress, plan checkpoint, or major intent transition.',
+  })),
 });
 
 export interface RecapParams {
-  message: string;
+  ops?: Array<{ message?: string }>;
+  message?: string;
+}
+
+/**
+ * Exported executeRecapOp for invocation harnesses & tool dispatchers.
+ */
+export async function executeRecapOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  _ctx: { cwd: string } = { cwd: process.cwd() }
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeRecapOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, _ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map((op: any) => executeRecapOp(_toolCallId, op, _signal, _onUpdate, _ctx))
+    );
+    const messages = results.map(r => r.details?.message).filter(Boolean);
+    return {
+      content: [{ type: 'text' as const, text: messages.join('\n') }],
+      isError: false,
+      details: {
+        message: messages.join('; '),
+        messages,
+        totalRecaps: results.length,
+      },
+    };
+  }
+
+  const message = String(params?.message ?? '').trim();
+  return {
+    content: [{ type: 'text' as const, text: message }],
+    isError: false,
+    details: { message },
+  };
 }
 
 export function registerRecapTool(pi: ExtensionAPI): void {
@@ -33,7 +78,7 @@ export function registerRecapTool(pi: ExtensionAPI): void {
     parameters: recapSchema,
 
     renderCall(args: any, theme: any) {
-      const msg = args?.message || '';
+      const msg = args?.message || (Array.isArray(args?.ops) ? args.ops.map((o: any) => o?.message).filter(Boolean).join('; ') : '');
       const italicFn = theme.italic ? theme.italic : (t: string) => `\x1b[3m${t}\x1b[23m`;
       const text = theme.fg('toolTitle', 'recap ') + theme.fg('muted', italicFn(`"${msg}"`));
       return new Text(text, 0, 0);
@@ -47,13 +92,8 @@ export function registerRecapTool(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
 
-    async execute(_toolCallId: string, params: any) {
-      const message = String(params?.message ?? '').trim();
-      return {
-        content: [{ type: 'text', text: message }],
-        isError: false,
-        details: { message },
-      };
+    async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
+      return (executeRecapOp(toolCallId, params, signal, onUpdate, ctx) as any);
     },
   });
 

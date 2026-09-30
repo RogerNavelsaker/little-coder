@@ -104,4 +104,28 @@ describe("recap extension", () => {
     expect(res.systemPrompt).toContain("[Narration Discipline]");
     expect(res.systemPrompt).toContain("recap");
   });
+
+  it("supports ops array via executeRecapOp", async () => {
+    let registeredTool: any = null;
+    const mockPi = {
+      registerTool(tool: any) {
+        registeredTool = tool;
+      },
+      on() {},
+    };
+
+    registerRecapTool(mockPi as any);
+
+    const result = await registeredTool.execute("call_ops", {
+      ops: [
+        { message: "Step 1 complete" },
+        { message: "Step 2 in progress" },
+      ],
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toContain("Step 1 complete");
+    expect(result.content[0].text).toContain("Step 2 in progress");
+    expect(result.details.totalRecaps).toBe(2);
+  });
 });
