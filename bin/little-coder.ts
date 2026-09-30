@@ -29,15 +29,47 @@ import { fileURLToPath } from "node:url";
 const isDev = Boolean(process.argv[1]?.match(/\.(m?ts|tsx)$/));
 
 // ---------------------------------------------------------------------------
-// Data directory
+// RPC mode detection & stdout purity guard
+//
+// In Warren container / RPC mode (--mode rpc), stdout is strictly reserved
+// for JSON-RPC messages between Pi and Warren. Any stdout pollution corrupts
+// the handshake. All launcher logs/diagnostics are diverted to stderr.
+// ---------------------------------------------------------------------------
+function checkRpcMode(): boolean {
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === "--mode" && process.argv[i + 1] === "rpc") return true;
+    if (arg === "--mode=rpc") return true;
+    if (arg === "-m" && process.argv[i + 1] === "rpc") return true;
+    if (arg === "-m=rpc") return true;
+  }
+  return process.env.LITTLE_CODER_MODE === "rpc";
+}
+
+const isRpc = checkRpcMode();
+if (isRpc) {
+  console.log = (...args: unknown[]) => { console.error(...args); };
+  console.info = (...args: unknown[]) => { console.error(...args); };
+  process.env.PI_SKIP_VERSION_CHECK = "1";
+}
+
+// ---------------------------------------------------------------------------
+// Data & Share directories
 //
 // Dev:      repo root  (sibling of this file)
+// Nix:      LITTLE_CODER_SHARE or ../share/little-coder
 // Compiled: ~/.little-coder  (or LITTLE_CODER_HOME env override)
 // ---------------------------------------------------------------------------
+const nixShare = process.env.LITTLE_CODER_SHARE
+  ?? resolve(dirname(process.execPath), "..", "share", "little-coder");
+const isNix = !isDev && existsSync(nixShare);
+
 const DATA_HOME = process.env.LITTLE_CODER_HOME ?? join(homedir(), ".little-coder");
 const pkgRoot = isDev
   ? resolve(dirname(fileURLToPath(import.meta.url)), "..")
-  : DATA_HOME;
+  : isNix
+    ? nixShare
+    : DATA_HOME;
 
 // ---------------------------------------------------------------------------
 // Platform names (shared between binary/pi asset resolution)
@@ -46,16 +78,21 @@ const osName   = ({ linux: "linux", darwin: "darwin" } as Record<string, string>
 const cpuName  = ({ x64: "x64", arm64: "arm64", aarch64: "arm64" } as Record<string, string>)[arch()] ?? arch();
 
 // ---------------------------------------------------------------------------
-// Bun runtime — dev mode only.
-// Compiled/installed mode uses the vendored pi binary directly (no bun needed).
+// Path utilities
 // ---------------------------------------------------------------------------
-function findBun(): string {
-  if (isDev) return process.execPath;
+function findOnPath(name: string): string | null {
   const PATH = (process.env.PATH ?? "").split(":");
   for (const d of PATH) {
-    const b = join(d, "bun");
-    if (existsSync(b)) return b;
+    const p = join(d, name);
+    if (existsSync(p)) return p;
   }
+  return null;
+}
+
+function findBun(): string {
+  if (isDev) return process.execPath;
+  const b = findOnPath("bun");
+  if (b) return b;
   console.error("little-coder: bun not found in PATH. Install bun: https://bun.sh");
   process.exit(1);
 }
@@ -97,9 +134,9 @@ if (sub === "update")    { await cmdUpdate(process.argv.slice(3));    process.ex
 if (sub === "version")   { await cmdVersion();                        process.exit(0); }
 
 // ---------------------------------------------------------------------------
-// Guard: compiled binary requires data dir to exist
+// Guard: compiled binary requires data dir to exist (unless packaged via Nix)
 // ---------------------------------------------------------------------------
-if (!isDev && !existsSync(DATA_HOME)) {
+if (!isDev && !isNix && !existsSync(DATA_HOME)) {
   console.error(`little-coder: data directory not found at ${DATA_HOME}`);
   console.error(`Run: little-coder install`);
   process.exit(1);
@@ -109,7 +146,7 @@ if (!isDev && !existsSync(DATA_HOME)) {
 // pi entry point
 //
 // Dev:      bun + node_modules/@earendil-works/pi-coding-agent bin entry
-// Compiled: vendored pi-<os>-<cpu> binary in DATA_HOME/vendor/pi/
+// Installed: PATH pi, LITTLE_CODER_PI_BIN, or vendored pi binary in DATA_HOME
 // ---------------------------------------------------------------------------
 let piCmd: string;
 let piCmdArgs: string[] = [];
@@ -169,18 +206,28 @@ if (isDev) {
   piCmd = findBun();
   piCmdArgs = [piEntry];
 } else {
-  // Installed mode: use vendored compiled pi binary (patches baked in at build time)
+  // Installed mode (Nix or ~/.little-coder)
+  const piFromEnv = process.env.LITTLE_CODER_PI_BIN;
   const piVendored = join(DATA_HOME, "vendor", "pi", `pi-${osName}-${cpuName}`);
-  if (!existsSync(piVendored)) {
-    console.error(`little-coder: vendored pi binary not found at ${piVendored}`);
-    console.error(`Run: little-coder install`);
+  const piOnPath = findOnPath("pi");
+
+  if (piFromEnv && existsSync(piFromEnv)) {
+    piCmd = piFromEnv;
+  } else if (piOnPath) {
+    piCmd = piOnPath;
+  } else if (existsSync(piVendored)) {
+    piCmd = piVendored;
+  } else {
+    console.error(`little-coder: pi runtime not found on PATH or at ${piVendored}`);
+    if (!isNix) console.error(`Run: little-coder install`);
     process.exit(1);
   }
-  piCmd = piVendored;
 }
 
-// Auto-discover extensions under pkgRoot/.pi/extensions/*/index.ts
-const extDir = join(pkgRoot, ".pi", "extensions");
+// Auto-discover extensions under pkgRoot/extensions or pkgRoot/.pi/extensions
+const extDir = existsSync(join(pkgRoot, "extensions"))
+  ? join(pkgRoot, "extensions")
+  : join(pkgRoot, ".pi", "extensions");
 const extArgs: string[] = [];
 if (existsSync(extDir)) {
   for (const name of readdirSync(extDir).sort()) {
@@ -199,7 +246,7 @@ if (existsSync(extDir)) {
 }
 
 // Quiet pi's own version banner
-if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
+if (process.env.PI_SKIP_VERSION_CHECK === undefined || isRpc) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
@@ -235,7 +282,7 @@ child.on("exit", (code, signal) => {
 // ===========================================================================
 
 async function cmdVersion() {
-  const pkgJson = join(isDev ? pkgRoot : DATA_HOME, "package.json");
+  const pkgJson = join((isDev || isNix) ? pkgRoot : DATA_HOME, "package.json");
   const ver = existsSync(pkgJson)
     ? (JSON.parse(readFileSync(pkgJson, "utf-8")) as { version: string }).version
     : "unknown";
