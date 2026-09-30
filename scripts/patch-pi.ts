@@ -73,7 +73,56 @@ const BOX_RENDER_PATCH = {
     "            const lines = child.render(contentWidth);",
 };
 
-export const PATCHES = [ABORT_MARKER_PATCH, BOX_RENDER_PATCH];
+const TOOL_EXECUTION_SPACER_PATCH = {
+  rel: "dist/modes/interactive/components/tool-execution.js",
+  applied: "little-coder patch: suppress blank spacer lines for grouped tools",
+  find:
+    "    render(width) {\n" +
+    "        if (this.hideComponent) {\n" +
+    "            return [];\n" +
+    "        }\n" +
+    "        return super.render(width);\n" +
+    "    }",
+  replace:
+    "    render(width) {\n" +
+    "        if (this.hideComponent) {\n" +
+    "            return [];\n" +
+    "        }\n" +
+    "        // little-coder patch: suppress blank spacer lines for grouped tools\n" +
+    "        const lines = super.render(width);\n" +
+    "        if (this.suppressLeadingSpacer || this.isGrouped) {\n" +
+    "            if (lines.length > 0 && lines[0] === \"\") {\n" +
+    "                lines.shift();\n" +
+    "            }\n" +
+    "        }\n" +
+    "        return lines;\n" +
+    "    }",
+};
+
+const TOOL_OVERRIDE_PATCH = {
+  rel: "dist/modes/interactive/components/tool-execution.js",
+  applied: "little-coder patch: toolDefinitionOverrides for third-party rendering",
+  find:
+    "    getCallRenderer() {\n" +
+    "        if (!this.builtInToolDefinition) {\n" +
+    "            return this.toolDefinition?.renderCall;\n" +
+    "        }",
+  replace:
+    "    // little-coder patch: toolDefinitionOverrides for third-party rendering\n" +
+    "    getCallRenderer() {\n" +
+    "        const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);\n" +
+    "        if (override?.renderCall) return override.renderCall;\n" +
+    "        if (!this.builtInToolDefinition) {\n" +
+    "            return this.toolDefinition?.renderCall;\n" +
+    "        }",
+};
+
+export const PATCHES = [
+  ABORT_MARKER_PATCH,
+  BOX_RENDER_PATCH,
+  TOOL_EXECUTION_SPACER_PATCH,
+  TOOL_OVERRIDE_PATCH,
+];
 
 export function resolvePiRoot(piRootOverride) {
   if (piRootOverride && existsSync(join(piRootOverride, "package.json"))) {
