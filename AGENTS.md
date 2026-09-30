@@ -18,46 +18,30 @@ ml prime architecture tools   # compact priming prompt
 Grove stores: `.seeds/` `.mulch/` `.trellis/` `.canopy/`
 The devenv environment provides the project CLIs, aliases, and Bun.
 
-Repo root: `/home/rona/Repositories/.ru/RogerNavelsaker/little-coder` (only path; no `~/projects/little-coder`).
+Repo root: `/home/rona/Repositories/RogerNavelsaker/little-coder` (only path; no `~/projects/little-coder` or `.ru`).
 
 ## Architecture
 
-little-coder is a self-contained pi distribution. It ships two compiled binaries per platform plus a cross-platform data archive.
+little-coder is a Nix-native pi distribution designed for local developers and Warren autonomous agent containers. It eliminates upstream npm packaging, in-tree updaters, and vendored libc blobs in favor of pure Nix derivations.
 
-### Release artifacts
+### Packaging & Warren Runtime
 
-| Asset | Description |
+| Target | Description |
 |---|---|
-| `little-coder-<os>-<cpu>` | Launcher binary. Handles `install`/`update`/`uninstall`/`version` + spawns pi. |
-| `pi-<os>-<cpu>` | Compiled pi runtime with patches baked in. No node_modules needed at runtime. |
-| `data.tar.gz` | Cross-platform archive: compiled extensions, AGENTS.md, skills, config. |
+| `packages.default` | Compiled Bun launcher wrapped with nixpkgs dependencies (`pi`, `ripgrep`, `git`) via `makeBinaryWrapper`. |
+| `packages.warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage` for Warren RPC sandboxes. |
 
-### Installed layout (`~/.little-coder/`)
+### Extensions & Assets
 
-```
-~/.little-coder/
-├── .pi/
-│   ├── settings.json
-│   └── extensions/
-│       ├── basic-tools/index.js        # read,edit,write,grep,find,ls,shell,ast_search,revert_file
-│       ├── context/index.js            # ctx_record,ctx_packet,ctx_inject
-│       └── pi-file-reference/index.js  # @filepath reference injection
-├── vendor/
-│   └── pi/
-│       └── pi-<os>-<cpu>              # compiled pi (patches baked in at build time)
-├── AGENTS.md
-├── models.json
-└── skills/
-```
-
-No `node_modules`. Extensions are self-contained ESM bundles (all deps inlined at build time). The pi binary is standalone — no bun required at runtime.
+- Extensions (`.pi/extensions/*`) are pre-compiled to ESM bundles during the Nix build phase and loaded directly from `/nix/store`.
+- In container mode (`--mode rpc`), `little-coder` runs with strict stdout purity, passing raw JSON-RPC messages between Pi and Warren without greeting banners.
 
 ### Source layout
 
 ```
 little-coder/
 ├── bin/
-│   └── little-coder.ts         # launcher source
+│   └── little-coder.ts         # launcher source (RPC transparent, no self-updater)
 ├── .pi/
 │   ├── settings.json
 │   └── extensions/

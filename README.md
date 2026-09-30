@@ -2,26 +2,32 @@
 
 **A coding agent tuned for small local models, built on [pi](https://github.com/mariozechner/pi).**
 
-Hard fork of [itayinbarr/little-coder](https://github.com/itayinbarr/little-coder). This repo replaces the upstream npm/Node distribution with a self-contained bun binary distribution — no Node.js, no npm, no global pi install required.
+Hard fork of [itayinbarr/little-coder](https://github.com/itayinbarr/little-coder). This fork replaces the upstream npm and binary-blob distribution with a **pure Nix Flake & container agent runtime** — no npm, no self-updaters, no vendored libc blobs, and fully compatible with Warren autonomous sandboxes.
 
 The research story — why scaffold–model fit matters, how a 9.7 B Qwen beat frontier entries on Aider Polyglot — is in the upstream Substack post: [*Honey, I Shrunk the Coding Agent*](https://open.substack.com/pub/itayinbarr/p/honey-i-shrunk-the-coding-agent).
 
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/RogerNavelsaker/little-coder/main/install.sh | sh
-```
-
-This downloads the `little-coder` launcher binary to `~/.local/bin/` and runs `little-coder install` to set up `~/.little-coder/` (extensions, vendored pi runtime, AGENTS.md, skills).
-
-**Nix:**
+## Install (Nix)
 
 ```bash
 nix profile install github:RogerNavelsaker/little-coder
-little-coder install    # set up ~/.little-coder/
 ```
 
-**Requirements:** bun is required for dev/source builds. The installed binary distribution needs no runtime — not Node, not bun, not a global pi install.
+Or run directly without installation:
+
+```bash
+nix run github:RogerNavelsaker/little-coder -- --model llamacpp/qwen3.6-35b-a3b
+```
+
+## Warren Agent Runtime
+
+`little-coder` can run directly as an autonomous agent runtime in Warren:
+
+```yaml
+# .warren/config.yaml
+agentImage: ghcr.io/rogernavelsaker/warren-agent:latest
+```
+
+When invoked by Warren with `--mode rpc`, `little-coder` operates transparently with zero startup noise, passing through all JSON-RPC events directly to the supervisor.
 
 ## Run
 
@@ -41,23 +47,15 @@ export LLAMACPP_API_KEY=noop
 export LLAMACPP_BASE_URL=http://127.0.0.1:8888/v1
 ```
 
-## Update / uninstall
-
-```bash
-little-coder update      # fetch latest release; update data dir + binaries in-place
-little-coder uninstall   # remove ~/.little-coder/
-```
-
-The launcher binary itself is updated in-place by `update`. To remove it: `rm $(which little-coder)`.
-
 ## Architecture
 
-little-coder ships as two compiled binaries per platform plus one cross-platform data archive:
+little-coder packages the tailored Pi scaffold into a deterministic Nix derivation:
 
-| Release asset | Description |
+| Component | Packaging |
 |---|---|
-| `little-coder-<os>-<cpu>` | Launcher. Manages install/update/uninstall and spawns pi. |
-| `pi-<os>-<cpu>` | Compiled pi runtime with patches baked in. Self-contained. |
+| `little-coder` | Compiled Bun launcher wrapped with Nix runtime dependencies (`pi`, `ripgrep`, `git`). |
+| `extensions` | Pre-compiled ESM bundles loaded directly from `/nix/store`. |
+| `warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage`. |
 | `data.tar.gz` | Cross-platform: compiled extensions, AGENTS.md, skills, config. |
 
 ### How it works
