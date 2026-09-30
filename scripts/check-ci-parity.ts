@@ -17,6 +17,7 @@ const PACKAGE_JSON_PATH = resolve(REPO_ROOT, 'package.json');
 const CI_ONLY = new Set<string>([
   'build',
   'test',
+  'sync:source',
 ]);
 
 if (!existsSync(PACKAGE_JSON_PATH)) {
