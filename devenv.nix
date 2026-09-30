@@ -32,6 +32,10 @@ in
 
   env.NODE_ENV = "development";
 
+  scripts.little-coder.exec = ''
+    exec bun "$DEVENV_ROOT/bin/little-coder.ts" "$@"
+  '';
+
   enterShell = ''
     export PATH="/home/rona/Repositories/scripts:$PATH"
   '';
