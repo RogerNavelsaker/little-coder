@@ -81,9 +81,12 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 - **`sh` Tool & Runtime** (`little-coder-2315`): Canonical `sh` tool + container detection.
 - **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline` as workspace CLIs.
 - **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
-- **`model-router`** (`little-coder-5767`): Model routing and `model_switch` CLI.
-- **`web-tools`** (`little-coder-6ebe`): Web research CLIs (`fetch`, `search`, `control` via flyscrape).
-- **`docs-tools`** (`little-coder-5030`): Document processing CLI (`doc_read`, `doc_ocr`, `doc_extract` via docling).
+- **`web-tools`** (`little-coder-6ebe`): Web research CLIs:
+  - `ddgr`: Low-token search API querying.
+  - `flyscrape` + `curl`: High-speed article extraction (Defuddle/Readability) to Markdown/TOON (override: `CRAWL4AI_URL`).
+  - `aria2c` + `yt-dlp`: Fast multi-connection download and media/stream extraction.
+- **`docs-tools`** (`little-coder-5030`): Document processing CLI (`docling.nu`):
+  - Converts PDF, DOCX, PPTX, XLSX, scanned documents to Markdown/JSON via `DOCLING_URL` (default `https://docling.naco.casa`). Supports `--vlm` for `Docling_258M` on `ester-desktop`.
 - **`grove`** (`little-coder-bd7f`): Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs.
 - **`quality-stack`** (`little-coder-c0da`): Output parsing, write guards, and quality monitoring.
 - **`security`** (`little-coder-5e37`): Permission gate and sandbox isolation.

@@ -128,10 +128,13 @@ Skills provide high-level workflows and specialized capability guides:
 
 - **Protocols** (`skills/protocols/`): `task_decomposition.md`.
 - **Tools Reference** (`skills/tools/`): `nu.md`, `edit.md`, `read.md`, `write.md`, `grep.md`, `glob.md`, `shell_session.md`.
-- **Web Skills Suite** (`skills/web/`):
-  - `web-fetch`: Clean article extraction (Defuddle/Readability) + Markdown/TOON export without HTML/CSS bloat.
-  - `web-search`: High-signal query formatting and link gathering via search APIs.
-  - `web-download`: Headless resource and asset downloading.
+- **Web Skills & CLI Suite** (`skills/web/`):
+  - **`web-search` (`ddgr`)**: Fast, low-token search via DuckDuckGo CLI (`ddgr`).
+  - **`web-fetch` (`flyscrape` + `curl`)**: Scrapes and renders HTML to clean Markdown via Defuddle/Readability.
+    - *Override*: Set `CRAWL4AI_URL` (defaulting to `https://crawl4ai.naco.casa`) for JavaScript-heavy multi-page crawls.
+  - **`web-download` (`aria2c` + `yt-dlp`)**: Multi-connection fast asset downloads via `aria2c` and media/stream extraction via `yt-dlp`.
+  - **`docling` (`docling.nu`)**: Local CLI wrapper for converting PDF, DOCX, PPTX, XLSX, and scanned documents to Markdown or JSON.
+    - *Endpoint*: `DOCLING_URL` (defaults to `https://docling.naco.casa`). Supports `--vlm` for accelerated inference on `ester-desktop`'s `Docling_258M`.
 
 ### Cross-repo dependencies
 
