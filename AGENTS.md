@@ -130,12 +130,12 @@ Skills provide high-level workflows and specialized capability guides:
 - **Tools Reference** (`skills/tools/`): `nu.md`, `edit.md`, `read.md`, `write.md`, `grep.md`, `glob.md`, `shell_session.md`.
 - **Web Skills & CLI Suite** (`skills/web/`):
   - **`web-search` (`ddgr`)**: Fast, low-token search via DuckDuckGo CLI (`ddgr`).
-    - *Override*: Set `SEARXNG_URL` (defaulting to `https://searxng.naco.casa`) to query a SearXNG meta-search instance first with `ddgr` fallback.
+    - *Override*: Set `SEARXNG_URL` (default: `""`, disabled) to query a SearXNG meta-search instance first with `ddgr` fallback.
   - **`web-fetch` (`flyscrape` + `curl`)**: Scrapes and renders HTML to clean Markdown via Defuddle/Readability.
-    - *Override*: Set `CRAWL4AI_URL` (defaulting to `https://crawl4ai.naco.casa`) for JavaScript-heavy multi-page crawls.
+    - *Override*: Set `CRAWL4AI_URL` (default: `""`, disabled) for remote JavaScript-heavy multi-page crawls.
   - **`web-download` (`aria2c` + `yt-dlp`)**: Multi-connection fast asset downloads via `aria2c` and media/stream extraction via `yt-dlp`.
-  - **`docling` (`docling.nu`)**: Local CLI wrapper for converting PDF, DOCX, PPTX, XLSX, and scanned documents to Markdown or JSON.
-    - *Endpoint*: `DOCLING_URL` (defaults to `https://docling.naco.casa`). Supports `--vlm` for accelerated inference on `ester-desktop`'s `Docling_258M`.
+  - **`docling` (`docling.nu`)**: CLI wrapper for converting PDF, DOCX, PPTX, XLSX, and scanned documents to Markdown or JSON.
+    - *Endpoint*: `DOCLING_URL` (default: `""`, required). Supports `--vlm` for accelerated inference on a local VLM endpoint.
 
 ### Cross-repo dependencies
 

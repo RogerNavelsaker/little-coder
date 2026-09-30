@@ -14,7 +14,7 @@ def main [
   let effective_searxng_url = if ($searxng_url | is-not-empty) {
     $searxng_url
   } else {
-    ($env.SEARXNG_URL? | default "https://searxng.naco.casa")
+    ($env.SEARXNG_URL? | default "")
   }
 
   mut args = [
@@ -35,11 +35,15 @@ def main [
     $args = ($args | append ["--time" $time])
   }
 
-  let searxng = (^curl --fail --silent --show-error --location --max-time ($timeout | into string)
-    --get --data-urlencode $"q=($query)" --data-urlencode "format=json"
-    $"($effective_searxng_url)/search" | complete)
-  let result = if $searxng.exit_code == 0 and ($searxng.stdout | str trim | is-not-empty) {
-    {exit_code: 0, stdout: $searxng.stdout, stderr: ""}
+  let result = if ($effective_searxng_url | is-not-empty) {
+    let searxng = (^curl --fail --silent --show-error --location --max-time ($timeout | into string)
+      --get --data-urlencode $"q=($query)" --data-urlencode "format=json"
+      $"($effective_searxng_url)/search" | complete)
+    if $searxng.exit_code == 0 and ($searxng.stdout | str trim | is-not-empty) {
+      {exit_code: 0, stdout: $searxng.stdout, stderr: ""}
+    } else {
+      (^timeout ($timeout | into string) ddgr ...$args $query | complete)
+    }
   } else {
     (^timeout ($timeout | into string) ddgr ...$args $query | complete)
   }

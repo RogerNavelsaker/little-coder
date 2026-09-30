@@ -55,9 +55,20 @@ def main [
   --allowed-domain: string = ""
   --timeout: int = 60
   --retries: int = 1
-  --crawler-url: string = "https://crawl4ai.naco.casa"
-  --crawler-token: string = "crawl4ai-naco-token"
+  --crawler-url: string = ""
+  --crawler-token: string = ""
 ] {
+  let effective_crawler_url = if ($crawler_url | is-not-empty) {
+    $crawler_url
+  } else {
+    ($env.CRAWL4AI_URL? | default "")
+  }
+  let effective_crawler_token = if ($crawler_token | is-not-empty) {
+    $crawler_token
+  } else {
+    ($env.CRAWL4AI_TOKEN? | default "")
+  }
+
   if ($urls | is-empty) {
     error make {msg: "provide at least one URL"}
   }
@@ -94,25 +105,26 @@ def main [
       $args = ($args | append ["--allowedDomains" $allowed_domain])
     }
 
-    let crawler_payload = ({urls: [$url]} | to json)
-    let crawler_auth = (if ($crawler_token | is-not-empty) { ["-H" $"Authorization: Bearer ($crawler_token)"] } else { [] })
-    let crawler = (^curl --fail --silent --show-error --location --max-time ($timeout | into string)
-      -H "Content-Type: application/json" ...$crawler_auth --data $crawler_payload $"($crawler_url)/crawl" | complete)
     mut fetched = []
-    if $crawler.exit_code == 0 and ($crawler.stdout | str trim | is-not-empty) {
-      try {
-        let payload = ($crawler.stdout | from json)
-        let results = ($payload.results? | default [])
-        if ($results | length) > 0 {
-          $fetched = ($results | each {|item|
-            let md = (if ($item.markdown? | default "" | describe | str starts-with "record") {
-              $item.markdown.raw_markdown? | default ($item.markdown.fit_markdown? | default "")
-            } else {
-              $item.markdown? | default ($item.cleaned_markdown? | default "")
-            })
-            {
-              url: ($item.url? | default $url)
-              title: ($item.title? | default "")
+    if ($effective_crawler_url | is-not-empty) {
+      let crawler_payload = ({urls: [$url]} | to json)
+      let crawler_auth = (if ($effective_crawler_token | is-not-empty) { ["-H" $"Authorization: Bearer ($effective_crawler_token)"] } else { [] })
+      let crawler = (^curl --fail --silent --show-error --location --max-time ($timeout | into string)
+        -H "Content-Type: application/json" ...$crawler_auth --data $crawler_payload $"($effective_crawler_url)/crawl" | complete)
+      if $crawler.exit_code == 0 and ($crawler.stdout | str trim | is-not-empty) {
+        try {
+          let payload = ($crawler.stdout | from json)
+          let results = ($payload.results? | default [])
+          if ($results | length) > 0 {
+            $fetched = ($results | each {|item|
+              let md = (if ($item.markdown? | default "" | describe | str starts-with "record") {
+                $item.markdown.raw_markdown? | default ($item.markdown.fit_markdown? | default "")
+              } else {
+                $item.markdown? | default ($item.cleaned_markdown? | default "")
+              })
+              {
+                url: ($item.url? | default $url)
+                title: ($item.title? | default "")
               markdown: $md
               html: ($item.html? | default ($item.cleaned_html? | default ""))
               links: ($item.links? | default [])

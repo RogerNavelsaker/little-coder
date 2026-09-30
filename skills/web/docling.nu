@@ -8,8 +8,13 @@ def main [
   --format (-f): string = "md" # md or json
   --vlm                        # Use Lemonade VLM acceleration on ester-desktop
 ] {
-  let endpoint = ($env.DOCLING_URL? | default "https://docling.naco.casa")
+  let endpoint = ($env.DOCLING_URL? | default "")
   
+  if ($endpoint | is-empty) {
+    print -e "Error: DOCLING_URL environment variable is not set. Set DOCLING_URL to your Docling Serve endpoint."
+    exit 1
+  }
+
   if not ($file_path | path exists) {
     print -e $"Error: File not found: ($file_path)"
     exit 1

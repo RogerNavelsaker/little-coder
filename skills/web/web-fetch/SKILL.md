@@ -3,7 +3,7 @@ name: web-fetch
 description: Fetches, crawls, renders, and exports web content into Markdown, JSON, or TOON. Use when Codex needs website content without spending context on raw HTML/CSS/JS; multi-page crawls; link or metadata extraction; article Markdown; rendered pages; or pages discovered with web-search.
 ---
 
-Use Docling for PDFs and office documents, Crawl4AI first for webpage crawling/rendering, and `flyscrape` as the webpage fallback, with Bun for extraction. The wrapper supports single pages, multi-URL fetches, small crawls, rendered pages, cleanup before extraction, and multiple output surfaces. Crawl4AI is reached through `https://crawl4ai.naco.casa` by default.
+Use Docling for PDFs and office documents, `flyscrape` + Bun (Defuddle/Readability) as the primary webpage extractor, and Crawl4AI for remote/rendered multi-page crawls when `CRAWL4AI_URL` is set (default: none). The wrapper supports single pages, multi-URL fetches, small crawls, rendered pages, cleanup before extraction, and multiple output surfaces.
 
 ## Preferred Wrapper
 
