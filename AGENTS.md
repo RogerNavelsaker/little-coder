@@ -83,7 +83,6 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
 | **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
 | **`quality-stack`** | `little-coder-c0da` | Guardrails: output parser, write guard, and quality monitors. |
-| **`security`** | `little-coder-5e37` | Permission gate and sandbox isolation wrapper. |
 
 ### Build flow (build-release.ts)
 
