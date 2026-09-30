@@ -53,33 +53,37 @@ little-coder/
 └── package.json                # devDependencies only
 ```
 
-### Current Extensions Runtime Mechanics
+### Current Extensions Runtime Mechanics & The Single Tool Pattern
 
-1. **`basic-tools`**:
-   - **Schema**: Single `{ops: Op[]}` discriminated union. Small models reliably output a single unified tool call with multiple operations instead of managing many disparate tool interfaces.
-   - **Linehash Integration**: Line reads and edits utilize 4-character hex anchors (`xxhash32`). Edits match anchored lines with fuzzy fallback, avoiding hallucinated line-number drift.
-   - **TOON Encoding**: Tool results returned to the LLM are serialized via `@toon-format/toon`, saving 30–50% tokens compared to raw JSON.
-   - **Shell Execution**: Shell executes in **Nushell (`nu`)**, not POSIX/bash. Nushell syntax rules apply (e.g. `out+err>|`, `;` sequence, `^` escaping).
-   - **Bash Tool Suppression**: On startup, `pi.getActiveTools()` filters out Pi's built-in `bash` tool to force Nushell tool calls.
+1. **The Single Tool Pattern (`sh` as Code-as-Action)**:
+   - **Primary Action Primitive**: The agent interacts primarily through a single execution tool: **`sh`** (executing in **Nushell**).
+   - **Extensions as Environment Providers**: Rather than registering dozens of bespoke JSON-RPC schemas (which bloat system prompts and trigger context rot on small models), extensions contribute **CLI utilities and Nu modules** directly into the workspace `$PATH`.
+   - **Multi-step Pipelining in 1 Turn**: Agents perform filtering, pagination, and multi-step investigation natively inside the pipeline (e.g. `sd ready | from json | get 0.title`), keeping raw intermediate data out of the LLM context.
+   - **Precision Mutation via `linehash`**: Precision anchored edits (`read`, `edit`, `write`) remain available through `ops[]` with `xxhash32` 4-character hex line anchors to eliminate hallucinated line-drift.
 
-2. **`context`**:
-   - Ephemeral session memory (`ctx_record`, `ctx_packet`, `ctx_inject`). Distinct from persistent repository stores (`.seeds/`, `.mulch/`, `.trellis/`). Used by models as an in-session scratchpad.
+2. **Container-Aware Sandboxing (`burrow` vs. Container)**:
+   - **In Containers (Warren / Podman / Docker / K8s)**: When `/.dockerenv`, `/run/.containerenv`, or container runtime flags are detected, the container/cgroup boundary already provides complete filesystem and network isolation. Nested `burrow` (Bubblewrap) is bypassed entirely to avoid permission/capability failures.
+   - **Direct on Host**: When running on a bare-metal developer workstation, `burrow` (`bwrap`) wraps commands to enforce read-only bindings and protect the host filesystem.
 
-3. **`pi-file-reference`**:
-   - Automatically intercepts `@path/to/file` references in prompts and expands file contents.
+3. **`context` & `pi-file-reference`**:
+   - `context`: Ephemeral in-session scratchpad (`ctx_record`, `ctx_packet`, `ctx_inject`) separate from persistent git-backed knowledge stores.
+   - `pi-file-reference`: Automatic `@filepath` prompt expansion.
 
-### Planned Extensions Roadmap (Seeds Tracking)
+### Planned Extensions Roadmap (CLI & Module Architecture)
 
-| Extension / Domain | Tracked Seed | Description & Exported Tools |
+Instead of bloated JSON tool registries, extensions deliver domain capabilities as executable CLIs and Nu modules:
+
+| Extension / Domain | Tracked Seed | Delivered Capability & CLI/Module |
 |---|---|---|
-| **`extra-tools`** | `little-coder-cbcc` | Advanced agent utilities: `repo_map`, `scratchpad`, `session`, `outline`. |
+| **`sh` Single Tool** | `little-coder-2315` | Canonical `sh` execution tool + container-aware sandbox detection (bwrap bypass in containers). |
+| **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session`, `outline` as CLIs/Nu scripts. |
 | **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
-| **`model-router`** | `little-coder-5767` | Model routing and `model_switch` tool for dynamic multi-model pipelines. |
-| **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control`, `source`. |
-| **`docs-tools`** | `little-coder-5030` | Document parsing & OCR: `doc_read`, `doc_ocr`, `doc_extract` via docling. |
-| **`grove`** | `little-coder-bd7f` | Direct agent tools for `.seeds/`, `.mulch/`, `.trellis/`, and `.canopy/`. |
-| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser`, `write-guard`, `read-guard`, `quality-monitor`. |
-| **`security`** | `little-coder-5e37` | `permission-gate` extension for sandbox access control. |
+| **`model-router`** | `little-coder-5767` | Model routing and `model_switch` CLI for dynamic multi-model pipelines. |
+| **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
+| **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
+| **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
+| **`quality-stack`** | `little-coder-c0da` | Guardrails: output parser, write guard, and quality monitors. |
+| **`security`** | `little-coder-5e37` | Permission gate and sandbox isolation wrapper. |
 
 ### Build flow (build-release.ts)
 

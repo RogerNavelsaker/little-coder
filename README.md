@@ -58,29 +58,34 @@ little-coder packages the tailored Pi scaffold into a deterministic Nix derivati
 | `warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage`. |
 | `data.tar.gz` | Cross-platform: compiled extensions, AGENTS.md, skills, config. |
 
-### Extensions Mechanics
+### The Single Tool Pattern (`sh` as Code-as-Action)
 
-1. **`basic-tools`**:
-   - **Unified Schema**: Exposes a single `{ops: Op[]}` discriminated union covering `read`, `edit`, `write`, `grep`, `find`, `ls`, `shell`, and `ast_search`.
-   - **Linehash Integration**: Employs 4-char hex anchors (`xxhash32`) to anchor file edits, eliminate drift, and perform fuzzy matching.
-   - **TOON Output**: Encodes LLM-facing results with `@toon-format/toon`, saving 30–50% tokens compared to JSON.
-   - **Nushell (`nu`) Execution**: Shell commands execute strictly in Nushell syntax; the built-in POSIX `bash` tool is suppressed.
+Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaust context and cause round-trip latency, `little-coder` embraces **Code-as-Action**:
 
-2. **`context`**:
-   - In-session ephemeral scratchpad (`ctx_record`, `ctx_packet`, `ctx_inject`).
+1. **`sh` as the Universal Execution Tool**:
+   - The agent writes **Nushell (`nu`)** code directly into the workspace.
+   - Pipelining, filtering, loops, and pagination happen natively inside the sandbox (e.g. `sd ready | from json | get 0.title`). Intermediate data never bloats the LLM context.
+   - **Precision Mutation via `linehash`**: Precision anchored edits (`read`, `edit`, `write`) remain available through `ops[]` with `xxhash32` 4-character hex line anchors to eliminate hallucinated line-drift.
+   - Built-in POSIX `bash` tool is suppressed in favor of structured Nushell execution.
 
-3. **`pi-file-reference`**:
-   - Automatic `@filepath` prompt expansion.
+2. **Extensions as Environment Providers**:
+   - Extensions contribute **CLI binaries and Nu script libraries** to the workspace `$PATH` rather than injecting separate JSON schemas into the prompt.
+   - Any new tool or domain (web, docling, seeds, git) is immediately callable via `sh` pipelines without increasing system prompt token overhead.
 
-### Extensions Roadmap
+3. **Container-Aware Sandboxing**:
+   - **Containers (Warren / Podman / K8s)**: When running in container sandboxes, `burrow` (nested Bubblewrap) is automatically bypassed; the container/cgroup boundary provides complete isolation.
+   - **Host Execution**: When running directly on bare-metal workstations, `burrow` enforces read-only mounts and host safety.
 
-- **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline`.
+### Extensions Roadmap (CLI & Module Architecture)
+
+- **`sh` Tool & Runtime** (`little-coder-2315`): Canonical `sh` tool + container detection.
+- **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline` as workspace CLIs.
 - **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
-- **`model-router`** (`little-coder-5767`): Dynamic model routing and `model_switch`.
-- **`web-tools`** (`little-coder-6ebe`): Web research suite (`fetch`, `search`, `control`, `source`).
-- **`docs-tools`** (`little-coder-5030`): Document processing (`doc_read`, `doc_ocr`, `doc_extract` via docling).
-- **`grove`** (`little-coder-bd7f`): Direct agent operations for `.seeds/`, `.mulch/`, `.trellis/`, and `.canopy/`.
-- **`quality-stack`** (`little-coder-c0da`): Output parsing, read/write guards, and quality monitoring.
+- **`model-router`** (`little-coder-5767`): Model routing and `model_switch` CLI.
+- **`web-tools`** (`little-coder-6ebe`): Web research CLIs (`fetch`, `search`, `control` via flyscrape).
+- **`docs-tools`** (`little-coder-5030`): Document processing CLI (`doc_read`, `doc_ocr`, `doc_extract` via docling).
+- **`grove`** (`little-coder-bd7f`): Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs.
+- **`quality-stack`** (`little-coder-c0da`): Output parsing, write guards, and quality monitoring.
 - **`security`** (`little-coder-5e37`): Permission gate and sandbox isolation.
 
 ### Source layout
