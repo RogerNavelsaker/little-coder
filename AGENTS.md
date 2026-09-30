@@ -48,7 +48,7 @@ little-coder/
 │       ├── _shared/            # shared TypeScript helpers (linehash, toon, display, intervention)
 │       ├── basic-tools/        # universal Op[] schema (read, edit, write, grep, find, ls, shell, ast_search)
 │       ├── context/            # ephemeral session scratchpads (ctx_record, ctx_packet, ctx_inject)
-│       └── pi-file-reference   # @filepath reference injection
+│       └── project-context/    # workspace AGENTS.md/CLAUDE.md loader + @filepath expansion
 ├── flake.nix                   # pure Nix flake packaging & dockerTools image
 └── package.json                # devDependencies only
 ```
@@ -214,7 +214,7 @@ Agent process management, background execution, sandboxing, isolation, and inter
 | Worker | Role & Command |
 |---|---|
 | `planner` | Lead orchestrator (Claude Code / AGY CLI). Manages plots (`pt`), issues (`sd`), and dispatches worker agents. |
-| `editor` | Code modification agent running via `herdr`: `pi -ne -e npm:pi-continue -e npm:pi-schedule-prompt -e npm:@josephyoung/pi-file-reference` inside a `burrow` (`bw`) sandbox. |
+| `editor` | Code modification agent running via `herdr`: `pi -ne -e npm:pi-continue -e npm:pi-schedule-prompt` inside a `burrow` (`bw`) sandbox. |
 | `tester` | Verification agent running via `herdr`: `pi` (plain) inside a `burrow` (`bw`) sandbox. |
 
 ### Tooling & Management Scripts (relative to repo root)

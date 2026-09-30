@@ -99,7 +99,7 @@ little-coder/
 │       ├── _shared/          # shared TypeScript helpers across extensions
 │       ├── basic-tools/      # universal Op[] schema (sh, read, edit, write, grep, find, ls)
 │       ├── context/          # context scratchpad tools
-│       └── pi-file-reference # @filepath reference injection
+│       └── project-context/  # workspace AGENTS.md/CLAUDE.md loader + @filepath expansion
 ├── rules/                    # behavioral standards (caveman, token-economy, defense-in-depth, etc.)
 ├── skills/                   # skills suite (protocols, tools, web-fetch, web-search, web-download)
 ├── flake.nix                 # Nix package and distroless container image

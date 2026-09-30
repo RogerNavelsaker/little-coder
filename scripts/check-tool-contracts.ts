@@ -16,8 +16,10 @@ const REPO_ROOT = resolve(import.meta.dir, '..');
 const EXTENSIONS_DIR = resolve(REPO_ROOT, '.pi/extensions');
 
 const HELPER_FILES = new Set([
+  'discover.ts',
   'display.ts',
   'file-checkpoint.ts',
+  'file-reference.ts',
   'invoke.ts',
   'linehash.ts',
   'output.ts',
