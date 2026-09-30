@@ -34,6 +34,7 @@ const TOOL_REGISTRY: Record<string, Parameters<typeof registerReadTool>[0]> = {
   find: registerFindTool,
   ls: registerLsTool,
   shell: registerShellTool,
+  sh: registerShellTool,
   "ast-search": registerAstSearchTool,
   ast_search: registerAstSearchTool,
   "basic-tools": registerUnifiedTool,

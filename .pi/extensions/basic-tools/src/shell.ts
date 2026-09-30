@@ -139,7 +139,13 @@ function runBwrapSandbox(
   }
 }
 import { loadSettings } from './settings.js';
-import { type DisplayMode, formatShellCompact, SHELL_GUIDANCE } from './display.js';
+import {
+  type DisplayMode,
+  formatShellCompact,
+  formatStarshipHeader,
+  formatStarshipPrompt,
+  SHELL_GUIDANCE,
+} from './display.js';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 
@@ -812,6 +818,7 @@ export async function executeShellOp(
     details: {
       cwd: targetCwd,
       command,
+      display: params.display,
       envResolved: (isReadonly && isContainerEnvironment()) ? 'readonly (container)' : envResolved,
       configResolved: nuConfig.configSource,
       exitCode,
@@ -862,11 +869,13 @@ export function registerShellTool(pi: ExtensionAPI) {
     ),
     display: Type.Optional(
       Type.Union([
-        Type.Literal('auto', { description: 'Auto: compact by default, fuller when expanded (default)' }),
+        Type.Literal('auto', { description: 'Auto: starship header & prompt when expanded (default)' }),
+        Type.Literal('starship', { description: 'Starship-style header (CWD + right-aligned status/runtime) and prompt' }),
+        Type.Literal('plain', { description: 'Plain: backend/env info and raw stdout/stderr without starship header' }),
         Type.Literal('compact', { description: 'Compact: 1-5 short visible lines' }),
         Type.Literal('table', { description: 'Markdown table via renderResult' }),
         Type.Literal('full', { description: 'Compact summary + stdout/stderr sections' }),
-      ], { description: 'Display mode: auto (default), compact, table, or full' })
+      ], { description: 'Display mode: auto (default), starship, plain, compact, table, or full' })
     ),
     readonly_shell: Type.Optional(
       Type.Boolean({ description: 'Run command inside a bubblewrap read-only sandbox (PoC)' })
@@ -910,6 +919,8 @@ export function registerShellTool(pi: ExtensionAPI) {
 
         const details = (result as {
           details?: {
+            cwd?: string;
+            command?: string;
             exitCode?: number;
             durationMs?: number;
             stdout?: string;
@@ -918,31 +929,111 @@ export function registerShellTool(pi: ExtensionAPI) {
             envResolved?: string;
             truncated?: boolean;
             fullOutputPath?: string;
+            display?: DisplayMode;
+            runs?: any[];
           };
         }).details;
-        const exitCode = details?.exitCode;
-        const output = oneLine(details?.stderr || details?.stdout, 140);
-        const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
-        const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
-        let text = `${status}${duration}`;
-        if (output) {
-          text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
+
+        const displayParam = details?.display ?? (result as { params?: { display?: DisplayMode } }).params?.display;
+        const isCompact = displayParam === 'compact';
+        const isPlain = displayParam === 'plain';
+
+        if (!expanded || isCompact) {
+          const exitCode = details?.exitCode;
+          const output = oneLine(details?.stderr || details?.stdout, 140);
+          const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
+          const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
+          let text = `${status}${duration}`;
+          if (output) {
+            text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
+          }
+          return new Text(text, 0, 0);
         }
 
-        const displayParam = (result as { params?: { display?: DisplayMode } }).params?.display;
-        const isAuto = displayParam === undefined || displayParam === 'auto';
-        const isCompact = displayParam === 'compact';
-        const showFull = expanded && !isCompact && isAuto;
-
-        if (showFull && details) {
-          if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
-          if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
-          if (details.stdout) text += `\n${details.stdout}`;
-          if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
-          if (details.truncated) {
-            const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
-            text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
+        if (isPlain) {
+          const exitCode = details?.exitCode;
+          const output = oneLine(details?.stderr || details?.stdout, 140);
+          const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
+          const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
+          let text = `${status}${duration}`;
+          if (output) {
+            text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
           }
+          if (details) {
+            if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
+            if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
+            if (details.stdout) text += `\n${details.stdout}`;
+            if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
+            if (details.truncated) {
+              const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
+              text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
+            }
+          }
+          return new Text(text, 0, 0);
+        }
+
+        // Expanded Starship view (default)
+        const width = Math.max(20, (theme as any)?.terminalWidth ?? (_context as any)?.terminalWidth ?? (process.stdout?.columns || 80));
+
+        if (details?.runs && Array.isArray(details.runs)) {
+          const renderedRuns = details.runs.map((run: any) => {
+            const rCwd = run?.cwd ?? process.cwd();
+            const rCommand = run?.command ?? '';
+            const rExitCode = run?.exitCode ?? 0;
+            const rDurationMs = run?.durationMs ?? 0;
+            const rHeader = formatStarshipHeader({
+              cwd: rCwd,
+              exitCode: rExitCode,
+              durationMs: rDurationMs,
+              width,
+              theme,
+            });
+            const rPrompt = formatStarshipPrompt(rCommand, theme);
+            let rText = `${rHeader}\n${rPrompt}`;
+            if (run?.stdout) {
+              const stdout = run.stdout.replace(/\n+$/, '');
+              if (stdout) rText += `\n${stdout}`;
+            }
+            if (run?.stderr) {
+              const stderr = run.stderr.replace(/\n+$/, '');
+              if (stderr) rText += `\n${theme.fg('warning', stderr)}`;
+            }
+            return rText;
+          });
+          return new Text(renderedRuns.join('\n\n'), 0, 0);
+        }
+
+        const cwd = details?.cwd ?? process.cwd();
+        const command = details?.command ?? (Array.isArray((details as any)?.commands) ? (details as any).commands.join('; ') : '');
+        const exitCode = details?.exitCode ?? (result?.isError ? 1 : 0);
+        const durationMs = details?.durationMs ?? 0;
+
+        const header = formatStarshipHeader({
+          cwd,
+          exitCode,
+          durationMs,
+          width,
+          theme,
+        });
+        const prompt = formatStarshipPrompt(command, theme);
+
+        let text = `${header}\n${prompt}`;
+
+        if (details?.stdout) {
+          const stdout = details.stdout.replace(/\n+$/, '');
+          if (stdout) {
+            text += `\n${stdout}`;
+          }
+        }
+        if (details?.stderr) {
+          const stderr = details.stderr.replace(/\n+$/, '');
+          if (stderr) {
+            text += `\n${theme.fg('warning', stderr)}`;
+          }
+        }
+        if (details?.truncated) {
+          const hint = details.fullOutputPath ? ` · full output at ${details.fullOutputPath}` : '';
+          text += `\n${theme.fg('muted', `… output truncated${hint}`)}`;
         }
 
         return new Text(text, 0, 0);

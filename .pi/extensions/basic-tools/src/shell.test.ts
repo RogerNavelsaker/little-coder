@@ -1,6 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { registerShellTool } from "./shell.js";
+import {
+  formatHumanRuntime,
+  formatCwd,
+  formatStarshipHeader,
+  formatStarshipPrompt,
+} from "./display.js";
 import { invokeTool, contentText, FIXTURE } from "./test-helpers.js";
 
 const DIRENV_FIXTURE = `/tmp/pi-shell-test-direnv-${process.pid}`;
@@ -338,6 +344,101 @@ describe("shell tool", () => {
       });
       const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
       expect(text).toContain("boom");
+    });
+    test("expanded success: renders starship header and ❯ prompt", async () => {
+      const { result, tool } = await invokeTool(registerShellTool, {
+        command: "echo starship-test",
+      });
+      const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
+      expect(text).toContain("✓");
+      expect(text).toContain("❯ echo starship-test");
+      expect(text).toContain("starship-test");
+    });
+
+    test("expanded failure: renders ✗ <exitCode> in header", async () => {
+      const { result, tool } = await invokeTool(registerShellTool, {
+        command: "nu -c 'exit 42'",
+      });
+      const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
+      expect(text).toContain("✗ 42");
+      expect(text).toContain("❯ nu -c 'exit 42'");
+    });
+
+    test("display='plain': renders plain layout without ❯ prompt", async () => {
+      const { result, tool } = await invokeTool(registerShellTool, {
+        command: "echo plain-test",
+        display: "plain",
+      });
+      const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
+      expect(text).not.toContain("❯");
+      expect(text).toContain("exit 0");
+      expect(text).toContain("plain-test");
+    });
+
+    test("display='compact': stays compact even when expanded", async () => {
+      const { result, tool } = await invokeTool(registerShellTool, {
+        command: "echo compact-test",
+        display: "compact",
+      });
+      const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
+      expect(text).not.toContain("❯");
+      expect(text).toContain("exit 0");
+      expect(text).toContain("compact-test");
+    });
+  });
+
+  describe("Starship formatting helpers", () => {
+    test("formatHumanRuntime formats ms, s, and m s", () => {
+      expect(formatHumanRuntime(0)).toBe("0ms");
+      expect(formatHumanRuntime(480)).toBe("480ms");
+      expect(formatHumanRuntime(999)).toBe("999ms");
+      expect(formatHumanRuntime(1000)).toBe("1s");
+      expect(formatHumanRuntime(12400)).toBe("12s");
+      expect(formatHumanRuntime(59999)).toBe("59s");
+      expect(formatHumanRuntime(62000)).toBe("1m 2s");
+      expect(formatHumanRuntime(125000)).toBe("2m 5s");
+    });
+
+    test("formatCwd replaces homedir with ~", () => {
+      const fakeHome = "/home/developer";
+      expect(formatCwd(fakeHome, fakeHome)).toBe("~");
+      expect(formatCwd(`${fakeHome}/projects/app`, fakeHome)).toBe("~/projects/app");
+      expect(formatCwd("/var/log", fakeHome)).toBe("/var/log");
+      expect(formatCwd("", fakeHome)).toBe("~");
+    });
+
+    test("formatStarshipHeader aligns cwd and status", () => {
+      const mockTheme = {
+        fg: (_c: string, t: string) => t,
+        bold: (t: string) => t,
+      };
+      const header0 = formatStarshipHeader({
+        cwd: "/home/developer/repo",
+        exitCode: 0,
+        durationMs: 480,
+        width: 60,
+        theme: mockTheme,
+      });
+      expect(header0).toContain("✓");
+      expect(header0).toContain("480ms");
+
+      const headerErr = formatStarshipHeader({
+        cwd: "/home/developer/repo",
+        exitCode: 127,
+        durationMs: 12000,
+        width: 60,
+        theme: mockTheme,
+      });
+      expect(headerErr).toContain("✗ 127");
+      expect(headerErr).toContain("12s");
+    });
+
+    test("formatStarshipPrompt formats ❯ prompt", () => {
+      const mockTheme = {
+        fg: (_c: string, t: string) => t,
+        bold: (t: string) => t,
+      };
+      expect(formatStarshipPrompt("echo hi", mockTheme)).toBe("❯ echo hi");
     });
   });
 

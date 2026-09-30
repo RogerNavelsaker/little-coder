@@ -11,6 +11,7 @@
  */
 
 import { spawnSync } from 'child_process';
+import { homedir } from 'os';
 import { Markdown, type MarkdownTheme } from '@earendil-works/pi-tui';
 
 // ---- Throttle helper ----
@@ -47,7 +48,7 @@ function resolveBatBin(): string {
 
 const BAT_BIN = resolveBatBin();
 
-export type DisplayMode = 'auto' | 'compact' | 'table' | 'full';
+export type DisplayMode = 'auto' | 'compact' | 'table' | 'full' | 'starship' | 'plain';
 
 // ---- MarkdownTheme builder ----
 
@@ -337,6 +338,95 @@ export function formatShellCompact(result: ShellCompactResult): string {
     return `${status} — ${firstLine}`;
   }
   return status;
+}
+
+/**
+ * Format runtime in human-friendly format:
+ *   < 1s   → ms (e.g. 480ms)
+ *   < 60s  → Ns (e.g. 12s)
+ *   >= 60s → Nm Ns (e.g. 1m 2s)
+ */
+export function formatHumanRuntime(ms: number): string {
+  const rounded = Math.max(0, Math.round(ms));
+  if (rounded < 1000) {
+    return `${rounded}ms`;
+  }
+  const totalSeconds = Math.floor(rounded / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+/**
+ * Format CWD replacing homedir with ~
+ */
+export function formatCwd(cwd: string, home = homedir()): string {
+  if (!cwd) return '~';
+  if (cwd === home) return '~';
+  if (cwd.startsWith(home + '/')) {
+    return `~${cwd.slice(home.length)}`;
+  }
+  return cwd;
+}
+
+/**
+ * Strip ANSI escape codes to calculate visual string width.
+ */
+export function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+export interface StarshipHeaderOptions {
+  cwd: string;
+  exitCode: number;
+  durationMs: number;
+  width?: number;
+  theme: {
+    fg(color: string, text: string): string;
+    bold?(text: string): string;
+  };
+}
+
+/**
+ * Formats a Starship-style header line:
+ * Left: formatted CWD
+ * Right: status glyph + exit code (if non-zero) + human runtime
+ *
+ * Degrades gracefully on narrow terminals by putting status on a second line.
+ */
+export function formatStarshipHeader(options: StarshipHeaderOptions): string {
+  const { cwd, exitCode, durationMs, width = 80, theme } = options;
+  const runtime = formatHumanRuntime(durationMs);
+  const statusGlyph = exitCode === 0
+    ? theme.fg('success', '✓')
+    : theme.fg('error', `✗ ${exitCode}`);
+  const status = `${statusGlyph} ${theme.fg('dim', runtime)}`;
+  const formattedCwd = theme.fg('accent', formatCwd(cwd));
+
+  const visibleLeft = stripAnsi(formattedCwd).length;
+  const visibleRight = stripAnsi(status).length;
+  const padding = width - visibleLeft - visibleRight;
+
+  if (padding >= 2) {
+    return `${formattedCwd}${' '.repeat(padding)}${status}`;
+  }
+  // Graceful degradation on narrow panes: status on second line
+  return `${formattedCwd}\n${status}`;
+}
+
+/**
+ * Formats Starship-style prompt line:
+ *   ❯ <command>
+ */
+export function formatStarshipPrompt(
+  command: string,
+  theme: { fg(color: string, text: string): string; bold?(text: string): string },
+): string {
+  const glyph = theme.bold ? theme.bold(theme.fg('accent', '❯')) : theme.fg('accent', '❯');
+  return `${glyph} ${command}`;
 }
 
 export interface AstSearchCompactResult {

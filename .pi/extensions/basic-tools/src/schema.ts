@@ -261,9 +261,12 @@ export const ShellOp = Type.Object({
     Type.String(),
   ])),
   display: Type.Optional(Type.Union([
+    Type.Literal('auto'),
     Type.Literal('compact'),
     Type.Literal('table'),
     Type.Literal('full'),
+    Type.Literal('starship'),
+    Type.Literal('plain'),
   ])),
 });
 
