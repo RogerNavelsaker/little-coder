@@ -20,7 +20,6 @@
     "skills/",
     ".pi/extensions/",
     ".pi/settings.json",
-    "models.json",
     "vendor/",
     "LICENSE",
     "NOTICE",

@@ -39,12 +39,8 @@ little-coder
 Pi's standard `--model` flag and all provider env vars apply:
 
 ```bash
-little-coder --model llamacpp/qwen3.6-35b-a3b
 little-coder --model anthropic/claude-haiku-4-5
-little-coder --model ollama/qwen3.5
-
-export LLAMACPP_API_KEY=noop
-export LLAMACPP_BASE_URL=http://127.0.0.1:8888/v1
+little-coder --model openrouter/anthropic/claude-3.7-sonnet
 ```
 
 ## Architecture
@@ -121,7 +117,7 @@ bun run build:release        # → dist/little-coder-<os>-<cpu>, dist/pi-<os>-<c
 1. Compile launcher → `dist/little-coder-<os>-<cpu>`.
 2. Apply `patch-pi.ts` to `node_modules/@earendil-works/pi-coding-agent/dist/`, compile pi → `dist/pi-<os>-<cpu>`.
 3. Compile each extension: `bun build index.ts --outfile dist/extensions/*/index.js` (no `--external`; all deps bundled).
-4. Pack `dist/data.tar.gz`: compiled `.js` files, AGENTS.md, skills/, models.json, settings.json.
+4. Pack `dist/data.tar.gz`: compiled `.js` files, AGENTS.md, skills/, settings.json.
 
 ### Patching pi
 

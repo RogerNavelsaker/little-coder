@@ -78,7 +78,6 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | **`sh` Single Tool** | `little-coder-2315` | Canonical `sh` execution tool + container-aware sandbox detection (bwrap bypass in containers). |
 | **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session`, `outline` as CLIs/Nu scripts. |
 | **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
-| **`model-router`** | `little-coder-5767` | Model routing and `model_switch` CLI for dynamic multi-model pipelines. |
 | **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
 | **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
@@ -90,7 +89,7 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 1. Compile `bin/little-coder.ts` → `dist/little-coder-<os>-<cpu>` (launcher binary).
 2. Apply `scripts/patch-pi.ts` to `node_modules/@earendil-works/pi-coding-agent/dist/`, then compile pi's entry → `dist/pi-<os>-<cpu>`.
 3. Compile each `.pi/extensions/*/index.ts` → `dist/extensions/*/index.js` (all deps bundled inline; no `--external` flags).
-4. Pack `dist/data.tar.gz`: compiled `index.js` files, `AGENTS.md`, `skills/`, `models.json`, `.pi/settings.json`, `vendor/` source.
+4. Pack `dist/data.tar.gz`: compiled `index.js` files, `AGENTS.md`, `skills/`, `.pi/settings.json`, `vendor/` source.
 
 ### Dev vs installed mode
 

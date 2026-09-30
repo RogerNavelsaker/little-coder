@@ -117,11 +117,97 @@ const TOOL_OVERRIDE_PATCH = {
     "        }",
 };
 
+/**
+ * Escape raw CR / LF / TAB that appear INSIDE JSON string literals, leaving
+ * structural whitespace between tokens untouched.
+ */
+export function repairJsonControlChars(text: string): string {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (const ch of text) {
+    if (esc) {
+      out += ch;
+      esc = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      esc = true;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      out += ch;
+      continue;
+    }
+    if (inStr) {
+      if (ch === "\n") {
+        out += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        out += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        out += "\\t";
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
+}
+
+const EDIT_REPAIR_APPLIED = "little-coder patch: repair raw control chars in a JSON-string `edits`";
+
+function editRepairCatch(indent: number): string {
+  const i = " ".repeat(indent);
+  return (
+    `catch {\n` +
+    `${i}    // ${EDIT_REPAIR_APPLIED} (issue #127).\n` +
+    `${i}    // Small local models emit literal newlines inside oldText/newText;\n` +
+    `${i}    // JSON.parse rejects those as "Bad control character in string\n` +
+    `${i}    // literal", and the original empty catch left \`edits\` a string for\n` +
+    `${i}    // schema validation to refuse. With write refused for an existing\n` +
+    `${i}    // file, that left the model no way to deliver a patch at all.\n` +
+    `${i}    try {\n` +
+    `${i}        const repair = ${String(repairJsonControlChars).split("\n").join(`\n${i}        `)};\n` +
+    `${i}        const repaired = JSON.parse(repair(args.edits));\n` +
+    `${i}        if (Array.isArray(repaired))\n` +
+    `${i}            args.edits = repaired;\n` +
+    `${i}    }\n` +
+    `${i}    catch { }\n` +
+    `${i}}`
+  );
+}
+
+const EDIT_REPAIR_PATCH = {
+  rel: "dist/core/tools/edit.js",
+  applied: EDIT_REPAIR_APPLIED,
+  find:
+    "            if (Array.isArray(parsed))\n" +
+    "                args.edits = parsed;\n" +
+    "        }\n" +
+    "        catch { }\n" +
+    "    }\n" +
+    "    const legacy = args;",
+  replace:
+    "            if (Array.isArray(parsed))\n" +
+    "                args.edits = parsed;\n" +
+    "        }\n" +
+    "        " + editRepairCatch(8) + "\n" +
+    "    }\n" +
+    "    const legacy = args;",
+};
+
 export const PATCHES = [
   ABORT_MARKER_PATCH,
   BOX_RENDER_PATCH,
   TOOL_EXECUTION_SPACER_PATCH,
   TOOL_OVERRIDE_PATCH,
+  EDIT_REPAIR_PATCH,
 ];
 
 export function resolvePiRoot(piRootOverride) {

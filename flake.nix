@@ -81,9 +81,6 @@
               if [ -d skills ]; then
                 cp -r skills $out/share/little-coder/skills
               fi
-              if [ -f models.json ]; then
-                cp models.json $out/share/little-coder/models.json
-              fi
               if [ -f .pi/settings.json ]; then
                 mkdir -p $out/share/little-coder/.pi
                 cp .pi/settings.json $out/share/little-coder/.pi/settings.json

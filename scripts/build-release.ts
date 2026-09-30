@@ -146,7 +146,7 @@ for (const name of readdirSync(extSrc).sort()) {
 // 4. Data archive (cross-platform — no pi binary inside)
 //
 //    Contains: compiled extensions, AGENTS.md, skills/, .pi/settings.json,
-//              models.json, vendor/ source (provenance).
+//              vendor/ source (provenance).
 //    Does NOT contain: node_modules, package.json, bun.lock, pi binaries.
 //    pi binary is a separate per-platform release asset (pi-<os>-<cpu>).
 // ---------------------------------------------------------------------------
@@ -163,11 +163,6 @@ mkdirSync(join(stageDir, "data", ".pi", "extensions"), { recursive: true });
 // AGENTS.md
 if (existsSync(join(root, "AGENTS.md"))) {
   copyFileSync(join(root, "AGENTS.md"), join(stageDir, "data", "AGENTS.md"));
-}
-
-// models.json
-if (existsSync(join(root, "models.json"))) {
-  copyFileSync(join(root, "models.json"), join(stageDir, "data", "models.json"));
 }
 
 // .pi/settings.json
