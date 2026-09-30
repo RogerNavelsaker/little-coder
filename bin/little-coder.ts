@@ -219,6 +219,14 @@ if (process.env.PI_SKIP_VERSION_CHECK === undefined || isRpc) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
+// Set default PI_NUSHELL_CONFIG if not already defined
+if (!process.env.PI_NUSHELL_CONFIG) {
+  const defaultNuConfig = join(pkgRoot, ".pi", "nushell", "config.nu");
+  if (existsSync(defaultNuConfig)) {
+    process.env.PI_NUSHELL_CONFIG = defaultNuConfig;
+  }
+}
+
 // Compose argv and spawn pi
 const userArgs = process.argv.slice(2);
 const agentsMd = join(pkgRoot, "AGENTS.md");

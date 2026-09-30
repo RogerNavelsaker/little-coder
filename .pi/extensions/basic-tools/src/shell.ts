@@ -192,7 +192,18 @@ function resolveNuConfig(): { configPath: string | undefined; configSource: stri
   if (existsSync(PI_NUSHELL_CONFIG_PATH)) {
     return { configPath: PI_NUSHELL_CONFIG_PATH, configSource: PI_NUSHELL_CONFIG_PATH };
   }
-  // 3. No config — clean execution
+  // 3. Check bundled default config (.pi/nushell/config.nu)
+  const bundledCandidates = [
+    resolve(__dirname, '../../../nushell/config.nu'),
+    resolve(__dirname, '../../nushell/config.nu'),
+    join(process.cwd(), '.pi', 'nushell', 'config.nu'),
+  ];
+  for (const cand of bundledCandidates) {
+    if (existsSync(cand)) {
+      return { configPath: cand, configSource: cand };
+    }
+  }
+  // 4. No config — clean execution
   return { configPath: undefined, configSource: 'clean (no config)' };
 }
 

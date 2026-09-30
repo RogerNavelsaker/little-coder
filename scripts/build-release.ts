@@ -177,6 +177,13 @@ if (existsSync(piSettings)) {
   copyFileSync(piSettings, join(stageDir, "data", ".pi", "settings.json"));
 }
 
+// .pi/nushell/config.nu
+const piNuConfig = join(root, ".pi", "nushell", "config.nu");
+if (existsSync(piNuConfig)) {
+  mkdirSync(join(stageDir, "data", ".pi", "nushell"), { recursive: true });
+  copyFileSync(piNuConfig, join(stageDir, "data", ".pi", "nushell", "config.nu"));
+}
+
 // skills/ (for skill-inject)
 const skillsDir = join(root, "skills");
 if (existsSync(skillsDir)) {

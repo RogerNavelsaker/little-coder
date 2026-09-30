@@ -3,6 +3,16 @@ name: nu
 description: Nushell syntax reference for running commands, checking paths, capturing output, and reporting results. Load when writing or executing Nu shell code.
 ---
 
+## Built-in little-coder Aliases
+
+The default Nushell configuration (`.pi/nushell/config.nu`) exposes non-conflicting CLI tool shortcuts:
+
+| Alias | Target | Description |
+|---|---|---|
+| `read` | `linehash read` | Anchored line-hash file reader with 4-char hex anchors |
+| `edit` | `linehash edit` | Anchored surgical file mutation with fuzzy matching |
+| `ast-search` | `ast-grep` | Structural AST pattern search and rewrite |
+
 ## External commands
 
 Prefix external binaries with `^` to bypass Nu built-ins:

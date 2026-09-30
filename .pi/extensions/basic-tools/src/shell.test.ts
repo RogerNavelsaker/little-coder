@@ -78,6 +78,26 @@ describe("shell tool", () => {
       expect(result.isError).toBe(true);
       expect(contentText(result)).toContain("boom");
     });
+
+    test("bundled config provides default aliases: read, edit, ast-search", async () => {
+      const { result } = await invokeTool(registerShellTool, {
+        command: "read --help",
+      });
+      expect(result.details.exitCode).toBe(0);
+      expect(result.details.stdout).toContain("linehash read");
+
+      const editResult = await invokeTool(registerShellTool, {
+        command: "edit --help",
+      });
+      expect(editResult.result.details.exitCode).toBe(0);
+      expect(editResult.result.details.stdout).toContain("linehash edit");
+
+      const astResult = await invokeTool(registerShellTool, {
+        command: "ast-search --help",
+      });
+      expect(astResult.result.details.exitCode).toBe(0);
+      expect(astResult.result.details.stdout).toContain("ast-grep");
+    });
   });
 
   // ---- Timeout ----

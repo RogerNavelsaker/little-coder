@@ -88,6 +88,10 @@
                 mkdir -p $out/share/little-coder/.pi
                 cp .pi/settings.json $out/share/little-coder/.pi/settings.json
               fi
+              if [ -d .pi/nushell ]; then
+                mkdir -p $out/share/little-coder/.pi/nushell
+                cp -r .pi/nushell/* $out/share/little-coder/.pi/nushell/
+              fi
               if [ -f package.json ]; then
                 cp package.json $out/share/little-coder/package.json
               fi
