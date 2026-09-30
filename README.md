@@ -93,24 +93,18 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 ```
 little-coder/
 ├── bin/
-│   └── little-coder.ts       # launcher (bun source; compiled for releases)
+│   └── little-coder.ts       # launcher (Nix-wrapped; RPC transparent, no self-updater)
 ├── .pi/
 │   ├── settings.json
 │   └── extensions/
 │       ├── _shared/          # shared TypeScript helpers across extensions
-│       ├── basic-tools/      # index.ts + src/ (structural tools)
-│       ├── context/          # index.ts + src/ (context tools)
-│       └── pi-file-reference -> ../../vendor/pi-file-reference/extensions
-├── vendor/
-│   └── pi-file-reference/    # vendored @josephyoung/pi-file-reference v0.1.7
-├── scripts/
-│   ├── build-release.ts      # builds all release artifacts
-│   └── patch-pi.ts           # idempotent pi dist patches (baked into pi binary at release)
-├── skills/                   # bundled skill and knowledge markdown files
-├── models.json
-├── install.sh                # bootstrap installer (curl | sh)
-├── flake.nix                 # Nix package (build from source or fetchurl)
-└── package.json              # devDependencies only; no runtime npm deps
+│       ├── basic-tools/      # universal Op[] schema (sh, read, edit, write, grep, find, ls)
+│       ├── context/          # context scratchpad tools
+│       └── pi-file-reference # @filepath reference injection
+├── rules/                    # behavioral standards (caveman, token-economy, defense-in-depth, etc.)
+├── skills/                   # skills suite (protocols, tools, web-fetch, web-search, web-download)
+├── flake.nix                 # Nix package and distroless container image
+└── package.json              # devDependencies only
 ```
 
 ### Build

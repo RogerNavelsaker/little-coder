@@ -1,0 +1,21 @@
+{
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "bun build ./src/page-to-markdown.ts --bundle --target=browser --format=esm --outfile=./defuddle-page-to-markdown.js",
+    "build:cli": "bun build ./src/extract-cli.ts --bundle --target=node --format=esm --outfile=./extract-cli.js",
+    "check": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "defuddle": "^0.9.0",
+    "jsdom": "^24.1.3",
+    "turndown": "^7.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/turndown": "^5.0.5",
+    "typescript": "^5.9.3"
+  }
+}

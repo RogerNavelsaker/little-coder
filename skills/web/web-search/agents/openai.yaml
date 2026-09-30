@@ -1,0 +1,3 @@
+display_name: "Web Search"
+short_desc: "Search the web from the terminal and return compact source results."
+default_prompt: "Search the web and summarize the strongest sources."

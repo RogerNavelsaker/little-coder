@@ -107,14 +107,40 @@ The launcher detects its mode from `process.argv[1]`:
 - Build: `scripts/build-release.ts`
 - Patches: `scripts/patch-pi.ts`
 
+## Rules & Behavioral Standards (`rules/`)
+
+`little-coder` integrates the standardized behavioral rules from `~/.llm/rules/`:
+
+| Rule | File | Purpose |
+|---|---|---|
+| **Caveman** | `rules/caveman.md` | Ultra-concise, low-token prose for conversational responses. |
+| **Token Economy** | `rules/token-economy.md` | Aggressive context conservation, targeted reads, minimal tool turns. |
+| **Defense in Depth** | `rules/defense-in-depth.md` | Multiple layers of verification before completing tasks. |
+| **Direct Execution** | `rules/direct-execution.md` | Proactive terminal execution without unnecessary conversational hand-offs. |
+| **Gentle Coding** | `rules/gentle-coding.md` | Surgical, non-destructive edits with zero collateral damage. |
+| **Instruction Specificity** | `rules/instruction-specificity.md` | Unambiguous line targets and reproducible assertions. |
+| **Positive Phrasing** | `rules/positive-phrasing.md` | Clear directive requirements over negative constraints. |
+| **LLM Shorthand** | `rules/llm-shorthand.md` | Compact syntax patterns for agent communication. |
+
+## Skills (`skills/`)
+
+Skills provide high-level workflows and specialized capability guides:
+
+- **Protocols** (`skills/protocols/`): `task_decomposition.md`.
+- **Tools Reference** (`skills/tools/`): `nu.md`, `edit.md`, `read.md`, `write.md`, `grep.md`, `glob.md`, `shell_session.md`.
+- **Web Skills Suite** (`skills/web/`):
+  - `web-fetch`: Clean article extraction (Defuddle/Readability) + Markdown/TOON export without HTML/CSS bloat.
+  - `web-search`: High-signal query formatting and link gathering via search APIs.
+  - `web-download`: Headless resource and asset downloading.
+
 ### Cross-repo dependencies
 
 Three repos must stay in sync for every linehash change. Skipping any step leaves the consumer running stale code while logs look fine.
 
 | Repo | Path | Role |
 |---|---|---|
-| **linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/linehash` | Rust source. Provides anchored reads, edit, diff, fuzzy matching, patch-apply. |
-| **nixpkg-linehash** | `/home/rona/Repositories/.ru/RogerNavelsaker/nixpkg-linehash` | Nix package wrapper. Pinned by commit in `devenv.yaml`. |
+| **linehash** | `/home/rona/Repositories/RogerNavelsaker/linehash` | Rust source. Provides anchored reads, edit, diff, fuzzy matching, patch-apply. |
+| **nixpkg-linehash** | `/home/rona/Repositories/RogerNavelsaker/nixpkg-linehash` | Nix package wrapper. Pinned by commit in `devenv.yaml`. |
 | **little-coder** | this repo | Consumer. The devenv environment exposes `linehash` on PATH. |
 
 #### Sync chain (run for EVERY linehash change)

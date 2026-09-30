@@ -1,0 +1,3 @@
+display_name: "Web Fetch"
+short_desc: "Export webpages as LLM-ready Markdown for agent analysis."
+default_prompt: "Fetch webpage content and export clean Markdown for analysis."
