@@ -65,9 +65,9 @@ little-coder/
    - **In Containers (Warren / Podman / Docker / K8s)**: When `/.dockerenv`, `/run/.containerenv`, or container runtime flags are detected, the container/cgroup boundary already provides complete filesystem and network isolation. Nested `burrow` (Bubblewrap) is bypassed entirely to avoid permission/capability failures.
    - **Direct on Host**: When running on a bare-metal developer workstation, `burrow` (`bwrap`) wraps commands to enforce read-only bindings and protect the host filesystem.
 
-3. **`context` & `pi-file-reference`**:
-   - `context`: Ephemeral in-session scratchpad (`ctx_record`, `ctx_packet`, `ctx_inject`) separate from persistent git-backed knowledge stores.
-   - `pi-file-reference`: Automatic `@filepath` prompt expansion.
+3. **`context` & `project-context`**:
+   - `context`: Automated compaction bridge and Engram memory integration, preserving active state on `session_before_compact` without leaving `.pi-context/` disk clutter in repositories.
+   - `project-context`: Workspace instruction discovery (nearest `AGENTS.md` / `CLAUDE.md`, capped at 4k chars, deduplicated) with baked-in `@filepath` reference prompt expansion (replacing the vendored `pi-file-reference` extension).
 
 ### Planned Extensions Roadmap (CLI & Module Architecture)
 
@@ -76,7 +76,8 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | Extension / Domain | Tracked Seed | Delivered Capability & CLI/Module |
 |---|---|---|
 | **`sh` Single Tool** | `little-coder-2315` | Canonical `sh` execution tool + container-aware sandbox detection (bwrap bypass in containers). |
-| **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session`, `outline` as CLIs/Nu scripts. |
+| **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session` (herdr-backed), `outline` as CLIs/Nu scripts. |
+| **`project-context`** | `little-coder-78a9` | Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
 | **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
 | **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
