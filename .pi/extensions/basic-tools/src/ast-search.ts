@@ -176,7 +176,14 @@ function parseAstGrepOutput(json: string): AstMatch[] {
   for (const entry of results) {
     const e = entry as Record<string, unknown>;
     // JSONL output may contain diagnostic objects alongside match records.
-    if (!e || typeof e !== 'object' || !e.range || typeof e.file !== 'string') continue;
+    if (
+      !e ||
+      typeof e !== 'object' ||
+      typeof e.file !== 'string' ||
+      !e.file ||
+      !e.range ||
+      typeof e.range !== 'object'
+    ) continue;
     const range = e.range as Record<string, unknown>;
     const start = range?.start as Record<string, unknown> | undefined;
     const end = range?.end as Record<string, unknown> | undefined;
