@@ -24,8 +24,14 @@ describe("RPC stdout purity", () => {
     // Send RPC initialize request
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
 
-    // Wait for response
-    await new Promise((res) => setTimeout(res, 1500));
+    // Wait for the response rather than assuming a fixed startup time.
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 10_000);
+      child.stdout.once("data", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
     child.kill("SIGTERM");
 
     // Audit every line emitted to stdout
@@ -39,5 +45,5 @@ describe("RPC stdout purity", () => {
       }).not.toThrow();
       expect(typeof parsed).toBe("object");
     }
-  });
+  }, { timeout: 15_000 });
 });
