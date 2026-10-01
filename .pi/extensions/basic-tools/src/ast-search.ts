@@ -24,7 +24,7 @@ function resolveAstGrepBin(): string {
   if (process.env.AST_GREP_BIN) return process.env.AST_GREP_BIN;
   try {
     const { execSync } = require('child_process');
-    const p = execSync('which ast-grep 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    const p = execSync('command -v ast-grep 2>/dev/null || true', { encoding: 'utf-8' }).trim();
     if (p) return p;
   } catch { /* continue */ }
   return 'ast-grep';
@@ -159,14 +159,25 @@ function parseAstGrepOutput(json: string): AstMatch[] {
   try {
     parsed = JSON.parse(json);
   } catch {
-    return matches;
+    // Newer ast-grep releases may emit one JSON object per line.
+    const entries = json.split('\n').map((line) => line.trim()).filter(Boolean);
+    parsed = entries.flatMap((line) => {
+      try {
+        const entry = JSON.parse(line) as unknown;
+        return Array.isArray(entry) ? entry : [entry];
+      } catch {
+        return [];
+      }
+    });
   }
 
   const results = Array.isArray(parsed) ? parsed : [parsed];
 
   for (const entry of results) {
     const e = entry as Record<string, unknown>;
-    const range = e.range as Record<string, unknown> | undefined;
+    // JSONL output may contain diagnostic objects alongside match records.
+    if (!e || typeof e !== 'object' || !e.range || typeof e.file !== 'string') continue;
+    const range = e.range as Record<string, unknown>;
     const start = range?.start as Record<string, unknown> | undefined;
     const end = range?.end as Record<string, unknown> | undefined;
     const byteOffset = range?.byteOffset as Record<string, unknown> | undefined;
@@ -308,19 +319,6 @@ export async function executeAstSearchOp(
   }
 
   const binPath = getAstGrepBin();
-
-  const whichResult = spawnSync('which', [binPath], {
-    cwd: process.cwd(),
-    env: { ...process.env },
-    timeout: 5000,
-  });
-  if (whichResult.status !== 0) {
-    return {
-      content: [{ type: 'text', text: error('binary-failed', 'ast-grep is not installed or not in PATH', { tool: 'ast_search' }).message }],
-      isError: true,
-      details: { errorType: 'binary-failed' },
-    };
-  }
 
   let agResult: { stdout: string; stderr: string; exitCode: number };
   try {

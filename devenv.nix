@@ -13,6 +13,7 @@ in
     curl
     aria2
     yt-dlp
+    ast-grep
     inputs.flyscrape.packages.${system}.default
     inputs.linehash.packages.${system}.default
     inputs.burrow.packages.${system}.default
