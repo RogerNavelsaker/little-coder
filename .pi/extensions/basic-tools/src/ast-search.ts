@@ -320,19 +320,6 @@ export async function executeAstSearchOp(
 
   const binPath = getAstGrepBin();
 
-  const whichResult = spawnSync('which', [binPath], {
-    cwd: process.cwd(),
-    env: { ...process.env },
-    timeout: 5000,
-  });
-  if (whichResult.status !== 0) {
-    return {
-      content: [{ type: 'text', text: error('binary-failed', 'ast-grep is not installed or not in PATH', { tool: 'ast_search' }).message }],
-      isError: true,
-      details: { errorType: 'binary-failed' },
-    };
-  }
-
   let agResult: { stdout: string; stderr: string; exitCode: number };
   try {
     agResult = await runAstGrep(binPath, pattern, searchPath, { language: language || undefined, glob: glob || undefined });
