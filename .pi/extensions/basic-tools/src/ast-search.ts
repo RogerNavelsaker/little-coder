@@ -24,7 +24,7 @@ function resolveAstGrepBin(): string {
   if (process.env.AST_GREP_BIN) return process.env.AST_GREP_BIN;
   try {
     const { execSync } = require('child_process');
-    const p = execSync('command -v ast-grep 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+    const p = execSync('command -v ast-grep 2>/dev/null || command -v sg 2>/dev/null || true', { encoding: 'utf-8' }).trim();
     if (p) return p;
   } catch { /* continue */ }
   return 'ast-grep';
