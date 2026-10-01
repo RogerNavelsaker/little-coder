@@ -36,6 +36,8 @@ __pycache__/
 /reference/
 
 # Misc
+# Local provider configuration seeded by Warren.
+.pi/extensions/lemonade-server.ts
 *.log
 debug_payload.json
 brainstorm_outputs/
