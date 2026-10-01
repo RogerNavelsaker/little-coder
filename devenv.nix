@@ -12,6 +12,7 @@ in
     ddgr
     curl
     aria2
+    ast-grep
     yt-dlp
     inputs.flyscrape.packages.${system}.default
     inputs.linehash.packages.${system}.default
