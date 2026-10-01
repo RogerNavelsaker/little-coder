@@ -161,11 +161,13 @@ function parseAstGrepOutput(json: string): AstMatch[] {
   } catch {
     // Newer ast-grep releases may emit one JSON object per line.
     const entries = json.split('\n').map((line) => line.trim()).filter(Boolean);
-    try {
-      parsed = entries.map((line) => JSON.parse(line));
-    } catch {
-      return matches;
-    }
+    parsed = entries.flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
   }
 
   const results = Array.isArray(parsed) ? parsed : [parsed];
