@@ -29,7 +29,7 @@
   "scripts": {
     "pi": "pi",
     "dev": "bun bin/little-coder.ts",
-    "test": "find .pi scripts -name '*.test.ts' | sed 's|^|./|' | xargs -n 1 bun test",
+    "test": "find .pi scripts -name '*.test.ts' -exec bun test ./{} \\;", 
     "test:coverage": "bun test .pi/extensions/**/*.test.ts --coverage --coverage-dir=coverage",
     "typecheck": "tsc --noEmit",
     "build": "bun build --compile --bytecode --minify --format=esm bin/little-coder.ts --outfile dist/little-coder",
