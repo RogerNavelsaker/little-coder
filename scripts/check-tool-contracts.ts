@@ -22,12 +22,14 @@ const HELPER_FILES = new Set([
   'file-reference.ts',
   'invoke.ts',
   'linehash.ts',
+  'local-estimate.ts',
   'output.ts',
   'schema.ts',
   'settings.ts',
   'test-helpers.ts',
   'toon.ts',
   'unified.ts',
+  'watchdog.ts',
 ]);
 
 function toPascalCase(str: string): string {
