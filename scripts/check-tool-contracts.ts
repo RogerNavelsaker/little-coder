@@ -27,6 +27,7 @@ const HELPER_FILES = new Set([
   'knowledge-inject.ts',
   'linehash.ts',
   'local-estimate.ts',
+  'orientation.ts',
   'output-parser.ts',
   'output.ts',
   'quality-monitor.ts',
