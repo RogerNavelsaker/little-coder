@@ -77,12 +77,14 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 |---|---|---|
 | **`sh` Single Tool** | `little-coder-2315` | Canonical `sh` execution tool + container-aware sandbox detection (bwrap bypass in containers). |
 | **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session` (herdr-backed), `outline` as CLIs/Nu scripts. |
-| **`project-context`** | `little-coder-78a9` | Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
+| **`project-context`** | `little-coder-78a9` | **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
+| **`context-watchdog`**| `little-coder-b2be` | Mid-run token compaction watchdog for autonomous Warren runs before context window overflow (#59, #68, #128). |
+| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser` (fenced tool recovery), `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path fix). |
+| **`turn-cap`** | `little-coder-071c` | Runaway loop guard: safety turn cap + 5-turn finalize warning before budget exhaustion. |
 | **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
 | **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
 | **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
-| **`quality-stack`** | `little-coder-c0da` | Guardrails: output parser, write guard, and quality monitors. |
 
 ### Build flow (build-release.ts)
 

@@ -75,7 +75,11 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 ### Extensions Roadmap (CLI & Module Architecture)
 
 - **`sh` Tool & Runtime** (`little-coder-2315`): Canonical `sh` tool + container detection.
-- **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session`, `outline` as workspace CLIs.
+- **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session` (herdr-backed), `outline` as workspace CLIs.
+- **`project-context`** (`little-coder-78a9`): **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` loader + baked-in `@filepath` reference expansion.
+- **`context-watchdog`** (`little-coder-b2be`): Mid-run token compaction watchdog for autonomous Warren container runs (#59, #68, #128).
+- **`quality-stack`** (`little-coder-c0da`): `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path rewrites), `output-parser` (fenced tool recovery).
+- **`turn-cap`** (`little-coder-071c`): Safety turn limits + 5-turn finalize warning before budget exhaustion.
 - **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
 - **`web-tools`** (`little-coder-6ebe`): Web research CLIs:
   - `ddgr`: Low-token search API querying (optional override: `SEARXNG_URL`, default: `""`).
@@ -84,8 +88,6 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 - **`docs-tools`** (`little-coder-5030`): Document processing CLI (`docling.nu`):
   - Converts PDF, DOCX, PPTX, XLSX, scanned documents to Markdown/JSON via `DOCLING_URL` (default: `""`, set to your Docling Serve instance). Supports `--vlm` for local VLM acceleration.
 - **`grove`** (`little-coder-bd7f`): Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs.
-- **`quality-stack`** (`little-coder-c0da`): Output parsing, write guards, and quality monitoring.
-- **`security`** (`little-coder-5e37`): Permission gate and sandbox isolation.
 
 ### Source layout
 
