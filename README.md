@@ -49,10 +49,8 @@ little-coder packages the tailored Pi scaffold into a deterministic Nix derivati
 
 | Component | Packaging |
 |---|---|
-| `little-coder` | Compiled Bun launcher wrapped with Nix runtime dependencies (`pi`, `ripgrep`, `git`). |
+| `packages.default` | Compiled Bun launcher wrapped with Nix runtime dependencies (`pi`, `ripgrep`, `git`, `nushell`, `linehash`, `fd`, `eza`, `bat`, `delta`, `ast-grep`). Consumed by developers and Warren agent containers. |
 | `extensions` | Pre-compiled ESM bundles loaded directly from `/nix/store`. |
-| `warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage`. |
-| `data.tar.gz` | Cross-platform: compiled extensions, AGENTS.md, skills, config. |
 
 ### The Single Tool Pattern (`sh` as Code-as-Action)
 
@@ -112,14 +110,14 @@ little-coder/
 
 ```bash
 bun install                  # devDependencies (pi-coding-agent, typebox, toon, diff, typescript)
-bun run build:release        # → dist/little-coder-<os>-<cpu>, dist/pi-<os>-<cpu>, dist/data.tar.gz
+bun run build                # compile launcher binary → dist/little-coder
+nix build .#default          # full Nix package wrapped with dependencies
 ```
 
 `build-release.ts` steps:
 1. Compile launcher → `dist/little-coder-<os>-<cpu>`.
 2. Apply `patch-pi.ts` to `node_modules/@earendil-works/pi-coding-agent/dist/`, compile pi → `dist/pi-<os>-<cpu>`.
 3. Compile each extension: `bun build index.ts --outfile dist/extensions/*/index.js` (no `--external`; all deps bundled).
-4. Pack `dist/data.tar.gz`: compiled `.js` files, AGENTS.md, skills/, settings.json.
 
 ### Patching pi
 
@@ -152,13 +150,15 @@ bun run test            # find .pi -name '*.test.ts' | xargs bun test
 
 Dev mode uses `node_modules/@earendil-works/pi-coding-agent` directly and applies `patch-pi.ts` on every launch. Extensions are loaded as `.ts` source (bun imports them directly).
 
-## Attribution
+## Attribution & Upstream Heritage
 
-little-coder v0.0.x — derived from [CheetahClaws / ClawSpring](https://github.com/SafeRL-Lab/clawspring) (Apache 2.0).
+- **[itayinbarr/little-coder](https://github.com/itayinbarr/little-coder)**: Upstream research and architecture for tuning coding agent scaffolding for small models.
+- **[pi](https://github.com/mariozechner/pi)**: Foundational minimal agent core by Mario Zechner (Apache 2.0 / MIT).
+- **[CheetahClaws / ClawSpring](https://github.com/SafeRL-Lab/clawspring)**: Early architecture antecedent (Apache 2.0).
+- **[linehash](https://github.com/RogerNavelsaker/linehash)**: Deterministic hash-anchored precision file manipulation and edits.
+- **[officeparser](https://github.com/nopers/officeparser)**: Fast document text and metadata parser across office file formats.
 
-little-coder v0.1.0+ — rebuilt on **[pi](https://github.com/mariozechner/pi)** by Mario Zechner (Apache 2.0 / MIT).
-
-RogerNavelsaker/little-coder — hard fork; replaces npm/Node distribution with a self-contained bun binary distribution.
+RogerNavelsaker/little-coder is a hard fork packaged natively for Nix and Warren autonomous environments.
 
 ## License
 
