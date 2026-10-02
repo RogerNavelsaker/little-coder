@@ -47,7 +47,12 @@ export const webSourceItemSchema = Type.Object({
   endpoint: Type.Optional(Type.String({ description: "Custom forge or search instance endpoint" })),
   token: Type.Optional(Type.String({ description: "Forge access token (or via env vars)" })),
   downloader: Type.Optional(
-    Type.Union([Type.Literal("yt-dlp"), Type.Literal("aria2c"), Type.Literal("curl")]),
+    Type.Union([
+      Type.Literal("xh"),
+      Type.Literal("yt-dlp"),
+      Type.Literal("aria2c"),
+      Type.Literal("curl"),
+    ]),
   ),
   target: Type.Optional(Type.Union([Type.Literal("repo"), Type.Literal("user")])),
 });
@@ -79,7 +84,14 @@ export const webSourceSchema = Type.Object({
   limit: Type.Optional(Type.Number()),
   endpoint: Type.Optional(Type.String()),
   token: Type.Optional(Type.String()),
-  downloader: Type.Optional(Type.Union([Type.Literal("yt-dlp"), Type.Literal("aria2c"), Type.Literal("curl")])),
+  downloader: Type.Optional(
+    Type.Union([
+      Type.Literal("xh"),
+      Type.Literal("yt-dlp"),
+      Type.Literal("aria2c"),
+      Type.Literal("curl"),
+    ]),
+  ),
   target: Type.Optional(Type.Union([Type.Literal("repo"), Type.Literal("user")])),
 });
 
@@ -204,6 +216,23 @@ export function executeWebSourceOp(op: any, cwd?: string): {
     }
 
     const downloader = op.downloader || (url.includes("youtube.com") || url.includes("youtu.be") || url.includes("vimeo.com") ? "yt-dlp" : "aria2c");
+
+    // xh (Rust HTTP client)
+    if (downloader === "xh") {
+      const outPath = op.path ? ["-o", op.path] : ["-d"];
+      const proc = spawnSync("xh", ["-b", ...outPath, url], {
+        cwd,
+        encoding: "utf-8",
+      });
+
+      if (proc.status === 0) {
+        return {
+          success: true,
+          op: "download",
+          output: `Downloaded with xh: ${url}`,
+        };
+      }
+    }
 
     // yt-dlp
     if (downloader === "yt-dlp") {
