@@ -89,17 +89,26 @@
                 mkdir -p $out/share/little-coder/.pi/nushell
                 cp -r .pi/nushell/* $out/share/little-coder/.pi/nushell/
               fi
+              if [ -d nu ]; then
+                mkdir -p $out/share/little-coder/nu
+                cp -r nu/* $out/share/little-coder/nu/
+              fi
               if [ -f package.json ]; then
                 cp package.json $out/share/little-coder/package.json
               fi
 
-              # Wrap launcher with nixpkgs dependencies (pi, ripgrep, git, nushell, linehash)
+              # Wrap launcher with nixpkgs dependencies (pi, ripgrep, git, nushell, linehash, fd, eza, bat, delta, ast-grep)
               wrapProgram $out/bin/little-coder \
                 --prefix PATH : ${pkgs.lib.makeBinPath [
                   pkgs.pi-coding-agent
                   pkgs.ripgrep
                   pkgs.git
                   pkgs.nushell
+                  pkgs.fd
+                  pkgs.eza
+                  pkgs.bat
+                  pkgs.delta
+                  pkgs.ast-grep
                   linehashPkg
                 ]} \
                 --set-default LITTLE_CODER_SHARE "$out/share/little-coder" \
@@ -147,6 +156,11 @@
               pkgs.nushell
               pkgs.ripgrep
               pkgs.git
+              pkgs.fd
+              pkgs.eza
+              pkgs.bat
+              pkgs.delta
+              pkgs.ast-grep
               pkgs.ddgr
               flyscrapePkg
               linehashPkg
@@ -169,6 +183,11 @@
                   pkgs.nushell
                   pkgs.ripgrep
                   pkgs.git
+                  pkgs.fd
+                  pkgs.eza
+                  pkgs.bat
+                  pkgs.delta
+                  pkgs.ast-grep
                   pkgs.ddgr
                   flyscrapePkg
                   linehashPkg

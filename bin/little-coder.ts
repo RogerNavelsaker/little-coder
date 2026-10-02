@@ -214,16 +214,39 @@ if (existsSync(extDir)) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Backend binaries distribution path resolution
+//
+// Prepends ~/.little-coder/bin and pkgRoot/bin to PATH to prioritize
+// bundled/distributed backend tool binaries (nu, rg, fd, eza, bat, delta, ast-grep, linehash).
+// ---------------------------------------------------------------------------
+const userBinDir = join(homedir(), ".little-coder", "bin");
+const pkgBinDir = join(pkgRoot, "bin");
+const extraBins = [userBinDir, pkgBinDir].filter(d => existsSync(d));
+if (extraBins.length > 0) {
+  process.env.PATH = [...extraBins, process.env.PATH ?? ""].join(":");
+}
+
 // Quiet pi's own version banner
 if (process.env.PI_SKIP_VERSION_CHECK === undefined || isRpc) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
-// Set default PI_NUSHELL_CONFIG if not already defined
+// Set default PI_NUSHELL_CONFIG and PI_NUSHELL_ENV if not already defined
 if (!process.env.PI_NUSHELL_CONFIG) {
-  const defaultNuConfig = join(pkgRoot, ".pi", "nushell", "config.nu");
-  if (existsSync(defaultNuConfig)) {
-    process.env.PI_NUSHELL_CONFIG = defaultNuConfig;
+  const rootNuConfig = join(pkgRoot, "nu", "config.nu");
+  const piNuConfig = join(pkgRoot, ".pi", "nushell", "config.nu");
+  if (existsSync(rootNuConfig)) {
+    process.env.PI_NUSHELL_CONFIG = rootNuConfig;
+  } else if (existsSync(piNuConfig)) {
+    process.env.PI_NUSHELL_CONFIG = piNuConfig;
+  }
+}
+
+if (!process.env.PI_NUSHELL_ENV) {
+  const rootNuEnv = join(pkgRoot, "nu", "env.nu");
+  if (existsSync(rootNuEnv)) {
+    process.env.PI_NUSHELL_ENV = rootNuEnv;
   }
 }
 
