@@ -32,7 +32,3 @@ jobs:
 
       - name: Build Default Package with Nix
         run: nix build .#default --accept-flake-config --no-link
-
-      - name: Build Warren Agent Container Image (Linux only)
-        if: runner.os == 'Linux'
-        run: nix build .#warren-agent --accept-flake-config --no-link

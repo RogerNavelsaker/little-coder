@@ -28,8 +28,7 @@ little-coder is a Nix-native pi distribution designed for local developers and W
 
 | Target | Description |
 |---|---|
-| `packages.default` | Compiled Bun launcher wrapped with nixpkgs dependencies (`pi`, `ripgrep`, `git`) via `makeBinaryWrapper`. |
-| `packages.warren-agent` | Minimal distroless container image built via `dockerTools.buildLayeredImage` for Warren RPC sandboxes. |
+| `packages.default` | Compiled Bun launcher wrapped with nixpkgs dependencies (`pi`, `ripgrep`, `git`, `nushell`, `linehash`, `fd`, `eza`, `bat`, `delta`, `ast-grep`) via `makeBinaryWrapper`. Consumed by developers and by `nixpkg-warren` (`#agentImage`). |
 
 ### Extensions & Assets
 

@@ -146,69 +146,9 @@
             else
               buildFromSource;
 
-          # Container image for Warren autonomous agent RPC sandboxes
-          warren-agent = pkgs.dockerTools.buildLayeredImage {
-            name = "warren-agent";
-            tag = "latest";
-            contents = [
-              default
-              pkgs.pi-coding-agent
-              pkgs.nushell
-              pkgs.ripgrep
-              pkgs.git
-              pkgs.fd
-              pkgs.eza
-              pkgs.bat
-              pkgs.delta
-              pkgs.ast-grep
-              pkgs.ddgr
-              flyscrapePkg
-              linehashPkg
-              pkgs.curl
-              pkgs.aria2
-              pkgs.yt-dlp
-              pkgs.coreutils
-              pkgs.dockerTools.binSh
-              pkgs.dockerTools.caCertificates
-            ];
-            extraCommands = ''
-              mkdir -m 1777 tmp
-            '';
-            config = {
-              Cmd = [ "${default}/bin/little-coder" "--mode" "rpc" ];
-              Env = [
-                "PATH=${pkgs.lib.makeBinPath [
-                  default
-                  pkgs.pi-coding-agent
-                  pkgs.nushell
-                  pkgs.ripgrep
-                  pkgs.git
-                  pkgs.fd
-                  pkgs.eza
-                  pkgs.bat
-                  pkgs.delta
-                  pkgs.ast-grep
-                  pkgs.ddgr
-                  flyscrapePkg
-                  linehashPkg
-                  pkgs.curl
-                  pkgs.aria2
-                  pkgs.yt-dlp
-                  pkgs.coreutils
-                ]}:/bin"
-                "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
-                "WARREN_RUNTIME=docker"
-                "LITTLE_CODER_MODE=rpc"
-                "LINEHASH_BIN=${linehashPkg}/bin/linehash"
-              ];
-              WorkingDir = "/workspace";
-            };
-          };
-
         in {
           packages = {
             inherit default;
-            inherit warren-agent;
           };
 
           apps.default = flake-utils.lib.mkApp { drv = default; };
