@@ -34,6 +34,7 @@ const HELPER_FILES = new Set([
   'settings.ts',
   'test-helpers.ts',
   'toon.ts',
+  'turn-cap.ts',
   'unified.ts',
   'watchdog.ts',
   'write-guard.ts',
