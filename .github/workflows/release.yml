@@ -1,0 +1,38 @@
+name: Release & Nix Cachix
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-cache:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: rogernavelsaker
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build Default Package with Nix
+        run: nix build .#default --accept-flake-config --no-link
+
+      - name: Build Warren Agent Container Image (Linux only)
+        if: runner.os == 'Linux'
+        run: nix build .#warren-agent --accept-flake-config --no-link
