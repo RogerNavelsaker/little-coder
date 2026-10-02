@@ -27,6 +27,7 @@ export interface ToolGatingConfig {
   enabledTools?: string[];
   disableWeb?: boolean;
   disableGrove?: boolean;
+  disableDocs?: boolean;
 }
 
 export const WRITE_AND_MUTATION_TOOLS = new Set([
@@ -58,6 +59,7 @@ export function getToolGatingConfig(env: NodeJS.ProcessEnv = process.env): ToolG
 
   const disableWeb = env.LITTLE_CODER_DISABLE_WEB === "1" || env.LITTLE_CODER_DISABLE_WEB === "true";
   const disableGrove = env.LITTLE_CODER_DISABLE_GROVE === "1" || env.LITTLE_CODER_DISABLE_GROVE === "true";
+  const disableDocs = env.LITTLE_CODER_DISABLE_DOCS === "1" || env.LITTLE_CODER_DISABLE_DOCS === "true";
 
   return {
     role,
@@ -66,6 +68,7 @@ export function getToolGatingConfig(env: NodeJS.ProcessEnv = process.env): ToolG
     enabledTools: enabledTools.length > 0 ? enabledTools : undefined,
     disableWeb,
     disableGrove,
+    disableDocs,
   };
 }
 
@@ -74,7 +77,7 @@ export function getToolGatingConfig(env: NodeJS.ProcessEnv = process.env): ToolG
  */
 export function isToolEnabled(
   toolName: string,
-  category?: "basic" | "web" | "grove" | "extra" | "scheduler" | "autonomous",
+  category?: "basic" | "web" | "grove" | "docs" | "extra" | "scheduler" | "autonomous",
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const config = getToolGatingConfig(env);
@@ -94,6 +97,9 @@ export function isToolEnabled(
     return false;
   }
   if (config.disableGrove && (category === "grove" || toolName.startsWith("grove_"))) {
+    return false;
+  }
+  if (config.disableDocs && (category === "docs" || toolName.startsWith("doc_"))) {
     return false;
   }
 
