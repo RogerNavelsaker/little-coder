@@ -34,6 +34,7 @@ const HELPER_FILES = new Set([
   'schema.ts',
   'settings.ts',
   'skill-inject.ts',
+  'storage.ts',
   'test-helpers.ts',
   'toon.ts',
   'turn-cap.ts',

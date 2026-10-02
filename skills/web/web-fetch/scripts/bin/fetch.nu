@@ -134,10 +134,10 @@ def main [
               published: ""
               wordCount: 0
               extraction: "crawl4ai"
-              cleanup: {}
-            }
-          })
-        }
+              }
+            })
+          }
+        } catch {}
       }
     }
     mut attempt = 0

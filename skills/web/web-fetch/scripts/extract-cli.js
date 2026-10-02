@@ -125994,7 +125994,7 @@ var require_XMLHttpRequest_impl = __commonJS((exports) => {
   var { fireAnEvent } = require_events();
   var { copyToArrayBufferInNewRealm } = require_binary_data();
   var { READY_STATES } = xhrUtils;
-  var syncWorkerFile = __require.resolve ? __require.resolve("./skills/web/web-fetch/scripts/node_modules/jsdom/lib/jsdom/living/xhr/xhr-sync-worker.js") : null;
+  var syncWorkerFile = null;
   var tokenRegexp = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
   var fieldValueRegexp = /^[ \t]*(?:[\x21-\x7E\x80-\xFF](?:[ \t][\x21-\x7E\x80-\xFF])?)*[ \t]*$/;
   var forbiddenRequestHeaders = new Set([
