@@ -24,7 +24,7 @@ describe("web-tools/web_control", () => {
     expect(res.error).toBe("Missing params");
   });
 
-  it("registers web_control tool with pi", () => {
+  it("registers web_control tool with pi when BROWSER_CLI_ENABLED is set", () => {
     let registered: any = null;
     const mockPi: any = {
       registerTool: (tool: any) => {
@@ -32,9 +32,23 @@ describe("web-tools/web_control", () => {
       },
     };
 
+    // Unset: should not register
+    const origEnv = process.env.BROWSER_CLI_ENABLED;
+    delete process.env.BROWSER_CLI_ENABLED;
+    registerWebControlTool(mockPi);
+    expect(registered).toBeNull();
+
+    // Set: registers tool
+    process.env.BROWSER_CLI_ENABLED = "1";
     registerWebControlTool(mockPi);
     expect(registered).toBeDefined();
     expect(registered.name).toBe("web_control");
     expect(typeof registered.execute).toBe("function");
+
+    if (origEnv !== undefined) {
+      process.env.BROWSER_CLI_ENABLED = origEnv;
+    } else {
+      delete process.env.BROWSER_CLI_ENABLED;
+    }
   });
 });

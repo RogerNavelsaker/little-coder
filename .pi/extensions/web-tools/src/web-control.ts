@@ -69,6 +69,17 @@ export const webControlSchema = Type.Object({
   target: Type.Optional(Type.Union([Type.Literal("repo"), Type.Literal("user")])),
 });
 
+export function isBrowserControlEnabled(): boolean {
+  // Available if BROWSER_CLI_ENABLED=1 or if custom firefox path is provided
+  if (process.env.BROWSER_CLI_ENABLED === "1" || process.env.BROWSER_CLI_ENABLED === "true") {
+    return true;
+  }
+  if (process.env.BROWSER_CLI_FIREFOX_PATH || process.env.FIREFOX_BIN) {
+    return true;
+  }
+  return false;
+}
+
 export function resolveFirefoxBinary(customPath?: string): string | undefined {
   if (customPath) return customPath;
   if (process.env.BROWSER_CLI_FIREFOX_PATH) return process.env.BROWSER_CLI_FIREFOX_PATH;
@@ -277,6 +288,11 @@ export function executeWebControlOp(op: any, cwd?: string): {
 }
 
 export function registerWebControlTool(pi: ExtensionAPI): void {
+  // Only register if environment explicitly enables browser automation or configures browser binary
+  if (!isBrowserControlEnabled()) {
+    return;
+  }
+
   pi.registerTool({
     name: "web_control",
     label: "web_control",
