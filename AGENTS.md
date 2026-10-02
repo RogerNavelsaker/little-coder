@@ -91,7 +91,7 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 1. Compile `bin/little-coder.ts` → `dist/little-coder-<os>-<cpu>` (launcher binary).
 2. Apply `scripts/patch-pi.ts` to `node_modules/@earendil-works/pi-coding-agent/dist/`, then compile pi's entry → `dist/pi-<os>-<cpu>`.
 3. Compile each `.pi/extensions/*/index.ts` → `dist/extensions/*/index.js` (all deps bundled inline; no `--external` flags).
-4. Pack `dist/data.tar.gz`: compiled `index.js` files, `AGENTS.md`, `skills/`, `.pi/settings.json`, `vendor/` source.
+4. In Nix packaging, `flake.nix` wraps the launcher and exposes assets directly via the `/nix/store` share directory.
 
 ### Dev vs installed mode
 
