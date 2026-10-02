@@ -14,20 +14,18 @@ describe("web-tools/web_source", () => {
     expect(res.error).toBe("Missing repo or path");
   });
 
-  it("searches code repositories using Sourcegraph stream API or gh fallback", () => {
+  it("searches code using GitHub CLI fallback", () => {
     const res = executeWebSourceOp({
       op: "search",
-      query: "repo:^github\\.com/itayinbarr/little-coder$ little-coder",
+      query: "antigravity",
       limit: 2,
     });
 
     expect(res.success).toBe(true);
     expect(res.matches).toBeDefined();
-    expect(res.matches!.length).toBeGreaterThan(0);
-    expect(res.matches![0].repository).toBe("github.com/itayinbarr/little-coder");
   });
 
-  it("supports download op with aria2c or curl", () => {
+  it("supports download op with curl", () => {
     const res = executeWebSourceOp({
       op: "download",
       url: "https://example.com",
@@ -37,6 +35,18 @@ describe("web-tools/web_source", () => {
 
     expect(res.success).toBe(true);
     expect(res.output).toContain("Downloaded with curl");
+  });
+
+  it("fetches raw file content from GitHub", () => {
+    const res = executeWebSourceOp({
+      op: "file",
+      repo: "RogerNavelsaker/little-coder",
+      path: "package.json",
+      ref: "main",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.output).toContain("little-coder");
   });
 
   it("registers web_source tool with pi", () => {

@@ -1,21 +1,22 @@
 /**
- * `web_source` tool — Multi-engine code & file search / retrieval.
+ * `web_source` tool — Multi-forge code search, raw file retrieval, and downloading.
  *
- * Supported operations:
- * - `search`: Search code repositories via Sourcegraph API (or GitHub CLI `gh search code` fallback)
- * - `file`: Fetch raw file content from repository via Sourcegraph raw API (or `gh api` / `curl` fallback)
- * - `download`: Download media/files via `aria2c`, `yt-dlp`, or `curl`
+ * Backends & Self-Hosted Fallbacks:
+ * 1. Self-hosted Hound (`HOUND_URL`): `/api/v1/search?q=...`
+ * 2. Self-hosted / Cloud GitLab (`GITLAB_URL` or `glab` CLI): `/api/v4/search?scope=blobs&search=...`
+ * 3. Self-hosted Gitea / Forgejo (`GITEA_URL` or `TEA_URL`): `/api/v1/repos/search` / raw file endpoints
+ * 4. GitHub (`gh` CLI or `raw.githubusercontent.com`): `gh search code` / raw file via curl
+ * 5. Media & Asset Downloader: `aria2c`, `yt-dlp`, or `curl`
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { encodeToon } from "../../_shared/toon.ts";
 import { storeWebArtifact } from "./storage.ts";
 
-export interface SourcegraphMatch {
+export interface CodeMatch {
   repository: string;
   path: string;
   lineMatches?: Array<{ line: string; lineNumber: number }>;
@@ -24,19 +25,27 @@ export interface SourcegraphMatch {
 export const webSourceItemSchema = Type.Object({
   op: Type.Optional(
     Type.Union([
-      Type.Literal("search", { description: "Search code via Sourcegraph or gh cli fallback" }),
-      Type.Literal("file", { description: "Fetch file content from repository" }),
-      Type.Literal("download", { description: "Download media/file using yt-dlp, aria2c, or curl" }),
+      Type.Literal("search", { description: "Search code across Hound, GitLab, Gitea, or GitHub" }),
+      Type.Literal("file", { description: "Fetch raw file content from forge or repository" }),
+      Type.Literal("download", { description: "Download media or file via yt-dlp, aria2c, or curl" }),
     ]),
   ),
-  query: Type.Optional(Type.String({ description: "Search query or terms" })),
+  forge: Type.Optional(
+    Type.Union([
+      Type.Literal("hound", { description: "Self-hosted Hound code search engine" }),
+      Type.Literal("gitlab", { description: "GitLab (self-hosted or gitlab.com)" }),
+      Type.Literal("gitea", { description: "Gitea / Forgejo instance" }),
+      Type.Literal("github", { description: "GitHub" }),
+    ]),
+  ),
+  query: Type.Optional(Type.String({ description: "Search query or regex pattern" })),
   url: Type.Optional(Type.String({ description: "Target URL to download or retrieve" })),
-  repo: Type.Optional(Type.String({ description: "Repository name (e.g. github.com/owner/repo or owner/repo)" })),
+  repo: Type.Optional(Type.String({ description: "Repository identifier (owner/repo or project ID)" })),
   path: Type.Optional(Type.String({ description: "File path in repository or local save path" })),
-  commit: Type.Optional(Type.String({ description: "Branch or commit hash (default: HEAD)" })),
+  ref: Type.Optional(Type.String({ description: "Branch, tag, or commit hash (default: main/HEAD)" })),
   limit: Type.Optional(Type.Number({ description: "Max results limit (default: 10)" })),
-  endpoint: Type.Optional(Type.String({ description: "Sourcegraph endpoint (env: SOURCEGRAPH_URL)" })),
-  token: Type.Optional(Type.String({ description: "Sourcegraph access token (env: SRC_ACCESS_TOKEN)" })),
+  endpoint: Type.Optional(Type.String({ description: "Custom forge or search instance endpoint" })),
+  token: Type.Optional(Type.String({ description: "Forge access token (or via env vars)" })),
   downloader: Type.Optional(
     Type.Union([Type.Literal("yt-dlp"), Type.Literal("aria2c"), Type.Literal("curl")]),
   ),
@@ -54,11 +63,19 @@ export const webSourceSchema = Type.Object({
       Type.Literal("download"),
     ]),
   ),
+  forge: Type.Optional(
+    Type.Union([
+      Type.Literal("hound"),
+      Type.Literal("gitlab"),
+      Type.Literal("gitea"),
+      Type.Literal("github"),
+    ]),
+  ),
   query: Type.Optional(Type.String()),
   url: Type.Optional(Type.String()),
   repo: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
-  commit: Type.Optional(Type.String()),
+  ref: Type.Optional(Type.String()),
   limit: Type.Optional(Type.Number()),
   endpoint: Type.Optional(Type.String()),
   token: Type.Optional(Type.String()),
@@ -66,11 +83,112 @@ export const webSourceSchema = Type.Object({
   target: Type.Optional(Type.Union([Type.Literal("repo"), Type.Literal("user")])),
 });
 
+/** Search code via self-hosted Hound instance */
+function searchHound(endpoint: string, query: string, limit: number): CodeMatch[] {
+  try {
+    const url = new URL("/api/v1/search", endpoint);
+    url.searchParams.set("q", query);
+    const proc = spawnSync("curl", ["-sSL", "--max-time", "15", url.toString()], { encoding: "utf-8" });
+    if (proc.status === 0 && proc.stdout) {
+      const data = JSON.parse(proc.stdout);
+      const matches: CodeMatch[] = [];
+      const results = data.results || {};
+      for (const [repoName, repoData] of Object.entries<any>(results)) {
+        if (!repoData || !Array.isArray(repoData.Matches)) continue;
+        for (const m of repoData.Matches) {
+          matches.push({
+            repository: repoName,
+            path: m.Filename || "",
+            lineMatches: (m.Matches || []).map((match: any) => ({
+              line: match.Line || "",
+              lineNumber: match.LineNumber || 0,
+            })),
+          });
+          if (matches.length >= limit) return matches;
+        }
+      }
+      return matches;
+    }
+  } catch {}
+  return [];
+}
+
+/** Search code via GitLab (self-hosted or gitlab.com) */
+function searchGitLab(endpoint: string, query: string, token: string, limit: number): CodeMatch[] {
+  try {
+    const url = new URL("/api/v4/search", endpoint);
+    url.searchParams.set("scope", "blobs");
+    url.searchParams.set("search", query);
+    url.searchParams.set("per_page", String(limit));
+
+    const headers = ["-H", "Accept: application/json"];
+    if (token) headers.push("-H", `PRIVATE-TOKEN: ${token}`);
+
+    const proc = spawnSync("curl", ["-sSL", "--max-time", "15", ...headers, url.toString()], { encoding: "utf-8" });
+    if (proc.status === 0 && proc.stdout) {
+      const data = JSON.parse(proc.stdout);
+      if (Array.isArray(data)) {
+        return data.slice(0, limit).map((item: any) => ({
+          repository: String(item.project_id || item.project_name || ""),
+          path: item.path || item.filename || "",
+          lineMatches: item.data ? [{ line: item.data, lineNumber: item.startline || 1 }] : undefined,
+        }));
+      }
+    }
+  } catch {}
+  return [];
+}
+
+/** Search code via Gitea / Forgejo */
+function searchGitea(endpoint: string, query: string, token: string, limit: number): CodeMatch[] {
+  try {
+    const url = new URL("/api/v1/repos/search", endpoint);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", String(limit));
+
+    const headers = ["-H", "Accept: application/json"];
+    if (token) headers.push("-H", `Authorization: token ${token}`);
+
+    const proc = spawnSync("curl", ["-sSL", "--max-time", "15", ...headers, url.toString()], { encoding: "utf-8" });
+    if (proc.status === 0 && proc.stdout) {
+      const data = JSON.parse(proc.stdout);
+      const repos = data.data || (Array.isArray(data) ? data : []);
+      return repos.slice(0, limit).map((r: any) => ({
+        repository: r.full_name || r.name || "",
+        path: r.description || "repository match",
+      }));
+    }
+  } catch {}
+  return [];
+}
+
+/** Search code via GitHub CLI (`gh search code`) */
+function searchGitHub(query: string, repo: string | undefined, limit: number): CodeMatch[] {
+  const args = ["search", "code", query, "--limit", String(limit), "--json", "repository,path"];
+  if (repo) {
+    args.push("--repo", repo.replace(/^github\.com\//, ""));
+  }
+
+  try {
+    const proc = spawnSync("gh", args, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+    if (proc.status === 0 && proc.stdout) {
+      const parsed = JSON.parse(proc.stdout);
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, limit).map((item: any) => ({
+          repository: item.repository?.nameWithOwner || item.repository?.fullName || item.repository?.name || "",
+          path: item.path || "",
+        }));
+      }
+    }
+  } catch {}
+  return [];
+}
+
 export function executeWebSourceOp(op: any, cwd?: string): {
   success: boolean;
   op: string;
   output: string;
-  matches?: SourcegraphMatch[];
+  matches?: CodeMatch[];
   artifactPath?: string;
   error?: string;
 } {
@@ -78,7 +196,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
     op.op ||
     (op.url ? "download" : op.path && op.repo ? "file" : "search");
 
-  // 1. Download operation (yt-dlp / aria2c / curl)
+  // 1. Download operation (aria2c / yt-dlp / curl)
   if (operation === "download") {
     const url = op.url;
     if (!url) {
@@ -87,7 +205,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
 
     const downloader = op.downloader || (url.includes("youtube.com") || url.includes("youtu.be") || url.includes("vimeo.com") ? "yt-dlp" : "aria2c");
 
-    // Try aria2c or yt-dlp first
+    // yt-dlp
     if (downloader === "yt-dlp") {
       const proc = spawnSync("yt-dlp", ["--no-playlist", "--no-warnings", url], {
         cwd,
@@ -104,6 +222,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
       }
     }
 
+    // aria2c
     if (downloader === "aria2c") {
       const outPath = op.path ? ["-o", op.path] : [];
       const proc = spawnSync("aria2c", ["-x", "4", "-s", "4", "--summary-interval=0", ...outPath, url], {
@@ -121,7 +240,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
       }
     }
 
-    // Fallback to curl
+    // curl fallback
     const curlOut = op.path ? ["-o", op.path] : ["-O"];
     const proc = spawnSync("curl", ["-sSL", "--fail", ...curlOut, url], {
       cwd,
@@ -139,54 +258,77 @@ export function executeWebSourceOp(op: any, cwd?: string): {
     return {
       success: false,
       op: "download",
-      output: proc.stderr || "Download failed across all tools",
+      output: proc.stderr || "Download failed across yt-dlp, aria2c, and curl",
       error: proc.stderr,
     };
   }
 
-  // 2. File retrieval operation (Sourcegraph or gh api/curl fallback)
+  // 2. File retrieval operation (GitLab / Gitea / GitHub raw)
   if (operation === "file") {
     if (!op.repo || !op.path) {
       return { success: false, op: "file", output: "repo and path required", error: "Missing repo or path" };
     }
 
-    const endpoint = op.endpoint || process.env.SOURCEGRAPH_URL || "https://sourcegraph.com";
-    const token = op.token || process.env.SRC_ACCESS_TOKEN || "";
-    const commit = op.commit || "HEAD";
+    const ref = op.ref || "main";
+    const cleanRepo = op.repo.replace(/^https?:\/\/[^/]+\//, "").replace(/^\/+/, "");
 
-    const headers = ["-H", "Accept: application/json, text/event-stream"];
-    if (token) headers.push("-H", `Authorization: token ${token}`);
-
-    const fileUrl = `${endpoint.replace(/\/+$/, "")}/${op.repo}@${commit}/-/raw/${op.path.replace(/^\/+/, "")}`;
-    const proc = spawnSync("curl", ["-sSL", "--max-time", "30", ...headers, fileUrl], {
-      encoding: "utf-8",
-      maxBuffer: 20 * 1024 * 1024,
-    });
-
-    if (proc.status === 0 && proc.stdout) {
-      const stored = storeWebArtifact(proc.stdout, `source-${op.path.split("/").pop()}`, "txt", {
-        target: op.target || "repo",
-        cwd,
+    // Gitea / Forgejo raw
+    const giteaUrl = op.endpoint || process.env.GITEA_URL || process.env.TEA_URL;
+    if (giteaUrl && (op.forge === "gitea" || (!op.forge && !cleanRepo.includes("github.com")))) {
+      const rawUrl = `${giteaUrl.replace(/\/+$/, "")}/${cleanRepo}/raw/branch/${ref}/${op.path.replace(/^\/+/, "")}`;
+      const token = op.token || process.env.GITEA_TOKEN || process.env.TEA_TOKEN || "";
+      const headers = token ? ["-H", `Authorization: token ${token}`] : [];
+      const proc = spawnSync("curl", ["-sSL", "--fail", "--max-time", "15", ...headers, rawUrl], {
+        encoding: "utf-8",
       });
-
-      return {
-        success: true,
-        op: "file",
-        output: stored.inline ? stored.content : `File content saved: ${stored.filePath}`,
-        artifactPath: stored.filePath,
-      };
+      if (proc.status === 0 && proc.stdout) {
+        const stored = storeWebArtifact(proc.stdout, `file-${op.path.split("/").pop()}`, "txt", {
+          target: op.target || "repo",
+          cwd,
+        });
+        return {
+          success: true,
+          op: "file",
+          output: stored.inline ? stored.content : `File saved: ${stored.filePath}`,
+          artifactPath: stored.filePath,
+        };
+      }
     }
 
-    // Fallback: GitHub raw URL if repo is a github repo
-    const cleanRepo = op.repo.replace(/^github\.com\//, "");
-    const rawGhUrl = `https://raw.githubusercontent.com/${cleanRepo}/${commit === "HEAD" ? "main" : commit}/${op.path.replace(/^\/+/, "")}`;
+    // GitLab raw
+    const gitlabUrl = op.endpoint || process.env.GITLAB_URL;
+    if (gitlabUrl && (op.forge === "gitlab" || (!op.forge && gitlabUrl))) {
+      const encodedRepo = encodeURIComponent(cleanRepo);
+      const encodedPath = encodeURIComponent(op.path.replace(/^\/+/, ""));
+      const rawUrl = `${gitlabUrl.replace(/\/+$/, "")}/api/v4/projects/${encodedRepo}/repository/files/${encodedPath}/raw?ref=${ref}`;
+      const token = op.token || process.env.GITLAB_TOKEN || "";
+      const headers = token ? ["-H", `PRIVATE-TOKEN: ${token}`] : [];
+      const proc = spawnSync("curl", ["-sSL", "--fail", "--max-time", "15", ...headers, rawUrl], {
+        encoding: "utf-8",
+      });
+      if (proc.status === 0 && proc.stdout) {
+        const stored = storeWebArtifact(proc.stdout, `file-${op.path.split("/").pop()}`, "txt", {
+          target: op.target || "repo",
+          cwd,
+        });
+        return {
+          success: true,
+          op: "file",
+          output: stored.inline ? stored.content : `File saved: ${stored.filePath}`,
+          artifactPath: stored.filePath,
+        };
+      }
+    }
+
+    // GitHub raw fallback via curl
+    const rawGhUrl = `https://raw.githubusercontent.com/${cleanRepo.replace(/^github\.com\//, "")}/${ref}/${op.path.replace(/^\/+/, "")}`;
     const ghProc = spawnSync("curl", ["-sSL", "--fail", "--max-time", "15", rawGhUrl], {
       encoding: "utf-8",
       maxBuffer: 20 * 1024 * 1024,
     });
 
     if (ghProc.status === 0 && ghProc.stdout) {
-      const stored = storeWebArtifact(ghProc.stdout, `source-${op.path.split("/").pop()}`, "txt", {
+      const stored = storeWebArtifact(ghProc.stdout, `file-${op.path.split("/").pop()}`, "txt", {
         target: op.target || "repo",
         cwd,
       });
@@ -194,7 +336,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
       return {
         success: true,
         op: "file",
-        output: stored.inline ? stored.content : `File content saved: ${stored.filePath}`,
+        output: stored.inline ? stored.content : `File saved: ${stored.filePath}`,
         artifactPath: stored.filePath,
       };
     }
@@ -202,77 +344,51 @@ export function executeWebSourceOp(op: any, cwd?: string): {
     return {
       success: false,
       op: "file",
-      output: proc.stderr || ghProc.stderr || "Failed to retrieve file from Sourcegraph and GitHub raw",
-      error: proc.stderr || ghProc.stderr,
+      output: ghProc.stderr || "Failed to retrieve raw file across forges",
+      error: ghProc.stderr,
     };
   }
 
-  // 3. Search operation (Sourcegraph or gh search fallback)
-  const query = op.query || (op.repo ? `repo:^${op.repo}$` : "");
+  // 3. Search operation (Hound > GitLab > Gitea > GitHub)
+  const query = op.query || (op.repo ? `repo:${op.repo}` : "");
   if (!query) {
     return { success: false, op: "search", output: "query is required for code search", error: "Missing query" };
   }
 
-  const endpoint = op.endpoint || process.env.SOURCEGRAPH_URL || "https://sourcegraph.com";
-  const token = op.token || process.env.SRC_ACCESS_TOKEN || "";
   const limit = typeof op.limit === "number" ? op.limit : 10;
+  let matches: CodeMatch[] = [];
 
-  const headers = ["-H", "Accept: application/json, text/event-stream"];
-  if (token) headers.push("-H", `Authorization: token ${token}`);
+  // A. Self-hosted Hound if configured
+  const houndEndpoint = op.endpoint || process.env.HOUND_URL;
+  if (houndEndpoint && (op.forge === "hound" || !op.forge)) {
+    matches = searchHound(houndEndpoint, query, limit);
+  }
 
-  const searchUrl = `${endpoint.replace(/\/+$/, "")}/.api/search/stream?q=${encodeURIComponent(query)}&display=${limit}`;
-  const proc = spawnSync("curl", ["-sSL", "--max-time", "30", ...headers, searchUrl], {
-    encoding: "utf-8",
-    maxBuffer: 20 * 1024 * 1024,
-  });
-
-  const matches: SourcegraphMatch[] = [];
-  if (proc.status === 0 && proc.stdout) {
-    const lines = proc.stdout.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line === "event: matches" && i + 1 < lines.length) {
-        const nextLine = lines[i + 1].trim();
-        if (nextLine.startsWith("data:")) {
-          try {
-            const rawData = JSON.parse(nextLine.slice(5).trim());
-            if (Array.isArray(rawData)) {
-              for (const item of rawData) {
-                if (item.type === "content" || item.type === "path") {
-                  matches.push({
-                    repository: item.repository || "",
-                    path: item.path || "",
-                    lineMatches: item.lineMatches,
-                  });
-                }
-              }
-            }
-          } catch {}
-        }
-      }
+  // B. GitLab if configured
+  if (matches.length === 0) {
+    const gitlabEndpoint = op.endpoint || process.env.GITLAB_URL;
+    if (gitlabEndpoint && (op.forge === "gitlab" || !op.forge)) {
+      const gitlabToken = op.token || process.env.GITLAB_TOKEN || "";
+      matches = searchGitLab(gitlabEndpoint, query, gitlabToken, limit);
     }
   }
 
-  // Fallback: gh search code if matches empty and gh CLI available
+  // C. Gitea if configured
   if (matches.length === 0) {
-    try {
-      const ghProc = spawnSync("gh", ["search", "code", query, "--limit", String(limit), "--json", "repository,path"], {
-        encoding: "utf-8",
-      });
-      if (ghProc.status === 0 && ghProc.stdout) {
-        const parsed = JSON.parse(ghProc.stdout);
-        for (const item of parsed) {
-          matches.push({
-            repository: item.repository?.fullName || item.repository?.name || "",
-            path: item.path || "",
-          });
-        }
-      }
-    } catch {}
+    const giteaEndpoint = op.endpoint || process.env.GITEA_URL || process.env.TEA_URL;
+    if (giteaEndpoint && (op.forge === "gitea" || !op.forge)) {
+      const giteaToken = op.token || process.env.GITEA_TOKEN || process.env.TEA_TOKEN || "";
+      matches = searchGitea(giteaEndpoint, query, giteaToken, limit);
+    }
+  }
+
+  // D. GitHub CLI fallback
+  if (matches.length === 0) {
+    matches = searchGitHub(query, op.repo, limit);
   }
 
   const toon = encodeToon({ query, count: matches.length, matches: matches.slice(0, limit) }).text;
-  const stored = storeWebArtifact(toon, `sourcegraph-${query.slice(0, 30)}`, "toon", {
+  const stored = storeWebArtifact(toon, `code-search-${query.slice(0, 30)}`, "toon", {
     target: op.target || "repo",
     cwd,
   });
@@ -281,7 +397,7 @@ export function executeWebSourceOp(op: any, cwd?: string): {
     success: true,
     op: "search",
     matches: matches.slice(0, limit),
-    output: stored.inline ? stored.content : `Sourcegraph results saved: ${stored.filePath}`,
+    output: stored.inline ? stored.content : `Search results saved: ${stored.filePath}`,
     artifactPath: stored.filePath,
   };
 }
@@ -290,7 +406,7 @@ export function registerWebSourceTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "web_source",
     label: "web_source",
-    description: "Search open-source code and retrieve repository files using Sourcegraph API or fallback to bundled CLIs (gh/curl/aria2c/yt-dlp).",
+    description: "Multi-forge code search, raw file retrieval, and downloading across Hound, GitLab, Gitea, GitHub, aria2c, and yt-dlp.",
     parameters: webSourceSchema,
     execute: async (_toolCallId: string, params: any) => {
       const ops = params?.ops || [params];
@@ -314,11 +430,11 @@ export function registerWebSourceTool(pi: ExtensionAPI): void {
       const count = first.matches?.length || 0;
 
       if (!expanded) {
-        const text = theme?.fg ? theme.fg("accent", `🐙 Sourcegraph (${count} matches)`) : `🐙 Sourcegraph (${count} matches)`;
+        const text = theme?.fg ? theme.fg("accent", `📦 Source Search (${count} matches)`) : `📦 Source Search (${count} matches)`;
         return new Text(text, 0, 0);
       }
 
-      const lines = [`🐙 Sourcegraph matches: ${count}`];
+      const lines = [`📦 Source search matches: ${count}`];
       for (const m of (first.matches || []).slice(0, 5)) {
         lines.push(`• [${m.repository}] ${m.path}`);
       }
