@@ -20,6 +20,7 @@ const HELPER_FILES = new Set([
   'continuous-gc.ts',
   'discover.ts',
   'display.ts',
+  'effort.ts',
   'file-checkpoint.ts',
   'file-reference.ts',
   'invoke.ts',

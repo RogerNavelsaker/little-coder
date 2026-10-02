@@ -9,6 +9,7 @@
  *
  * Hooks:
  * - `before_agent_start`: Injects [ACTIVE_CLIPBOARD] into prompt if scratchpad has entries.
+ * - `before_provider_request`: Injects reasoning effort / thinking budget per role profile.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -17,6 +18,7 @@ import { registerScratchpadTool, formatActiveClipboard, getScratchpadEntries } f
 import { registerRepoMapTool } from "./src/repo-map.ts";
 import { registerOutlineTool } from "./src/outline.ts";
 import { registerSessionTool } from "./src/session.ts";
+import { injectThinkingEffort, type ThinkingRole } from "./src/effort.ts";
 
 export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerScratchpadTool(pi);
@@ -35,5 +37,19 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
     if (!block || !dedupe(block)) return;
 
     return injectionResult("lc-scratchpad", block, event?.systemPrompt);
+  });
+
+  // Hook before_provider_request to inject dynamic thinking budget / effort
+  pi.on("before_provider_request", async (event: any, _ctx: any) => {
+    try {
+      const payload = event?.payload;
+      if (!payload) return;
+
+      const envRole = (process.env.LITTLE_CODER_ROLE || "coder") as ThinkingRole;
+      const modifiedPayload = injectThinkingEffort(payload, envRole);
+      return modifiedPayload;
+    } catch {
+      // Non-blocking fallback
+    }
   });
 }
