@@ -61,7 +61,7 @@ export const docReadSchema = Type.Object({
 export interface DocReadOpResult {
   success: boolean;
   path: string;
-  backend: "docling" | "pdftotext" | "unzip_xml" | "direct" | "error";
+  backend: "docling" | "officeparser" | "pdftotext" | "unzip_xml" | "direct" | "error";
   output: string;
   artifactPath?: string;
   chunksRecorded?: number;
@@ -281,62 +281,82 @@ export function executeDocReadOp(
         error: e.message,
       };
     }
-  } else if (ext === ".pdf") {
-    // Case B: PDF via pdftotext
-    try {
-      const pdfRes = spawnSync("pdftotext", ["-layout", resolvedPath, "-"], {
-        encoding: "utf-8",
-        timeout: 15000,
-      });
-      if (pdfRes.status === 0 && pdfRes.stdout) {
-        extractedContent = pdfRes.stdout.trim();
-        backendUsed = "pdftotext";
-      } else {
-        return {
-          success: false,
-          path: filePathStr,
-          backend: "error",
-          output: pdfRes.stderr || "pdftotext extraction failed",
-          error: "pdftotext failed",
-        };
-      }
-    } catch (e: any) {
-      return {
-        success: false,
-        path: filePathStr,
-        backend: "error",
-        output: e.message || "pdftotext execution error",
-        error: e.message,
-      };
-    }
-  } else if ([".docx", ".pptx", ".xlsx", ".odt"].includes(ext)) {
-    // Case C: Office archives via unzip + XML extraction
-    const text = extractFromZipContainer(resolvedPath, ext);
-    if (text) {
-      extractedContent = text;
-      backendUsed = "unzip_xml";
-    } else {
-      return {
-        success: false,
-        path: filePathStr,
-        backend: "error",
-        output: `Failed to extract text from ${ext} container`,
-        error: "Unzip XML extraction failed",
-      };
-    }
   } else {
-    // Unsupported fallback
+    // Check if officeparser CLI (from nixpkg-officeparser or PATH) is available
+    const officeFormat = format === "json" ? "json" : format === "text" ? "text" : "md";
     try {
-      extractedContent = readFileSync(resolvedPath, "utf-8");
-      backendUsed = "direct";
+      const officeRes = spawnSync(
+        "officeparser",
+        [resolvedPath, `--to=${officeFormat}`],
+        { encoding: "utf-8", timeout: 30000 },
+      );
+      if (officeRes.status === 0 && officeRes.stdout && officeRes.stdout.trim().length > 0) {
+        extractedContent = officeRes.stdout.trim();
+        backendUsed = "officeparser";
+      }
     } catch {
-      return {
-        success: false,
-        path: filePathStr,
-        backend: "error",
-        output: `Unsupported document format '${ext}' and no DOCLING_URL configured`,
-        error: `Unsupported format ${ext}`,
-      };
+      // officeparser not installed or failed, continue to format-specific fallbacks
+    }
+
+    if (!extractedContent) {
+      if (ext === ".pdf") {
+        // Case B: PDF via pdftotext
+        try {
+          const pdfRes = spawnSync("pdftotext", ["-layout", resolvedPath, "-"], {
+            encoding: "utf-8",
+            timeout: 15000,
+          });
+          if (pdfRes.status === 0 && pdfRes.stdout) {
+            extractedContent = pdfRes.stdout.trim();
+            backendUsed = "pdftotext";
+          } else {
+            return {
+              success: false,
+              path: filePathStr,
+              backend: "error",
+              output: pdfRes.stderr || "pdftotext extraction failed",
+              error: "pdftotext failed",
+            };
+          }
+        } catch (e: any) {
+          return {
+            success: false,
+            path: filePathStr,
+            backend: "error",
+            output: e.message || "pdftotext execution error",
+            error: e.message,
+          };
+        }
+      } else if ([".docx", ".pptx", ".xlsx", ".odt"].includes(ext)) {
+        // Case C: Office archives via unzip + XML extraction
+        const text = extractFromZipContainer(resolvedPath, ext);
+        if (text) {
+          extractedContent = text;
+          backendUsed = "unzip_xml";
+        } else {
+          return {
+            success: false,
+            path: filePathStr,
+            backend: "error",
+            output: `Failed to extract text from ${ext} container`,
+            error: "Unzip XML extraction failed",
+          };
+        }
+      } else {
+        // Unsupported fallback
+        try {
+          extractedContent = readFileSync(resolvedPath, "utf-8");
+          backendUsed = "direct";
+        } catch {
+          return {
+            success: false,
+            path: filePathStr,
+            backend: "error",
+            output: `Unsupported document format '${ext}' and no DOCLING_URL or officeparser configured`,
+            error: `Unsupported format ${ext}`,
+          };
+        }
+      }
     }
   }
 
