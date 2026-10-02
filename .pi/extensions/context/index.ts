@@ -7,6 +7,7 @@ import {
   formatSessionSummary,
   saveEngramSummary,
 } from "./src/bridge.js";
+import { runContinuousGC } from "./src/continuous-gc.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function contextExtension(pi: ExtensionAPI): void {
@@ -15,7 +16,24 @@ export default function contextExtension(pi: ExtensionAPI): void {
   registerCtxPacketTool(pi);
   registerCtxInjectTool(pi);
 
-  // 2. Automated Engram compaction bridge
+  // 2. Sapling-inspired Continuous Context Garbage Collector
+  // Evaluates every turn before LLM call; prunes intermediate tool outputs from older turns
+  // while keeping recent turns verbatim to keep token usage flat and prevent context degradation.
+  pi.on("context", async (event: any, _ctx: any) => {
+    try {
+      const messages = event?.messages || [];
+      if (!Array.isArray(messages) || messages.length === 0) return;
+
+      const { messages: pruned, stats } = runContinuousGC(messages);
+      if (stats.prunedToolResults > 0) {
+        return { messages: pruned };
+      }
+    } catch {
+      // Non-blocking fallback to original messages
+    }
+  });
+
+  // 3. Automated Engram compaction bridge
   // Fires right before context compaction. Preserves essential state to Engram
   // without creating .pi-context/ files or dirtying the git working tree.
   pi.on("session_before_compact", async (event: any, ctx: any) => {
@@ -39,8 +57,8 @@ export default function contextExtension(pi: ExtensionAPI): void {
     }
   });
 
-  // 3. Automated Engram session close bridge
-  pi.on("session_shutdown", async (_event: any, ctx: any) => {
+  // 4. Automated Engram session close bridge
+  pi.on("session_shutdown", async (_event: any, _ctx: any) => {
     try {
       // Clean up any ephemeral scratchpad if needed or notify
     } catch {}

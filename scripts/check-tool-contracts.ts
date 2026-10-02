@@ -17,6 +17,7 @@ const EXTENSIONS_DIR = resolve(REPO_ROOT, '.pi/extensions');
 
 const HELPER_FILES = new Set([
   'bridge.ts',
+  'continuous-gc.ts',
   'discover.ts',
   'display.ts',
   'file-checkpoint.ts',
