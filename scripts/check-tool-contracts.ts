@@ -26,13 +26,17 @@ const HELPER_FILES = new Set([
   'invoke.ts',
   'linehash.ts',
   'local-estimate.ts',
+  'output-parser.ts',
   'output.ts',
+  'quality-monitor.ts',
+  'read-guard.ts',
   'schema.ts',
   'settings.ts',
   'test-helpers.ts',
   'toon.ts',
   'unified.ts',
   'watchdog.ts',
+  'write-guard.ts',
 ]);
 
 function toPascalCase(str: string): string {

@@ -237,7 +237,7 @@ export function resolvePiRoot(piRootOverride) {
  * @param {string} [piRootOverride] Known pi package root (the launcher passes
  *   its already-resolved path; postinstall omits it and we resolve).
  */
-export function applyPiPatches(piRootOverride) {
+export function applyPiPatches(piRootOverride?: string) {
   const piRoot = resolvePiRoot(piRootOverride);
   if (!piRoot) return;
   for (const p of PATCHES) {
