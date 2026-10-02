@@ -76,7 +76,7 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | Extension / Domain | Tracked Seed | Delivered Capability & CLI/Module |
 |---|---|---|
 | **`sh` Single Tool** | `little-coder-2315` | Canonical `sh` execution tool + container-aware sandbox detection (bwrap bypass in containers). |
-| **`extra-tools`** | `little-coder-cbcc` | Workspace tools: `repo_map`, `scratchpad`, `session` (herdr-backed), `outline` as CLIs/Nu scripts. |
+| **`extra-tools`** | `little-coder-cbcc` | **Completed**: Workspace tools: `repo_map`, `scratchpad` ([ACTIVE_CLIPBOARD]), `session` (herdr-backed), `outline` (lines:N-M). |
 | **`project-context`** | `little-coder-78a9` | **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
 | **`context-watchdog`**| `little-coder-b2be` | Mid-run token compaction watchdog for autonomous Warren runs before context window overflow (#59, #68, #128). |
 | **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser` (fenced tool recovery), `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path fix). |
