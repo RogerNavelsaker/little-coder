@@ -159,6 +159,6 @@ describe("registerSessionTool", () => {
     expect(registeredTools.length).toBe(1);
     expect(registeredTools[0].name).toBe("session");
     expect(registeredCommands.length).toBe(1);
-    expect(registeredCommands[0].name).toBe("session");
+    expect(registeredCommands[0].name).toBe("sessions");
   });
 });

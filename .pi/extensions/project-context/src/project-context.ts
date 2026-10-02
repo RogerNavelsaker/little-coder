@@ -11,7 +11,8 @@
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { resolve, join } from "node:path";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { injectionResult, makeDedupe } from "../../_shared/inject.ts";
 import {
@@ -75,7 +76,10 @@ export const projectContextSchema = Type.Object({
 });
 
 function getOwnAgentsMd(): string {
-  return resolve(import.meta.dir, "..", "..", "..", "AGENTS.md");
+  const dir = typeof import.meta.dir === "string"
+    ? import.meta.dir
+    : (import.meta.url ? dirname(fileURLToPath(import.meta.url)) : process.cwd());
+  return resolve(dir, "..", "..", "..", "AGENTS.md");
 }
 
 let cachedFound: FoundContext | undefined;

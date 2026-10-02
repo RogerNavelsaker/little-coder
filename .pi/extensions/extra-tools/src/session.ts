@@ -439,7 +439,7 @@ export function registerSessionTool(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("session", {
+  pi.registerCommand("sessions", {
     description: "Manage background sessions",
     handler: async (args: string, ctx: any) => {
       const parts = args.trim().split(/\s+/);
