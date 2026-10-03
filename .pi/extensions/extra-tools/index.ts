@@ -40,13 +40,26 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
   });
 
   // Hook before_provider_request to inject dynamic thinking budget / effort
-  pi.on("before_provider_request", async (event: any, _ctx: any) => {
+  pi.on("before_provider_request", async (event: any, ctx: any) => {
     try {
       const payload = event?.payload;
       if (!payload) return;
 
+      // Check intent from last message if available
+      const messages = payload?.messages || ctx?.session?.messages || [];
+      const lastMsg = messages[messages.length - 1];
+      let lastText: string | undefined;
+      if (typeof lastMsg?.content === "string") {
+        lastText = lastMsg.content;
+      } else if (Array.isArray(lastMsg?.content)) {
+        lastText = lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ");
+      }
+
+      const { classifyTurnIntent } = await import("./src/effort.ts");
+      const detectedTask = classifyTurnIntent(lastText);
       const envRole = (process.env.LITTLE_CODER_ROLE || "coder") as ThinkingRole;
-      const modifiedPayload = injectThinkingEffort(payload, envRole);
+
+      const modifiedPayload = injectThinkingEffort(payload, detectedTask || envRole);
       return modifiedPayload;
     } catch {
       // Non-blocking fallback

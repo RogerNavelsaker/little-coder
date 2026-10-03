@@ -45,4 +45,44 @@ describe("injectThinkingEffort", () => {
     const res = injectThinkingEffort(rawPayload, "coder", 3000);
     expect(res.thinking.budget_tokens).toBe(3000);
   });
+
+  describe("task intent classification & dynamic steering", () => {
+    it("classifies quick fix intent", () => {
+      const { classifyTurnIntent } = require("./effort");
+      expect(classifyTurnIntent("fix typo in line 42")).toBe("quick_fix");
+      expect(classifyTurnIntent("rename variable foo to bar")).toBe("quick_fix");
+    });
+
+    it("classifies test run intent", () => {
+      const { classifyTurnIntent } = require("./effort");
+      expect(classifyTurnIntent("bun test src/app.test.ts")).toBe("test_run");
+      expect(classifyTurnIntent("run the tests")).toBe("test_run");
+    });
+
+    it("classifies architecture and debug intent", () => {
+      const { classifyTurnIntent } = require("./effort");
+      expect(classifyTurnIntent("refactor the auth architecture")).toBe("architecture");
+      expect(classifyTurnIntent("debug why eviction fails")).toBe("debug");
+    });
+
+    it("injects minimal tokens for quick_fix task", () => {
+      const rawPayload = {
+        model: "claude-3-7-sonnet-20250219",
+        messages: [{ role: "user", content: "fix typo" }],
+      };
+      const res = injectThinkingEffort(rawPayload, "quick_fix");
+      expect(res.thinking).toBeDefined();
+      expect(res.thinking.budget_tokens).toBe(1024);
+    });
+
+    it("disables thinking for test_run task", () => {
+      const rawPayload = {
+        model: "claude-3-7-sonnet-20250219",
+        messages: [{ role: "user", content: "run tests" }],
+        thinking: { type: "enabled", budget_tokens: 4096 },
+      };
+      const res = injectThinkingEffort(rawPayload, "test_run");
+      expect(res.thinking).toBeUndefined();
+    });
+  });
 });

@@ -12,8 +12,11 @@
 
 export type ThinkingRole = "coordinator" | "coder" | "reviewer" | "watchdog";
 
+export type TaskType = "quick_fix" | "test_run" | "refactor" | "feature" | "architecture" | "debug";
+
 export interface EffortConfig {
   roleBudgets: Record<ThinkingRole, { level: "high" | "medium" | "low" | "off"; tokens: number }>;
+  taskBudgets: Record<TaskType, { level: "high" | "medium" | "low" | "off"; tokens: number }>;
 }
 
 export const DEFAULT_EFFORT_CONFIG: EffortConfig = {
@@ -23,23 +26,68 @@ export const DEFAULT_EFFORT_CONFIG: EffortConfig = {
     reviewer: { level: "low", tokens: 1024 },
     watchdog: { level: "off", tokens: 0 },
   },
+  taskBudgets: {
+    quick_fix: { level: "minimal" as any, tokens: 1024 },
+    test_run: { level: "off", tokens: 0 },
+    refactor: { level: "low", tokens: 2048 },
+    feature: { level: "medium", tokens: 4096 },
+    architecture: { level: "high", tokens: 8192 },
+    debug: { level: "high", tokens: 8192 },
+  },
 };
+
+/**
+ * Classify task intent from the last message or tool execution context.
+ */
+export function classifyTurnIntent(lastMessageText?: string): TaskType | undefined {
+  if (!lastMessageText) return undefined;
+  const lower = lastMessageText.toLowerCase();
+
+  if (/^(fix typo|rename|format|lint|bump|spelling|whitespace)\b/.test(lower) || lower.includes("quick fix")) {
+    return "quick_fix";
+  }
+  if (/^(bun test|cargo test|npm test|pytest|test:|run tests?|verify)\b/.test(lower) || lower.includes("run the tests")) {
+    return "test_run";
+  }
+  if (lower.includes("architecture") || lower.includes("design") || lower.includes("rfc") || lower.includes("decompose")) {
+    return "architecture";
+  }
+  if (lower.includes("debug") || lower.includes("investigate") || lower.includes("root cause") || lower.includes("why is it failing")) {
+    return "debug";
+  }
+  if (lower.includes("refactor") || lower.includes("cleanup") || lower.includes("reorganize")) {
+    return "refactor";
+  }
+  return undefined;
+}
 
 /**
  * Injects or adjusts reasoning effort parameters in a raw provider request payload.
  */
 export function injectThinkingEffort(
   payload: any,
-  roleOrLevel?: ThinkingRole | "high" | "medium" | "low" | "off",
+  roleOrLevelOrTask?: ThinkingRole | TaskType | "high" | "medium" | "low" | "minimal" | "off",
   customTokens?: number,
   config: EffortConfig = DEFAULT_EFFORT_CONFIG,
 ): any {
   if (!payload || typeof payload !== "object") return payload;
 
-  const targetRole = (roleOrLevel && roleOrLevel in config.roleBudgets ? roleOrLevel : "coder") as ThinkingRole;
-  const setting = config.roleBudgets[targetRole] || config.roleBudgets.coder;
-  const level = (roleOrLevel && ["high", "medium", "low", "off"].includes(roleOrLevel) ? roleOrLevel : setting.level);
-  const tokens = customTokens ?? setting.tokens;
+  let level: "high" | "medium" | "low" | "minimal" | "off" = "medium";
+  let tokens = customTokens ?? 2048;
+
+  if (roleOrLevelOrTask) {
+    if (roleOrLevelOrTask in config.taskBudgets) {
+      const taskSetting = config.taskBudgets[roleOrLevelOrTask as TaskType];
+      level = taskSetting.level as any;
+      tokens = customTokens ?? taskSetting.tokens;
+    } else if (roleOrLevelOrTask in config.roleBudgets) {
+      const roleSetting = config.roleBudgets[roleOrLevelOrTask as ThinkingRole];
+      level = roleSetting.level as any;
+      tokens = customTokens ?? roleSetting.tokens;
+    } else if (["high", "medium", "low", "minimal", "off"].includes(roleOrLevelOrTask)) {
+      level = roleOrLevelOrTask as any;
+    }
+  }
 
   const cloned = { ...payload };
 
