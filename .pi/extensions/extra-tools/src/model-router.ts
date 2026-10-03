@@ -31,7 +31,7 @@ export function setDualModelConfig(update: Partial<DualModelConfig>): void {
   dualConfig = { ...dualConfig, ...update };
 }
 
-export const modelRouteSchema = Type.Object({
+export const modelRouteItemSchema = Type.Object({
   role: Type.Optional(
     Type.Union([
       Type.Literal("plan", { description: "Switch to high-capacity plan-model for design/decomposition" }),
@@ -42,42 +42,84 @@ export const modelRouteSchema = Type.Object({
   action_model: Type.Optional(Type.String({ description: "Configure action-model (provider/id or id)" })),
 });
 
+export const modelRouteSchema = Type.Object({
+  ops: Type.Optional(
+    Type.Array(modelRouteItemSchema, { description: "Batch model router operations" }),
+  ),
+  role: Type.Optional(
+    Type.Union([
+      Type.Literal("plan", { description: "Switch to high-capacity plan-model for design/decomposition" }),
+      Type.Literal("action", { description: "Switch to lean action-model for tool execution & editing" }),
+    ]),
+  ),
+  plan_model: Type.Optional(Type.String({ description: "Configure plan-model (provider/id or id)" })),
+  action_model: Type.Optional(Type.String({ description: "Configure action-model (provider/id or id)" })),
+});
+
+export async function executeModelRouterOp(
+  _toolCallId: string,
+  params: any,
+  _signal?: AbortSignal,
+  _onUpdate?: (update: unknown) => void,
+  ctx?: any,
+) {
+  if (Array.isArray(params.ops) && params.ops.length > 0) {
+    if (params.ops.length === 1) {
+      return executeModelRouterOp(_toolCallId, { ...params.ops[0], ops: undefined }, _signal, _onUpdate, ctx);
+    }
+    const results = await Promise.all(
+      params.ops.map((op: any) => executeModelRouterOp(_toolCallId, op, _signal, _onUpdate, ctx)),
+    );
+    return {
+      content: [{ type: "text" as const, text: results.map((r: any) => r.content[0].text).join("\n---\n") }],
+      isError: false,
+      details: {
+        totalOps: results.length,
+        results: results.map((r: any) => r.details),
+      },
+    };
+  }
+
+  if (params.plan_model) dualConfig.planModel = params.plan_model;
+  if (params.action_model) dualConfig.actionModel = params.action_model;
+  if (params.role) {
+    dualConfig.activeRole = params.role;
+
+    // If session provides setModel, switch immediately
+    const targetModel = params.role === "plan" ? dualConfig.planModel : dualConfig.actionModel;
+    if (targetModel && ctx?.session?.setModel) {
+      try {
+        await ctx.session.setModel(targetModel);
+      } catch (e: any) {
+        return {
+          content: [{ type: "text" as const, text: `Active role updated to ${params.role}, but setModel failed: ${e.message}` }],
+          details: { config: dualConfig, error: e.message },
+          isError: true,
+        };
+      }
+    }
+  }
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Dual-model route: role=${dualConfig.activeRole} | planModel=${dualConfig.planModel || "default"} | actionModel=${dualConfig.actionModel || "default"}`,
+      },
+    ],
+    details: { config: dualConfig },
+    isError: false,
+  };
+}
+
 export function registerModelRouteTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "model_route",
     label: "Model Route",
     description: "Inspect or configure the asymmetric dual-model split (plan-model vs action-model).",
     parameters: modelRouteSchema,
-    async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      if (params.plan_model) dualConfig.planModel = params.plan_model;
-      if (params.action_model) dualConfig.actionModel = params.action_model;
-      if (params.role) {
-        dualConfig.activeRole = params.role;
-
-        // If session provides setModel, switch immediately
-        const targetModel = params.role === "plan" ? dualConfig.planModel : dualConfig.actionModel;
-        if (targetModel && ctx?.session?.setModel) {
-          try {
-            await ctx.session.setModel(targetModel);
-          } catch (e: any) {
-            return {
-              content: [{ type: "text", text: `Active role updated to ${params.role}, but setModel failed: ${e.message}` }],
-              details: { config: dualConfig, error: e.message },
-              isError: true,
-            } as any;
-          }
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Dual-model route: role=${dualConfig.activeRole} | planModel=${dualConfig.planModel || "default"} | actionModel=${dualConfig.actionModel || "default"}`,
-          },
-        ],
-        details: { config: dualConfig },
-      } as any;
-    },
+    execute: (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) =>
+      executeModelRouterOp(_toolCallId, params, _signal, _onUpdate, ctx) as any,
   });
 }
+
