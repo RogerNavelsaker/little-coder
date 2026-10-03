@@ -479,5 +479,42 @@ describe("shell tool", () => {
     expect(registered).toContain("sh");
     expect(registered).toContain("shell");
   });
+
+  describe("shell output scrubber (lean-ctx pattern)", () => {
+    test("collapses runs of passing test assertions when exitCode=0", () => {
+      const { scrubShellOutput } = require("./shell.js");
+      const raw = [
+        "Running tests...",
+        "✓ test 1 passed [1ms]",
+        "✓ test 2 passed [1ms]",
+        "✓ test 3 passed [1ms]",
+        "✓ test 4 passed [1ms]",
+        "✓ test 5 passed [1ms]",
+        "Summary: 5 passed",
+      ].join("\n");
+      const scrubbed = scrubShellOutput(raw, 0);
+      expect(scrubbed).toContain("... [5 passing tests collapsed] ...");
+      expect(scrubbed).toContain("Summary: 5 passed");
+    });
+
+    test("preserves failing assertions and stack traces when exitCode!=0", () => {
+      const { scrubShellOutput } = require("./shell.js");
+      const raw = [
+        "✓ test 1 passed [1ms]",
+        "✗ test 2 failed [2ms]",
+        "Error: Expected true to be false",
+        "  at /src/app.test.ts:42:10",
+      ].join("\n");
+      const scrubbed = scrubShellOutput(raw, 1);
+      expect(scrubbed).toContain("✗ test 2 failed");
+      expect(scrubbed).toContain("at /src/app.test.ts:42:10");
+    });
+
+    test("strips ANSI color codes", () => {
+      const { stripAnsi } = require("./shell.js");
+      const colored = "\u001b[32mSUCCESS\u001b[0m";
+      expect(stripAnsi(colored)).toBe("SUCCESS");
+    });
+  });
 });
 

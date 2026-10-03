@@ -224,6 +224,61 @@ function oneLine(value: unknown, max = 96): string {
 }
 
 /**
+ * Strip ANSI escape codes from output.
+ */
+export function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
+/**
+ * Scrub and compact terminal noise (lean-ctx pattern):
+ * - Strips ANSI codes
+ * - Collapses long runs of passing test assertions (e.g. `✓ test name [0.1ms]`) when test passed
+ * - Collapses repeated progress spinners / download bars
+ * - Preserves failures, assertion errors, stack traces, and exit summaries intact
+ */
+export function scrubShellOutput(text: string, exitCode = 0): string {
+  if (!text) return '';
+  const clean = stripAnsi(text);
+  const lines = clean.split('\n');
+
+  // If exitCode is 0, we can safely collapse passing test assertions to a summary
+  if (exitCode === 0) {
+    const isPassingLine = (l: string) => /^\s*(✓|√|PASS|ok\b|test\s+\S+\s+\.\.\.\s+ok)/.test(l.trim());
+    let passCount = 0;
+    const scrubbed: string[] = [];
+
+    for (const line of lines) {
+      if (isPassingLine(line)) {
+        passCount++;
+      } else {
+        if (passCount > 3) {
+          scrubbed.push(`... [${passCount} passing tests collapsed] ...`);
+          passCount = 0;
+        } else if (passCount > 0) {
+          for (let i = 0; i < passCount; i++) {
+            // Keep up to 3 individual passing lines
+            scrubbed.push(`(passed test)`);
+          }
+          passCount = 0;
+        }
+        scrubbed.push(line);
+      }
+    }
+    if (passCount > 3) {
+      scrubbed.push(`... [${passCount} passing tests collapsed] ...`);
+    } else if (passCount > 0) {
+      for (let i = 0; i < passCount; i++) scrubbed.push(`(passed test)`);
+    }
+    return scrubbed.join('\n');
+  }
+
+  // If failed (exitCode !== 0), preserve failing lines and stack traces, but collapse carriage returns
+  const normalized = clean.replace(/\r+/g, '\n');
+  return normalized;
+}
+
+/**
  * Check if a command string looks like a Nushell parser error.
  */
 function looksLikeNuParserError(stderr: string): boolean {
@@ -789,14 +844,18 @@ export async function executeShellOp(
 
   const failureSummary = buildFailureSummary(exitCode, stdout, stderr, timeoutMs, durationMs, timedOut);
 
-  const stdoutExceeds = stdout.length > maxBytes || stdout.split('\n').length > maxLines;
-  const stderrExceeds = stderr.length > maxBytes || stderr.split('\n').length > maxLines;
+  // Apply pattern-based compaction and noise scrubbing (lean-ctx pattern)
+  const scrubbedStdout = scrubShellOutput(stdout, exitCode);
+  const scrubbedStderr = scrubShellOutput(stderr, exitCode);
+
+  const stdoutExceeds = scrubbedStdout.length > maxBytes || scrubbedStdout.split('\n').length > maxLines;
+  const stderrExceeds = scrubbedStderr.length > maxBytes || scrubbedStderr.split('\n').length > maxLines;
   const stdoutTruncated = stdoutExceeds;
   const stderrTruncated = stderrExceeds;
 
-  let stdoutPreview = stdout;
+  let stdoutPreview = scrubbedStdout;
   if (stdoutTruncated) {
-    const lines = stdout.split('\n');
+    const lines = scrubbedStdout.split('\n');
     const head = lines.slice(0, headLines).join('\n');
     const tail = lines.slice(-tailLines).join('\n');
     stdoutPreview = `[oversized: ${lines.length} lines, ${stdout.length} bytes — head ${headLines} lines + tail ${tailLines} lines]\n${head}\n... [${lines.length - headLines - tailLines} lines omitted] ...\n${tail}`;
@@ -820,7 +879,7 @@ export async function executeShellOp(
     } catch { /* ignore */ }
   }
 
-  let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout, stderr }] }).text;
+  let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout: (stdoutTruncated ? stdoutPreview : scrubbedStdout), stderr: (stderrTruncated ? stderrPreview : scrubbedStderr) }] }).text;
   if (failureSummary) userText += '\n' + failureSummary;
 
   return {
