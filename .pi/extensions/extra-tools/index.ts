@@ -18,6 +18,7 @@ import { registerScratchpadTool, formatActiveClipboard, getScratchpadEntries } f
 import { registerRepoMapTool } from "./src/repo-map.ts";
 import { registerOutlineTool } from "./src/outline.ts";
 import { registerSessionTool } from "./src/session.ts";
+import { registerModelRouteTool } from "./src/model-router.ts";
 import { injectThinkingEffort, type ThinkingRole } from "./src/effort.ts";
 
 export default function extraToolsExtension(pi: ExtensionAPI): void {
@@ -25,6 +26,7 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerRepoMapTool(pi);
   registerOutlineTool(pi);
   registerSessionTool(pi);
+  registerModelRouteTool(pi);
 
   const dedupe = makeDedupe();
 
