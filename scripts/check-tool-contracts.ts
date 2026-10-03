@@ -32,6 +32,7 @@ const HELPER_FILES = new Set([
   'output.ts',
   'quality-monitor.ts',
   'read-guard.ts',
+  'read-guard-edit.ts',
   'schema.ts',
   'settings.ts',
   'skill-inject.ts',
