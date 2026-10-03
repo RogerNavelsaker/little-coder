@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { repairJsonString, extractFencedToolCalls } from "./output-parser";
+import { repairJsonString, extractFencedToolCalls, filterKnownTools } from "./output-parser";
 
 describe("output-parser", () => {
   it("repairs control characters, single quotes, and trailing commas", () => {
@@ -37,5 +37,51 @@ Let's see what happens.`;
     const calls = extractFencedToolCalls(text);
     expect(calls.length).toBe(1);
     expect(calls[0].tool).toBe("outline");
+  });
+
+  describe("filterKnownTools (Issue #96)", () => {
+    const known = ["read", "write", "edit", "sh", "outline"];
+
+    it("drops unknown tools and config blobs", () => {
+      const text = `
+\`\`\`json
+{
+  "name": "myCustomPackage",
+  "version": "1.0.0"
+}
+\`\`\``;
+      const calls = extractFencedToolCalls(text);
+      expect(calls.length).toBe(1);
+      const filtered = filterKnownTools(calls, known);
+      expect(filtered.length).toBe(0);
+    });
+
+    it("preserves known tools regardless of case", () => {
+      const text = `
+\`\`\`json
+{
+  "name": "Read",
+  "parameters": { "path": "foo.txt" }
+}
+\`\`\``;
+      const calls = extractFencedToolCalls(text);
+      expect(calls.length).toBe(1);
+      const filtered = filterKnownTools(calls, known);
+      expect(filtered.length).toBe(1);
+      expect(filtered[0].tool).toBe("Read");
+    });
+
+    it("passes through all calls if known list is empty or undefined", () => {
+      const text = `
+\`\`\`json
+{
+  "name": "someTool",
+  "args": {}
+}
+\`\`\``;
+      const calls = extractFencedToolCalls(text);
+      expect(filterKnownTools(calls, undefined).length).toBe(1);
+      expect(filterKnownTools(calls, []).length).toBe(1);
+    });
   });
 });

@@ -108,3 +108,16 @@ export function extractFencedToolCalls(text: string): RecoveredToolCall[] {
 
   return recovered;
 }
+
+/**
+ * Filter recovered tool calls to only those actually registered in the session (Issue #96).
+ * Drops false positives from prose or config blobs carrying a "name" or "tool" key.
+ */
+export function filterKnownTools(
+  calls: RecoveredToolCall[],
+  knownNames: readonly string[] | undefined,
+): RecoveredToolCall[] {
+  if (!knownNames || knownNames.length === 0) return calls;
+  const known = new Set(knownNames.map((n) => n.trim().toLowerCase()));
+  return calls.filter((c) => known.has(c.tool.trim().toLowerCase()));
+}

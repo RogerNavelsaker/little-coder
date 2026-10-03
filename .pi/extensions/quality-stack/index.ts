@@ -12,7 +12,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { checkWritePath } from "./src/write-guard.ts";
 import { guardReadOutput } from "./src/read-guard.ts";
-import { extractFencedToolCalls } from "./src/output-parser.ts";
+import { extractFencedToolCalls, filterKnownTools } from "./src/output-parser.ts";
 import { QualityMonitor } from "./src/quality-monitor.ts";
 import { TurnCapGuard } from "./src/turn-cap.ts";
 
@@ -117,9 +117,22 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
 
         const recovered = extractFencedToolCalls(text);
         if (recovered.length > 0) {
-          const first = recovered[0];
-          const reminder = `Notice: Fenced tool call detected in text for '${first.tool}'. Please invoke tools natively.`;
-          ctx?.ui?.notify?.(reminder, "warning");
+          let knownNames: string[] | undefined;
+          try {
+            const all = (ctx as any)?.getAllTools?.();
+            if (Array.isArray(all)) {
+              knownNames = all.map((t: any) => String(t?.name ?? "")).filter(Boolean);
+            }
+          } catch {
+            knownNames = undefined;
+          }
+
+          const filtered = filterKnownTools(recovered, knownNames);
+          if (filtered.length > 0) {
+            const first = filtered[0];
+            const reminder = `Notice: Fenced tool call detected in text for '${first.tool}'. Please invoke tools natively.`;
+            ctx?.ui?.notify?.(reminder, "warning");
+          }
         }
       }
     } catch {}
