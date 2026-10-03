@@ -21,7 +21,7 @@ describe("model-router (dual-model split)", () => {
     expect(registeredTool).toBeDefined();
     expect(registeredTool.name).toBe("model_route");
 
-    const res = await registeredTool.execute({ role: "plan", plan_model: "o3-mini" }, {});
+    const res = await registeredTool.execute("call-1", { role: "plan", plan_model: "o3-mini" }, undefined, undefined, {});
     expect(res.content[0].text).toContain("role=plan");
     expect(res.details.config.planModel).toBe("o3-mini");
   });

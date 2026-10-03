@@ -45,9 +45,10 @@ export const modelRouteSchema = Type.Object({
 export function registerModelRouteTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "model_route",
+    label: "Model Route",
     description: "Inspect or configure the asymmetric dual-model split (plan-model vs action-model).",
     parameters: modelRouteSchema,
-    execute: async (params: any, ctx: any) => {
+    async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       if (params.plan_model) dualConfig.planModel = params.plan_model;
       if (params.action_model) dualConfig.actionModel = params.action_model;
       if (params.role) {
@@ -63,7 +64,7 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
               content: [{ type: "text", text: `Active role updated to ${params.role}, but setModel failed: ${e.message}` }],
               details: { config: dualConfig, error: e.message },
               isError: true,
-            };
+            } as any;
           }
         }
       }
@@ -76,7 +77,7 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
           },
         ],
         details: { config: dualConfig },
-      };
+      } as any;
     },
   });
 }
