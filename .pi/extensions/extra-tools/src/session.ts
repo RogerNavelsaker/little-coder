@@ -50,6 +50,19 @@ export const sessionItemSchema = Type.Object({
   input: Type.Optional(Type.String({ description: "Text or keys to write/send to session" })),
   cwd: Type.Optional(Type.String({ description: "Working directory for session" })),
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds" })),
+  wake_on: Type.Optional(
+    Type.Object({
+      exit: Type.Optional(Type.Boolean({ description: "Wake agent when process exits (default true)" })),
+      match: Type.Optional(
+        Type.Union([Type.String(), Type.Array(Type.String())], {
+          description: "Regex pattern(s) or keywords to wake agent on match",
+        }),
+      ),
+      silence: Type.Optional(
+        Type.Number({ description: "Wake agent if output goes silent for N milliseconds" }),
+      ),
+    }, { description: "Event-driven wakeup triggers" }),
+  ),
 });
 
 export const sessionSchema = Type.Object({
@@ -79,6 +92,19 @@ export const sessionSchema = Type.Object({
   input: Type.Optional(Type.String({ description: "Input to send" })),
   cwd: Type.Optional(Type.String({ description: "Working directory" })),
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds" })),
+  wake_on: Type.Optional(
+    Type.Object({
+      exit: Type.Optional(Type.Boolean({ description: "Wake agent when process exits (default true)" })),
+      match: Type.Optional(
+        Type.Union([Type.String(), Type.Array(Type.String())], {
+          description: "Regex pattern(s) or keywords to wake agent on match",
+        }),
+      ),
+      silence: Type.Optional(
+        Type.Number({ description: "Wake agent if output goes silent for N milliseconds" }),
+      ),
+    }, { description: "Event-driven wakeup triggers" }),
+  ),
 });
 
 // Process table for in-process fallbacks
@@ -258,25 +284,88 @@ export async function executeSessionOp(
     };
     activeProcesses.set(sessionId, sessionState);
 
+    // Setup event-driven wake_on triggers
+    const wakeOn = params.wake_on;
+    let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+    const matchPatterns: RegExp[] = [];
+    if (wakeOn?.match) {
+      const patterns = Array.isArray(wakeOn.match) ? wakeOn.match : [wakeOn.match];
+      for (const p of patterns) {
+        try {
+          matchPatterns.push(new RegExp(p));
+        } catch {
+          // fallback literal match
+          matchPatterns.push(new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        }
+      }
+    }
+
+    const triggerWake = (reason: string, snippet?: string) => {
+      const notifyText = `[Session Wakeup] Session '${sessionId}' triggered wake_on (${reason})${snippet ? `:\n${snippet}` : "."}`;
+      ctx?.ui?.notify?.(notifyText, "info");
+      if (typeof ctx?.sendUserMessage === "function") {
+        ctx.sendUserMessage(notifyText, { deliverAs: "followUp" });
+      }
+    };
+
+    const resetSilenceTimer = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      if (wakeOn?.silence && wakeOn.silence > 0) {
+        silenceTimer = setTimeout(() => {
+          if (sessionState.exitCode === null) {
+            triggerWake(`silence after ${wakeOn.silence}ms`);
+          }
+        }, wakeOn.silence);
+      }
+    };
+
     child.stdout?.on("data", (data) => {
+      const str = data.toString();
       try {
-        writeFileSync(logFile, data.toString(), { flag: "a" });
+        writeFileSync(logFile, str, { flag: "a" });
       } catch {}
+
+      resetSilenceTimer();
+
+      if (matchPatterns.length > 0) {
+        for (const re of matchPatterns) {
+          if (re.test(str)) {
+            triggerWake(`matched pattern '${re.source}'`, str.trim().slice(0, 200));
+            break;
+          }
+        }
+      }
     });
 
     child.stderr?.on("data", (data) => {
+      const str = data.toString();
       try {
-        writeFileSync(logFile, data.toString(), { flag: "a" });
+        writeFileSync(logFile, str, { flag: "a" });
       } catch {}
+
+      resetSilenceTimer();
+
+      if (matchPatterns.length > 0) {
+        for (const re of matchPatterns) {
+          if (re.test(str)) {
+            triggerWake(`matched pattern '${re.source}' in stderr`, str.trim().slice(0, 200));
+            break;
+          }
+        }
+      }
     });
 
     child.on("close", (code) => {
+      if (silenceTimer) clearTimeout(silenceTimer);
       sessionState.exitCode = code;
       const rec = loadSessionRecord(sessionId, sessionsDir);
       if (rec) {
         rec.status = "exited";
         rec.exitCode = code;
         saveSessionRecord(rec, sessionsDir);
+      }
+      if (wakeOn?.exit !== false && wakeOn !== undefined) {
+        triggerWake(`process exited with code ${code}`);
       }
     });
 
@@ -304,6 +393,8 @@ export async function executeSessionOp(
         }
       }, params.timeout);
     }
+
+    resetSilenceTimer();
 
     const footer = `\n[exit=null cwd=${targetCwd} timed_out=false]`;
     return {

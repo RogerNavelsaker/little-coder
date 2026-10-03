@@ -144,6 +144,49 @@ describe("executeSessionOp", () => {
 
     rmSync(testSessionsDir, { recursive: true, force: true });
   });
+
+  it("triggers wake_on callbacks on pattern match and exit", async () => {
+    mkdirSync(testSessionsDir, { recursive: true });
+    const messages: string[] = [];
+    const mockCtx = {
+      cwd: process.cwd(),
+      sessionsDir: testSessionsDir,
+      sendUserMessage: (msg: string) => messages.push(msg),
+    };
+
+    const spawnRes = await executeSessionOp(
+      "t11",
+      {
+        action: "create",
+        id: "test-wake",
+        command: "echo 'BUILD_SUCCESS'; sleep 0.05; exit 0",
+        wake_on: {
+          exit: true,
+          match: "BUILD_SUCCESS",
+        },
+      },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+
+    expect(spawnRes.isError).toBe(false);
+
+    // Wait for process and close
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(messages.some((m) => m.includes("matched pattern 'BUILD_SUCCESS'"))).toBe(true);
+    expect(messages.some((m) => m.includes("process exited with code 0"))).toBe(true);
+
+    await executeSessionOp(
+      "t12",
+      { action: "reset" },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+    rmSync(testSessionsDir, { recursive: true, force: true });
+  });
 });
 
 describe("registerSessionTool", () => {

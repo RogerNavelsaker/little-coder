@@ -15,10 +15,12 @@ import { guardReadOutput } from "./src/read-guard.ts";
 import { extractFencedToolCalls, filterKnownTools } from "./src/output-parser.ts";
 import { QualityMonitor } from "./src/quality-monitor.ts";
 import { TurnCapGuard } from "./src/turn-cap.ts";
+import { ReadGuardEditTracker } from "./src/read-guard-edit.ts";
 
 export default function qualityStackExtension(pi: ExtensionAPI): void {
   const monitor = new QualityMonitor();
   const turnCap = new TurnCapGuard();
+  const readGuardEdit = new ReadGuardEditTracker();
 
   // 1. Turn Start Hook: turn-cap + finalize-warn
   pi.on("turn_start", async (event: any, ctx: any) => {
@@ -66,16 +68,47 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
           };
         }
       }
+
+      // Read-before-edit invariant
+      if (toolName === "edit") {
+        const editPath = input?.path || input?.file_path || (Array.isArray(input?.edits) && input.edits[0]?.path);
+        if (typeof editPath === "string") {
+          const check = readGuardEdit.checkEdit(editPath, ctx?.cwd || process.cwd());
+          if (!check.allowed) {
+            ctx?.ui?.notify?.("Edit blocked: File must be read first", "warning");
+            return {
+              block: true,
+              reason: check.reason,
+            };
+          }
+        }
+      }
     } catch {
       // Non-blocking fallback
     }
   });
 
-  // 3. Tool Result Hook: read-guard + quality-monitor
+  // 3. Tool Result Hook: read-guard + quality-monitor + read-guard-edit tracking
   pi.on("tool_result", async (event: any, ctx: any) => {
     try {
       const toolName = event?.toolName;
       const result = event?.result;
+      const input = event?.input;
+      const isError = Boolean(event?.isError);
+
+      // Track read/authored files for read-guard-edit
+      if (!isError) {
+        if (toolName === "read" && input?.path) {
+          readGuardEdit.recordAccess(input.path, ctx?.cwd || process.cwd());
+        } else if (toolName === "write" && input?.path) {
+          readGuardEdit.recordAccess(input.path, ctx?.cwd || process.cwd());
+        } else if (toolName === "edit") {
+          const editPath = input?.path || input?.file_path || (Array.isArray(input?.edits) && input.edits[0]?.path);
+          if (typeof editPath === "string") {
+            readGuardEdit.recordAccess(editPath, ctx?.cwd || process.cwd());
+          }
+        }
+      }
 
       // Read guard: bound massive text payloads
       if (result && Array.isArray(result.content)) {
@@ -142,6 +175,7 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async () => {
     monitor.reset();
     turnCap.reset();
+    readGuardEdit.reset();
   });
 
   pi.on("before_agent_start", async () => {
