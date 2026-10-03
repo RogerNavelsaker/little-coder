@@ -173,7 +173,7 @@ export async function executeSessionOp(
   params: any,
   _signal?: AbortSignal,
   _onUpdate?: (update: unknown) => void,
-  ctx: { cwd: string; sessionsDir?: string } = { cwd: process.cwd() },
+  ctx: any = { cwd: process.cwd() },
 ) {
   if (Array.isArray(params.ops) && params.ops.length > 0) {
     if (params.ops.length === 1) {
