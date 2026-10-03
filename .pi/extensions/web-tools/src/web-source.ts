@@ -182,7 +182,7 @@ function searchGitHub(query: string, repo: string | undefined, limit: number): C
   }
 
   try {
-    const proc = spawnSync("gh", args, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+    const proc = spawnSync("gh", args, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 3000 });
     if (proc.status === 0 && proc.stdout) {
       const parsed = JSON.parse(proc.stdout);
       if (Array.isArray(parsed)) {

@@ -252,18 +252,12 @@ if (!process.env.PI_NUSHELL_ENV) {
 
 // Compose argv and spawn pi
 const userArgs = process.argv.slice(2);
-const hasExplicitModels = userArgs.some((arg) =>
-  arg === "--models" || arg.startsWith("--models=")
-);
-const modelsArgs = hasExplicitModels ? [] : ["--models", ""];
-
 const agentsMd = join(pkgRoot, "AGENTS.md");
 const piArgs = [
   "--no-context-files",
   "--no-extensions",
   ...(existsSync(agentsMd) ? ["--system-prompt", agentsMd] : []),
   ...extArgs,
-  ...modelsArgs,
   ...userArgs,
 ];
 

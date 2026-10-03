@@ -3,11 +3,13 @@ import { repairJsonControlChars, PATCHES } from "./patch-pi.js";
 
 describe("patch-pi", () => {
   it("exports PATCHES array with all essential patches", () => {
-    expect(PATCHES.length).toBeGreaterThanOrEqual(5);
+    expect(PATCHES.length).toBeGreaterThanOrEqual(8);
     const rels = PATCHES.map(p => p.rel);
     expect(rels).toContain("dist/modes/interactive/components/assistant-message.js");
     expect(rels).toContain("dist/modes/interactive/components/tool-execution.js");
     expect(rels).toContain("dist/core/tools/edit.js");
+    expect(rels).toContain("dist/core/auth-storage.js");
+    expect(rels).toContain("dist/core/model-resolver.js");
   });
 
   describe("repairJsonControlChars", () => {

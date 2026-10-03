@@ -202,12 +202,82 @@ const EDIT_REPAIR_PATCH = {
     "    const legacy = args;",
 };
 
+const AUTH_STORAGE_OAUTH_CHECK_PATCH = {
+  rel: "dist/core/auth-storage.js",
+  applied: "little-coder patch: verify oauth provider exists in hasAuth",
+  find:
+    "    hasAuth(provider) {\n" +
+    "        if (this.runtimeOverrides.has(provider))\n" +
+    "            return true;\n" +
+    "        if (this.data[provider])\n" +
+    "            return true;",
+  replace:
+    "    hasAuth(provider) {\n" +
+    "        // little-coder patch: verify oauth provider exists in hasAuth\n" +
+    "        if (this.runtimeOverrides.has(provider))\n" +
+    "            return true;\n" +
+    "        const cred = this.data[provider];\n" +
+    "        if (cred) {\n" +
+    '            if (cred.type === "oauth" && !getOAuthProvider(provider))\n' +
+    "                return false;\n" +
+    "            return true;\n" +
+    "        }",
+};
+
+const MODEL_RESOLVER_EMPTY_PATTERN_PATCH = {
+  rel: "dist/core/model-resolver.js",
+  applied: "little-coder patch: reject empty pattern in tryMatchModel",
+  find:
+    "function tryMatchModel(modelPattern, availableModels) {\n" +
+    "    const exactMatch = findExactModelReferenceMatch(modelPattern, availableModels);",
+  replace:
+    "function tryMatchModel(modelPattern, availableModels) {\n" +
+    "    // little-coder patch: reject empty pattern in tryMatchModel\n" +
+    "    if (!modelPattern || modelPattern.trim().length === 0) {\n" +
+    "        return undefined;\n" +
+    "    }\n" +
+    "    const exactMatch = findExactModelReferenceMatch(modelPattern, availableModels);",
+};
+
+const MODEL_RESOLVER_DEFAULT_AUTH_CHECK_PATCH = {
+  rel: "dist/core/model-resolver.js",
+  applied: "little-coder patch: verify auth on settings default model in findInitialModel",
+  find:
+    "    // 3. Try saved default from settings\n" +
+    "    if (defaultProvider && defaultModelId) {\n" +
+    "        const found = modelRegistry.find(defaultProvider, defaultModelId);\n" +
+    "        if (found) {\n" +
+    "            model = found;\n" +
+    "            if (defaultThinkingLevel) {\n" +
+    "                thinkingLevel = defaultThinkingLevel;\n" +
+    "            }\n" +
+    "            return { model, thinkingLevel, fallbackMessage: undefined };\n" +
+    "        }\n" +
+    "    }",
+  replace:
+    "    // 3. Try saved default from settings\n" +
+    "    // little-coder patch: verify auth on settings default model in findInitialModel\n" +
+    "    if (defaultProvider && defaultModelId) {\n" +
+    "        const found = modelRegistry.find(defaultProvider, defaultModelId);\n" +
+    "        if (found && modelRegistry.hasConfiguredAuth(found)) {\n" +
+    "            model = found;\n" +
+    "            if (defaultThinkingLevel) {\n" +
+    "                thinkingLevel = defaultThinkingLevel;\n" +
+    "            }\n" +
+    "            return { model, thinkingLevel, fallbackMessage: undefined };\n" +
+    "        }\n" +
+    "    }",
+};
+
 export const PATCHES = [
   ABORT_MARKER_PATCH,
   BOX_RENDER_PATCH,
   TOOL_EXECUTION_SPACER_PATCH,
   TOOL_OVERRIDE_PATCH,
   EDIT_REPAIR_PATCH,
+  AUTH_STORAGE_OAUTH_CHECK_PATCH,
+  MODEL_RESOLVER_EMPTY_PATTERN_PATCH,
+  MODEL_RESOLVER_DEFAULT_AUTH_CHECK_PATCH,
 ];
 
 export function resolvePiRoot(piRootOverride) {
