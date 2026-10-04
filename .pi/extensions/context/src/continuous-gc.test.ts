@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { runContinuousGC, type ContinuousGCSettings } from "./continuous-gc";
+import { runContinuousGC, scrubMessagesForCompaction, type ContinuousGCSettings } from "./continuous-gc";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 describe("continuous-gc (Sapling pattern)", () => {
@@ -75,4 +75,21 @@ describe("continuous-gc (Sapling pattern)", () => {
 
     expect(stats.prunedToolResults).toBe(0);
   });
+
+  it("scrubMessagesForCompaction aggressively prunes oversized tool results across entire history", () => {
+    const hugeOutput = "B".repeat(5000);
+    const messages: AgentMessage[] = [
+      { role: "user", content: "read file" },
+      { role: "toolResult", toolName: "read", content: [{ type: "text", text: hugeOutput }] } as any,
+      { role: "assistant", content: "summary" },
+    ];
+
+    const { messages: scrubbed, prunedCount, charsSaved } = scrubMessagesForCompaction(messages, 500);
+
+    expect(prunedCount).toBe(1);
+    expect(charsSaved).toBeGreaterThan(4000);
+    const toolMsg: any = scrubbed[1];
+    expect(toolMsg.content[0].text).toContain("omitted for compaction summary (read)");
+  });
 });
+

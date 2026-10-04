@@ -6,14 +6,20 @@
  * Truncates massive tool results with clear tombstones directing surgical reads.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+
 export interface ReadGuardOptions {
   maxLines: number;
   maxChars: number;
+  overflowDir?: string;
 }
 
 export const DEFAULT_READ_GUARD_OPTIONS: ReadGuardOptions = {
   maxLines: 800,
   maxChars: 40_000,
+  overflowDir: "/tmp/little-coder/overflow",
 };
 
 export interface ReadGuardResult {
@@ -21,10 +27,13 @@ export interface ReadGuardResult {
   text: string;
   originalLines: number;
   originalChars: number;
+  spillPath?: string;
 }
 
 /**
  * Enforces reading bounds on tool outputs.
+ * When output exceeds bounds, writes complete payload to a disk overflow artifact
+ * and provides clear instructions for targeted reading, ripgrep search, or sub-agent summarization.
  */
 export function guardReadOutput(
   content: string,
@@ -42,14 +51,33 @@ export function guardReadOutput(
     return { truncated: false, text: content, originalLines: totalLines, originalChars: totalChars };
   }
 
-  // Truncate to first 30 lines + tombstone
+  // Spool full output to disk artifact
+  let spillPath: string | undefined;
+  const overflowDir = options.overflowDir || "/tmp/little-coder/overflow";
+  try {
+    mkdirSync(overflowDir, { recursive: true });
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);
+    spillPath = join(overflowDir, `overflow-${Date.now()}-${hash}.txt`);
+    writeFileSync(spillPath, content, "utf-8");
+  } catch {
+    // Non-blocking fallback if disk write fails
+  }
+
+  // Truncate to first 30 lines + actionable cutoff notice
   const headLines = lines.slice(0, 30);
-  const tombstone = `\n... [Read Guard: Truncated ${totalLines - 30} lines / ${totalChars} chars. File is too large for single read. Use 'outline' or read specific line slices: lines:N-M]`;
+  const spillNotice = spillPath
+    ? `\n\n[Context Cutoff Notice: Output exceeded inline budget (${totalLines} lines / ${Math.round(totalChars / 1024)}KB). Full payload spooled to disk at: ${spillPath}]\n` +
+      `Options:\n` +
+      `1. Search: run \`rg '<pattern>' ${spillPath}\` via \`sh\`\n` +
+      `2. Slice: read targeted lines via \`read\` with offset/limit\n` +
+      `3. Sub-Agent: delegate summarization using an isolated sub-agent or \`sh\` pipeline`
+    : `\n\n... [Read Guard: Truncated ${totalLines - 30} lines / ${totalChars} chars. Use 'outline' or read specific line slices: lines:N-M]`;
 
   return {
     truncated: true,
-    text: headLines.join("\n") + tombstone,
+    text: headLines.join("\n") + spillNotice,
     originalLines: totalLines,
     originalChars: totalChars,
+    spillPath,
   };
 }

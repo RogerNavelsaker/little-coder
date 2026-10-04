@@ -78,12 +78,19 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | **`extra-tools`** | `little-coder-cbcc` | **Completed**: Workspace tools: `repo_map`, `scratchpad` ([ACTIVE_CLIPBOARD]), `session` (herdr-backed), `outline` (lines:N-M). |
 | **`project-context`** | `little-coder-78a9` | **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
 | **`context-watchdog`**| `little-coder-b2be` | Mid-run token compaction watchdog for autonomous Warren runs before context window overflow (#59, #68, #128). |
-| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser` (fenced tool recovery), `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path fix). |
+| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser`, `write-guard`, `read-guard` (with Volition disk overflow), `read-guard-edit`, `quality-monitor` (mtime & compaction aware), `output-machete` (`little-coder-f705`), `governor` (`little-coder-03cd`). |
 | **`turn-cap`** | `little-coder-071c` | Runaway loop guard: safety turn cap + 5-turn finalize warning before budget exhaustion. |
 | **`effort`** | `little-coder-dcee` | Dynamic thinking-budget injection per sub-goal. |
 | **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
 | **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
+| **`orientation`** | `little-coder-af1b` | Session resume orientation block (elapsed sleep time, git HEAD status, external file changes). |
+
+### Multi-Agent Coordination Policy (Minimalist Substrate)
+
+For inter-agent coordination across autonomous workers, `little-coder` adheres strictly to substrate simplicity:
+- **Primary Transport**: Existing tools already in the developer/Warren environment: **`sh`** (Nushell/bash commands), **`seeds`** (`sd` issues/tasks), **`mulch`** (`ml` structured expertise), **`herdr`** (`hrd` background agent IPC & process management), and **`engram`** (persistent memory).
+- **Deferred Complexity**: Third-party multi-agent abstractions, complex intercom/messenger layers (`pi-intercom`, `pi-messenger`, `pi-subagents`), and Dicklesworthstone CLI swarms are **intentionally deferred** until foundational single-tool execution, context compaction resilience, and ingestion stability are proven in Warren containers.
 
 ### Build flow (build-release.ts)
 

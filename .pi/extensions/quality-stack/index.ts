@@ -12,17 +12,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { checkWritePath } from "./src/write-guard.ts";
 import { guardReadOutput } from "./src/read-guard.ts";
+import { applyOutputMachete } from "./src/output-machete.ts";
 import { extractFencedToolCalls, filterKnownTools } from "./src/output-parser.ts";
 import { QualityMonitor } from "./src/quality-monitor.ts";
 import { TurnCapGuard } from "./src/turn-cap.ts";
+import { Governor } from "./src/governor.ts";
 import { ReadGuardEditTracker } from "./src/read-guard-edit.ts";
 
 export default function qualityStackExtension(pi: ExtensionAPI): void {
   const monitor = new QualityMonitor();
   const turnCap = new TurnCapGuard();
+  const governor = new Governor();
   const readGuardEdit = new ReadGuardEditTracker();
 
-  // 1. Turn Start Hook: turn-cap + finalize-warn
+  // 1. Turn Start Hook: turn-cap + finalize-warn + velocity governor
   pi.on("turn_start", async (event: any, ctx: any) => {
     try {
       const turnIndex = event?.turnIndex ?? 0;
@@ -39,6 +42,18 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
         ctx?.ui?.notify?.(evalResult.message, "error");
         if (typeof ctx?.abort === "function") {
           ctx.abort();
+        }
+        return;
+      }
+
+      // Check turn velocity governor (rapid-fire runaway loop detection)
+      const govResult = governor.evaluateTurn();
+      if (govResult.action === "throttle") {
+        ctx?.ui?.notify?.(govResult.message, "warning");
+        if (typeof (pi as any).sendUserMessage === "function") {
+          (pi as any).sendUserMessage(
+            `[GOVERNOR CIRCUIT BREAKER] ${govResult.message}\nTake a deliberate pause before the next action.`,
+          );
         }
       }
     } catch {
@@ -110,14 +125,22 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
         }
       }
 
-      // Read guard: bound massive text payloads
+      // Ingestion bounding: read-guard for reads / output-machete for shell
       if (result && Array.isArray(result.content)) {
         for (const part of result.content) {
           if (part.type === "text" && typeof part.text === "string") {
-            const guarded = guardReadOutput(part.text);
-            if (guarded.truncated) {
-              part.text = guarded.text;
-              ctx?.ui?.notify?.("Output truncated by read-guard", "info");
+            if (toolName === "sh" || toolName === "shell") {
+              const bounded = applyOutputMachete(part.text);
+              if (bounded.truncated) {
+                part.text = bounded.text;
+                ctx?.ui?.notify?.("Shell output truncated by output-machete", "info");
+              }
+            } else {
+              const guarded = guardReadOutput(part.text);
+              if (guarded.truncated) {
+                part.text = guarded.text;
+                ctx?.ui?.notify?.("Output truncated by read-guard", "info");
+              }
             }
           }
         }
@@ -142,10 +165,18 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
         event?.input,
         Boolean(event?.isError),
         activeTools,
+        ctx?.cwd || process.cwd(),
       );
 
       if (incident) {
         ctx?.ui?.notify?.(`[Quality Warning] ${incident.suggestion}`, "warning");
+        // Also inject guidance directly into LLM-visible tool_result content to guide the model
+        if (result && Array.isArray(result.content)) {
+          result.content.push({
+            type: "text",
+            text: `\n[Quality Guidance: ${incident.suggestion}]`,
+          });
+        }
       }
     } catch {}
   });
@@ -184,14 +215,22 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
     } catch {}
   });
 
-  // Reset quality monitor & turn-cap state on new session / before agent start
+  // Reset quality monitor, governor & turn-cap state on new session / before agent start
   pi.on("session_start", async () => {
     monitor.reset();
     turnCap.reset();
+    governor.reset();
     readGuardEdit.reset();
+  });
+
+  // Reset read counts on session compaction so summarized state starts fresh
+  pi.on("session_compact", async () => {
+    monitor.reset();
+    governor.reset();
   });
 
   pi.on("before_agent_start", async () => {
     turnCap.reset();
+    governor.reset();
   });
 }

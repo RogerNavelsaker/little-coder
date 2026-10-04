@@ -118,3 +118,47 @@ export function runContinuousGC(
     },
   };
 }
+
+/**
+ * Pre-scrubs messages before passing them to the compaction summarizer.
+ * Unlike turn-based GC, compaction input can span hundreds of turns or huge outputs.
+ * Caps all tool results to a compact size and enforces an overall char budget
+ * to prevent context_length_exceeded errors when summarizing.
+ */
+export function scrubMessagesForCompaction(
+  messages: AgentMessage[],
+  maxToolResultChars = 1000,
+): { messages: AgentMessage[]; prunedCount: number; charsSaved: number } {
+  let prunedCount = 0;
+  let charsSaved = 0;
+
+  const scrubbed = messages.map((m) => {
+    if (m.role === "toolResult") {
+      const toolMsg = m as any;
+      const content = toolMsg.content;
+      if (Array.isArray(content)) {
+        let changed = false;
+        const newContent = content.map((part: any) => {
+          if (part.type === "text" && typeof part.text === "string" && part.text.length > maxToolResultChars) {
+            const origLen = part.text.length;
+            const toolName = toolMsg.toolName || "tool";
+            const preview = part.text.slice(0, 160).trim();
+            const lines = part.text.split("\n").length;
+            const tombstone = `${preview}\n... [${lines} lines / ${origLen} chars omitted for compaction summary (${toolName})]`;
+            charsSaved += origLen - tombstone.length;
+            changed = true;
+            return { ...part, text: tombstone };
+          }
+          return part;
+        });
+        if (changed) {
+          prunedCount++;
+          return { ...toolMsg, content: newContent };
+        }
+      }
+    }
+    return m;
+  });
+
+  return { messages: scrubbed, prunedCount, charsSaved };
+}

@@ -50,7 +50,7 @@ describe("recap extension", () => {
     expect(result.details.message).toBe("Refactoring auth module");
   });
 
-  it("renders call with italic styling", () => {
+  it("renders call with prefix and italic styling", () => {
     let registeredTool: any = null;
     const mockPi = {
       registerTool(tool: any) {
@@ -62,11 +62,11 @@ describe("recap extension", () => {
     registerRecapTool(mockPi as any);
 
     const text = registeredTool.renderCall({ message: "Phase 2 starting" }, mockTheme);
-    expect(text.text).toContain("recap");
-    expect(text.text).toContain("_italic_\"Phase 2 starting\"_italic_");
+    expect(text.text).toContain("💬");
+    expect(text.text).toContain("_italic_Phase 2 starting_italic_");
   });
 
-  it("renders result with prefix and italic message", () => {
+  it("renders empty result when not expanded to prevent duplicate bubbles", () => {
     let registeredTool: any = null;
     const mockPi = {
       registerTool(tool: any) {
@@ -77,13 +77,20 @@ describe("recap extension", () => {
 
     registerRecapTool(mockPi as any);
 
-    const text = registeredTool.renderResult(
+    const unexpanded = registeredTool.renderResult(
       { details: { message: "Phase 2 complete" } },
       { expanded: false },
       mockTheme
     );
-    expect(text.text).toContain("💬");
-    expect(text.text).toContain("_italic_Phase 2 complete_italic_");
+    expect(unexpanded.text).toBe("");
+
+    const expanded = registeredTool.renderResult(
+      { details: { message: "Phase 2 complete" } },
+      { expanded: true },
+      mockTheme
+    );
+    expect(expanded.text).toContain("💬");
+    expect(expanded.text).toContain("_italic_Phase 2 complete_italic_");
   });
 
   it("before_agent_start hook appends narration discipline to systemPrompt", async () => {

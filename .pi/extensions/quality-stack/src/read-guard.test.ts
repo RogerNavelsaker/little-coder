@@ -9,11 +9,14 @@ describe("read-guard", () => {
     expect(res.text).toBe(text);
   });
 
-  it("truncates reads exceeding maxLines or maxChars and appends slice suggestion", () => {
+  it("truncates reads exceeding bounds, spools to disk overflow, and provides search/sub-agent options", () => {
     const bigContent = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`).join("\n");
     const res = guardReadOutput(bigContent, { maxLines: 50, maxChars: 5000 });
     expect(res.truncated).toBe(true);
-    expect(res.text).toContain("Read Guard: Truncated 70 lines");
-    expect(res.text).toContain("lines:N-M");
+    expect(res.spillPath).toBeDefined();
+    expect(res.text).toContain("Context Cutoff Notice");
+    expect(res.text).toContain("Full payload spooled to disk at:");
+    expect(res.text).toContain("Search: run `rg '<pattern>'");
+    expect(res.text).toContain("Sub-Agent: delegate summarization");
   });
 });

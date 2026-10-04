@@ -80,11 +80,15 @@ export function registerRecapTool(pi: ExtensionAPI): void {
     renderCall(args: any, theme: any) {
       const msg = args?.message || (Array.isArray(args?.ops) ? args.ops.map((o: any) => o?.message).filter(Boolean).join('; ') : '');
       const italicFn = theme.italic ? theme.italic : (t: string) => `\x1b[3m${t}\x1b[23m`;
-      const text = theme.fg('toolTitle', 'recap ') + theme.fg('muted', italicFn(`"${msg}"`));
+      const prefix = theme.fg('accent', '💬 ');
+      const text = prefix + theme.fg('muted', italicFn(msg));
       return new Text(text, 0, 0);
     },
 
     renderResult(result: any, { expanded }: any, theme: any) {
+      if (!expanded) {
+        return new Text('', 0, 0);
+      }
       const msg = result?.details?.message || (result?.content?.[0] as any)?.text || '';
       const italicFn = theme.italic ? theme.italic : (t: string) => `\x1b[3m${t}\x1b[23m`;
       const prefix = theme.fg('accent', '💬 ');
