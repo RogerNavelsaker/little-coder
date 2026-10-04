@@ -35,12 +35,12 @@ describe("basic-tool-grouping", () => {
     expect(getToolRoleIcon("ast_search")).toBe("⌕");
     expect(getToolRoleIcon("ast-search")).toBe("⌕");
 
-    // 🔍 web_search
-    expect(getToolRoleIcon("web_search")).toBe("🔍");
-    // 🌐 web_fetch
-    expect(getToolRoleIcon("web_fetch")).toBe("🌐");
-    // 📑 outline
-    expect(getToolRoleIcon("outline")).toBe("📑");
+    // ⌕ web_search
+    expect(getToolRoleIcon("web_search")).toBe("⌕");
+    // ⇲ web_fetch
+    expect(getToolRoleIcon("web_fetch")).toBe("⇲");
+    // ☷ outline
+    expect(getToolRoleIcon("outline")).toBe("☷");
     // ⚡ session
     expect(getToolRoleIcon("session")).toBe("⚡");
 
@@ -170,20 +170,20 @@ describe("basic-tool-grouping", () => {
       mockTheme,
       {}
     );
-    expect(btRendered.text).toContain("🛠 basic-tools (sh git status)");
+    expect(btRendered.text).toContain("⚙ basic-tools (sh git status)");
   });
 
   it("handles consecutive basic-tools grouping", () => {
     const t1 = tracker.recordToolStart("c_bt1", "basic-tools");
     expect(t1.isGrouped).toBe(false);
-    expect(t1.prefix).toBe("🛠 ");
+    expect(t1.prefix).toBe("⚙ ");
 
     const t2 = tracker.recordToolStart("c_bt2", "basic-tools");
     expect(t2.isGrouped).toBe(true);
-    expect(t2.prefix).toBe("├ 🛠 ");
+    expect(t2.prefix).toBe("├ ⚙ ");
 
     const retroT1 = tracker.getInfo("c_bt1");
     expect(retroT1?.isGrouped).toBe(true);
-    expect(retroT1?.prefix).toBe("┌ 🛠 ");
+    expect(retroT1?.prefix).toBe("┌ ⚙ ");
   });
 });

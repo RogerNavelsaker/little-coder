@@ -34,33 +34,33 @@ export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   sh: '❯',
 
   // Web tools
-  web_search: '🔍',
-  web_fetch: '🌐',
-  web_control: '🎛',
-  web_source: '📄',
+  web_search: '⌕',
+  web_fetch: '⇲',
+  web_control: '⚙',
+  web_source: '⎘',
 
   // Extra / Workspace tools
-  outline: '📑',
-  repo_map: '🗺',
-  scratchpad: '📋',
+  outline: '☷',
+  repo_map: '◱',
+  scratchpad: '⎘',
   session: '⚡',
-  command_history: '📜',
-  project_context: '🏷',
+  command_history: '◷',
+  project_context: '⌸',
 
   // Grove expertise & issue tracking tools
-  grove_read: '🌱',
-  grove_write: '🌱',
-  grove_search: '🔍',
-  grove_promote: '🌿',
+  grove_read: '◫',
+  grove_write: '✎',
+  grove_search: '⌕',
+  grove_promote: '△',
 
   // Document processing tools
-  doc_read: '📖',
-  doc_ocr: '👁',
-  doc_extract: '📑',
+  doc_read: '◫',
+  doc_ocr: '⌕',
+  doc_extract: '⎘',
 
   // Legacy/meta compat
-  'basic-tools': '🛠',
-  basic_tools: '🛠',
+  'basic-tools': '⚙',
+  basic_tools: '⚙',
 };
 
 export function isStructuralTool(toolName: string): boolean {
