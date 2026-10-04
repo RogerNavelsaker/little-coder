@@ -1011,11 +1011,20 @@ export function registerShellTool(pi: ExtensionAPI) {
         if (!expanded || isCompact) {
           const exitCode = details?.exitCode;
           const output = oneLine(details?.stderr || details?.stdout, 140);
-          const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
           const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
-          let text = `${status}${duration}`;
-          if (output) {
-            text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${output}`);
+          let text = '';
+          if (exitCode !== undefined && exitCode !== 0) {
+            // Non-zero exit: show exit code badge
+            text = `${theme.fg('error', `exit ${exitCode}`)}${duration}`;
+            if (output) {
+              text += theme.fg('warning', ` ${output}`);
+            }
+          } else {
+            // Clean exit 0: suppress exit status code in collapsed view, show runtime + one-line summary
+            text = duration ? duration.trimStart() : '';
+            if (output) {
+              text = text ? `${text} ${theme.fg('muted', output)}` : theme.fg('muted', output);
+            }
           }
           return new Text(text, 0, 0);
         }

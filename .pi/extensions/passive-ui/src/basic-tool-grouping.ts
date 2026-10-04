@@ -23,8 +23,8 @@ export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   ls: '◫',
   edit: '✎',
   write: '✎',
-  shell: '▸',
-  sh: '▸',
+  shell: '❯',
+  sh: '❯',
   ast_search: '⌕',
   'ast-search': '⌕',
   revert_file: '↩',
@@ -246,19 +246,52 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
         }
 
         const glyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
-        let label = toolName;
-        if ((toolName === 'basic-tools' || toolName === 'basic_tools') && Array.isArray(args?.ops) && args.ops.length > 0) {
-          const firstOp = args.ops[0];
-          const opType = firstOp?.type ?? (firstOp?.command ? 'sh' : (firstOp?.edits ? 'edit' : (firstOp?.content ? 'write' : 'op')));
-          if (args.ops.length === 1) {
-            const opTarget = firstOp?.command ? ` ${firstOp.command.split('\n')[0].slice(0, 40)}` : (firstOp?.path ? ` ${firstOp.path}` : '');
-            label = `${toolName} (${opType}${opTarget})`;
-          } else {
-            label = `${toolName} (${args.ops.length} ops: ${opType}...)`;
+        let styled: string;
+
+        if (toolName === 'sh' || toolName === 'shell') {
+          const cmd = args?.command ?? (Array.isArray(args?.commands) ? args.commands[0] : '');
+          const firstLineCmd = (cmd || '(empty)').split('\n')[0].trim();
+          // Color of ❯ depends on exit status (green for 0, red for error, muted/accent while running)
+          const isError = context?.isError;
+          const isFinished = context?.isPartial === false || (context?.result !== undefined);
+          const iconColor = isFinished ? (isError ? 'error' : 'success') : 'accent';
+          styled = `${glyph ? theme.fg('dim', glyph) : ''}${theme.fg(iconColor, '❯')} ${theme.fg('toolTitle', firstLineCmd)}`;
+        } else if (toolName === 'read') {
+          const files = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path, offset: args.offset, limit: args.limit }] : []);
+          const first = files[0];
+          const p = first?.path ?? '';
+          const from = first?.offset ?? 1;
+          const to = first?.limit ? `${from}-${Number(from) + Number(first.limit) - 1}` : `${from}..`;
+          const range = files.length === 1 ? ` [${to}]` : ` [${files.length} files]`;
+          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'read')} (${theme.fg('accent', p)})${theme.fg('dim', range)}`;
+        } else if (toolName === 'edit') {
+          const edits = args?.edits ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
+          const first = edits[0];
+          const p = first?.path ?? '';
+          const count = edits.length > 1 ? ` [${edits.length} edits]` : '';
+          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'edit')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+        } else if (toolName === 'write') {
+          const writes = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
+          const first = writes[0];
+          const p = first?.path ?? '';
+          const count = writes.length > 1 ? ` [${writes.length} files]` : '';
+          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'write')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+        } else {
+          let label = toolName;
+          if ((toolName === 'basic-tools' || toolName === 'basic_tools') && Array.isArray(args?.ops) && args.ops.length > 0) {
+            const firstOp = args.ops[0];
+            const opType = firstOp?.type ?? (firstOp?.command ? 'sh' : (firstOp?.edits ? 'edit' : (firstOp?.content ? 'write' : 'op')));
+            if (args.ops.length === 1) {
+              const opTarget = firstOp?.command ? ` ${firstOp.command.split('\n')[0].slice(0, 40)}` : (firstOp?.path ? ` ${firstOp.path}` : '');
+              label = `${toolName} (${opType}${opTarget})`;
+            } else {
+              label = `${toolName} (${args.ops.length} ops: ${opType}...)`;
+            }
           }
+          const titleText = `${glyph}${icon} ${label}`;
+          styled = theme.fg('toolTitle', titleText);
         }
-        const titleText = `${glyph}${icon} ${label}`;
-        const styled = theme.fg('toolTitle', titleText);
+
         return new Text(styled, 0, 0);
       },
     });

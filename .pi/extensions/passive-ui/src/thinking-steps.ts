@@ -85,7 +85,7 @@ export function patchAssistantMessageComponent(): number {
 
         if (this.hideThinkingBlock) {
           const label = formatThinkingStepsLabel(steps.length, this.hiddenThinkingLabel || 'Thinking');
-          this.contentContainer.addChild(new Text(formatThinkingText(label), 1, 0));
+          this.contentContainer.addChild(new Text(formatThinkingText(`💭 ${label}`), 1, 0));
           if (hasVisibleContentAfter) {
             this.contentContainer.addChild(new Spacer(1));
           }
@@ -93,7 +93,7 @@ export function patchAssistantMessageComponent(): number {
           // Render thinking steps
           for (let sIdx = 0; sIdx < steps.length; sIdx++) {
             const stepText = steps[sIdx];
-            const prefix = steps.length > 1 ? `✦ Step ${sIdx + 1}: ` : '';
+            const prefix = steps.length > 1 ? `💭 Step ${sIdx + 1}: ` : '💭 ';
             this.contentContainer.addChild(
               new Markdown(prefix + stepText, 1, 0, this.markdownTheme, {
                 color: (text: string) => formatThinkingText(text),

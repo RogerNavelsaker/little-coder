@@ -27,9 +27,9 @@ describe("basic-tool-grouping", () => {
     expect(getToolRoleIcon("edit")).toBe("✎");
     expect(getToolRoleIcon("write")).toBe("✎");
 
-    // ▸ shell/sh
-    expect(getToolRoleIcon("shell")).toBe("▸");
-    expect(getToolRoleIcon("sh")).toBe("▸");
+    // ❯ shell/sh
+    expect(getToolRoleIcon("shell")).toBe("❯");
+    expect(getToolRoleIcon("sh")).toBe("❯");
 
     // ⌕ ast_search/ast-search
     expect(getToolRoleIcon("ast_search")).toBe("⌕");
@@ -93,7 +93,7 @@ describe("basic-tool-grouping", () => {
   it("formats headers with correct tree glyphs", () => {
     expect(tracker.formatHeader("read", "read file.ts", false, false)).toBe("◫ read file.ts");
     expect(tracker.formatHeader("edit", "edit file.ts", true, false)).toBe("├ ✎ edit file.ts");
-    expect(tracker.formatHeader("shell", "sh cargo test", true, true)).toBe("└ ▸ sh cargo test");
+    expect(tracker.formatHeader("shell", "sh cargo test", true, true)).toBe("└ ❯ sh cargo test");
   });
 
   it("executes executeBasicToolGroupingOp single and ops[] batch", async () => {
@@ -143,8 +143,14 @@ describe("basic-tool-grouping", () => {
     expect(typeof readOverride.renderCall).toBe("function");
 
     const mockTheme = { fg: (_c: string, t: string) => t };
-    const rendered = readOverride.renderCall({}, mockTheme, {});
-    expect(rendered.text).toContain("◫ read");
+    const rendered = readOverride.renderCall({ path: "src/foo.ts", offset: 1, limit: 10 }, mockTheme, {});
+    expect(rendered.text).toContain("◫ read (src/foo.ts) [1-10]");
+
+    // Check sh override with ❯
+    const shOverride = getToolDefinitionOverride("sh");
+    expect(shOverride).toBeDefined();
+    const shRendered = shOverride.renderCall({ command: "git status" }, mockTheme, { isError: false });
+    expect(shRendered.text).toContain("❯ git status");
 
     // Check basic-tools override
     const btOverride = getToolDefinitionOverride("basic-tools");

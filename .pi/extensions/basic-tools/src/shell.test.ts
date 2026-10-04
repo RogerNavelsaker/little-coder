@@ -333,12 +333,13 @@ describe("shell tool", () => {
       expect(text).toContain("Running");
     });
 
-    test("collapsed success: text contains exit 0", async () => {
+    test("collapsed success: text contains duration and output without redundant exit 0 code", async () => {
       const { result, tool } = await invokeTool(registerShellTool, {
         commands: ["echo ok"],
       });
       const text = tool.renderResult?.(result, { expanded: false, isPartial: false }, mockTheme, {})?.text ?? "";
-      expect(text).toContain("exit 0");
+      expect(text).toContain("ok");
+      expect(text).not.toContain("exit 0");
     });
 
     test("collapsed failure: text contains exit N and stderr summary", async () => {
@@ -349,13 +350,12 @@ describe("shell tool", () => {
       expect(text).toContain("exit 42");
     });
 
-    test("collapsed: text contains command preview (via formatShellCompact)", async () => {
+    test("collapsed: text contains output preview without redundant exit 0", async () => {
       const { result, tool } = await invokeTool(registerShellTool, {
         commands: ["echo hello-world"],
       });
       const text = tool.renderResult?.(result, { expanded: false, isPartial: false }, mockTheme, {})?.text ?? "";
-      // renderResult shows status + duration + output (not the command itself)
-      expect(text).toContain("exit 0");
+      expect(text).toContain("hello-world");
     });
 
     test("expanded failure: text contains stderr", async () => {
@@ -402,7 +402,6 @@ describe("shell tool", () => {
       });
       const text = tool.renderResult?.(result, { expanded: true, isPartial: false }, mockTheme, {})?.text ?? "";
       expect(text).not.toContain("❯");
-      expect(text).toContain("exit 0");
       expect(text).toContain("compact-test");
     });
   });
