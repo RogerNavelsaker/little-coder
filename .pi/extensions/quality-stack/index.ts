@@ -124,11 +124,24 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
       }
 
       // Quality monitor: track failures and read loops
+      const activeTools = typeof (pi as any).getActiveTools === "function"
+        ? new Set<string>((pi as any).getActiveTools())
+        : new Set<string>([
+            "basic-tools", "sh", "shell", "read", "edit", "write", "grep", "find", "ls", "ast_search",
+            "outline", "repo_map", "scratchpad", "session", "schedule", "goal", "grove_search",
+            "passive_ui", "context_watchdog", "revert_file",
+          ]);
+      // Always allow basic-tools and grove tools
+      activeTools.add("basic-tools");
+      activeTools.add("sh");
+      activeTools.add("shell");
+      activeTools.add("grove_search");
+
       const incident = monitor.recordToolExecution(
         toolName,
         event?.input,
         Boolean(event?.isError),
-        new Set(["read", "edit", "write", "sh", "outline", "repo_map", "scratchpad", "session", "schedule", "goal"]),
+        activeTools,
       );
 
       if (incident) {

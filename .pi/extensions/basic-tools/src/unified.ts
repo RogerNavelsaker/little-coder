@@ -18,9 +18,10 @@ import { executeEditOp } from './edit.js';
 import { executeWriteOp } from './write.js';
 import { executeFindOp } from './find.js';
 import { executeLsOp } from './ls.js';
-import { executeShellOp } from './shell.js';
+import { executeShellOp, stripAnsi } from './shell.js';
 import { executeAstSearchOp } from './ast-search.js';
 import { error } from './output.js';
+import { formatStarshipHeader, formatStarshipPrompt } from './display.js';
 
 /**
  * Dispatch a single op to its handler.
@@ -128,23 +129,75 @@ export function registerUnifiedTool(pi: ExtensionAPI): void {
       }
 
       const details = (result as any)?.details ?? {};
-      const content = (result as any)?.content ?? [];
 
-      if (content.length > 0) {
-        const text = content.map((c: any) => c.text).join('\n');
-        return new Text(text) as any;
+      // Shell execution inside basic-tools: render Starship header and clean prompt/output instead of leaking raw TOON
+      if (details.command !== undefined && (details.stdout !== undefined || details.stderr !== undefined || details.exitCode !== undefined)) {
+        const exitCode = details.exitCode ?? ((result as any)?.isError ? 1 : 0);
+        const durationMs = details.durationMs ?? 0;
+        const stdout = details.stdout ?? '';
+        const stderr = details.stderr ?? '';
+        const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode}`);
+        const dur = typeof durationMs === 'number' ? theme.fg('dim', ` ${durationMs}ms`) : '';
+
+        if (!expanded) {
+          const firstLine = (stderr || stdout).split('\n').find((l: string) => l.trim().length > 0)?.trim() ?? '';
+          const preview = firstLine.length > 100 ? `${firstLine.slice(0, 99)}…` : firstLine;
+          let text = `${status}${dur}`;
+          if (preview) {
+            text += theme.fg(exitCode === 0 ? 'muted' : 'warning', ` ${preview}`);
+          }
+          return new Text(text, 0, 0) as any;
+        }
+
+        const width = Math.max(20, (theme as any)?.terminalWidth ?? (_context as any)?.terminalWidth ?? (process.stdout?.columns || 80));
+        const header = formatStarshipHeader({
+          cwd: details.cwd ?? process.cwd(),
+          exitCode,
+          durationMs,
+          width,
+          theme,
+        });
+        const prompt = formatStarshipPrompt(details.command || '', theme);
+        let text = `${header}\n${prompt}`;
+        if (stdout) {
+          const cleanOut = stdout.replace(/\n+$/, '');
+          if (cleanOut) text += `\n${cleanOut}`;
+        }
+        if (stderr) {
+          const cleanErr = stderr.replace(/\n+$/, '');
+          if (cleanErr) text += `\n${theme.fg('warning', cleanErr)}`;
+        }
+        return new Text(text, 0, 0) as any;
+      }
+
+      // Multi-file or read summary
+      if (details.totalFiles !== undefined) {
+        const count = details.totalFiles;
+        if (expanded && Array.isArray(details.files)) {
+          const lines = details.files.map((f: any) => {
+            const name = (f?.path ?? '').split('/').pop() ?? f?.path ?? '?';
+            const trunc = f?.truncated ? ' (truncated)' : '';
+            return `${theme.fg('accent', name)} — ${f?.returnedLines ?? f?.bytesWritten ?? 0} lines${trunc}`;
+          });
+          return new Text(lines.join('\n'), 1, 0) as any;
+        }
+        return new Text(`${count} file${count !== 1 ? 's' : ''}`, 0, 0) as any;
       }
 
       const summaryParts: string[] = [];
-      if (details.totalFiles) summaryParts.push(`${details.totalFiles} file(s)`);
-      if (details.totalMatches) summaryParts.push(`${details.totalMatches} match(es)`);
-      if (details.linesChanged) summaryParts.push(`${details.linesChanged} line(s) changed`);
+      if (details.totalMatches !== undefined) summaryParts.push(`${details.totalMatches} match(es)`);
+      if (details.linesChanged !== undefined) summaryParts.push(`${details.linesChanged} line(s) changed`);
 
       if (summaryParts.length > 0) {
         return new Text(summaryParts.join(', ')) as any;
       }
 
-      return new Text('OK') as any;
+      if ((result as any)?.isError) {
+        const errText = (result as any)?.content?.[0]?.text ?? 'Command failed';
+        return new Text(theme.fg('error', errText), 0, 0) as any;
+      }
+
+      return new Text(theme.fg('success', '✓ Done'), 0, 0) as any;
     },
   });
 }
