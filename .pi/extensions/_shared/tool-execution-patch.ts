@@ -60,6 +60,19 @@ export function patchToolExecutionComponent(): void {
     return lines;
   };
 
+  const origHasRendererDefinition = proto.hasRendererDefinition;
+  proto.hasRendererDefinition = function () {
+    if (globalThis.__littleCoderToolOverrides?.has(this.toolName)) return true;
+    return origHasRendererDefinition ? origHasRendererDefinition.call(this) : false;
+  };
+
+  const origGetRenderContext = proto.getRenderContext;
+  proto.getRenderContext = function (lastComponent: any) {
+    const ctx = origGetRenderContext.call(this, lastComponent);
+    ctx.component = this;
+    return ctx;
+  };
+
   const origGetCallRenderer = proto.getCallRenderer;
   proto.getCallRenderer = function () {
     const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);

@@ -43,6 +43,7 @@ export interface GroupedToolInfo {
   toolCallId: string;
   toolName: string;
   isGrouped: boolean;
+  isFirst: boolean;
   isLast: boolean;
   prefix: string;
 }
@@ -50,11 +51,13 @@ export interface GroupedToolInfo {
 export class ToolGroupingTracker {
   private currentTurnTools: string[] = [];
   private consecutiveStructuralCount = 0;
+  private firstToolIdInGroup: string | null = null;
   private toolCallMap = new Map<string, GroupedToolInfo>();
 
   reset(): void {
     this.currentTurnTools = [];
     this.consecutiveStructuralCount = 0;
+    this.firstToolIdInGroup = null;
     this.toolCallMap.clear();
   }
 
@@ -64,11 +67,28 @@ export class ToolGroupingTracker {
 
     if (structural) {
       this.consecutiveStructuralCount++;
+      if (this.consecutiveStructuralCount === 1) {
+        this.firstToolIdInGroup = toolCallId;
+      }
     } else {
       this.consecutiveStructuralCount = 0;
+      this.firstToolIdInGroup = null;
     }
 
     const isGrouped = this.consecutiveStructuralCount > 1;
+    const isFirst = this.consecutiveStructuralCount === 1;
+
+    // When 2nd structural tool arrives, retroactively group the 1st tool
+    if (isGrouped && this.firstToolIdInGroup) {
+      const firstInfo = this.toolCallMap.get(this.firstToolIdInGroup);
+      if (firstInfo && !firstInfo.isGrouped) {
+        firstInfo.isGrouped = true;
+        firstInfo.isFirst = true;
+        const firstIcon = getToolRoleIcon(firstInfo.toolName);
+        firstInfo.prefix = `┌ ${firstIcon} `;
+      }
+    }
+
     const icon = getToolRoleIcon(toolName);
     const prefix = isGrouped ? `├ ${icon} ` : `${icon} `;
 
@@ -76,6 +96,7 @@ export class ToolGroupingTracker {
       toolCallId,
       toolName,
       isGrouped,
+      isFirst,
       isLast: false,
       prefix,
     };
@@ -100,12 +121,12 @@ export class ToolGroupingTracker {
     return this.toolCallMap.get(toolCallId);
   }
 
-  formatHeader(toolName: string, callText: string, isGrouped: boolean, isLast: boolean): string {
+  formatHeader(toolName: string, callText: string, isGrouped: boolean, isLast: boolean, isFirst = false): string {
     const icon = getToolRoleIcon(toolName);
     if (!isGrouped) {
       return `${icon} ${callText}`;
     }
-    const glyph = isLast ? '└' : '├';
+    const glyph = isFirst ? '┌' : (isLast ? '└' : '├');
     return `${glyph} ${icon} ${callText}`;
   }
 }
@@ -117,6 +138,7 @@ export const basicToolGroupingItemSchema = Type.Object({
   callText: Type.Optional(Type.String({ description: 'Call text preview' })),
   isGrouped: Type.Optional(Type.Boolean({ description: 'Whether tool is part of a consecutive group' })),
   isLast: Type.Optional(Type.Boolean({ description: 'Whether tool is last in group' })),
+  isFirst: Type.Optional(Type.Boolean({ description: 'Whether tool is first in group' })),
 });
 
 export const basicToolGroupingSchema = Type.Object({
@@ -125,6 +147,7 @@ export const basicToolGroupingSchema = Type.Object({
   callText: Type.Optional(Type.String({ description: 'Call text preview' })),
   isGrouped: Type.Optional(Type.Boolean({ description: 'Whether tool is part of a consecutive group' })),
   isLast: Type.Optional(Type.Boolean({ description: 'Whether tool is last in group' })),
+  isFirst: Type.Optional(Type.Boolean({ description: 'Whether tool is first in group' })),
 });
 
 export async function executeBasicToolGroupingOp(
@@ -155,8 +178,9 @@ export async function executeBasicToolGroupingOp(
   const callText = params.callText ?? toolName;
   const isGrouped = Boolean(params.isGrouped);
   const isLast = Boolean(params.isLast);
+  const isFirst = Boolean(params.isFirst);
 
-  const formatted = defaultTracker.formatHeader(toolName, callText, isGrouped, isLast);
+  const formatted = defaultTracker.formatHeader(toolName, callText, isGrouped, isLast, isFirst);
   const icon = getToolRoleIcon(toolName);
   const isStructural = isStructuralTool(toolName);
 
@@ -168,6 +192,7 @@ export async function executeBasicToolGroupingOp(
       icon,
       isStructural,
       isGrouped,
+      isFirst,
       isLast,
       formatted,
     },
@@ -202,16 +227,23 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
       renderCall(args: any, theme: any, context: any) {
         const info = context?.toolCallId ? tracker.getInfo(context.toolCallId) : undefined;
         const isGrouped = info?.isGrouped ?? false;
+        const isFirst = info?.isFirst ?? false;
         const isLast = info?.isLast ?? false;
         const icon = getToolRoleIcon(toolName);
 
-        // When grouped, set isGrouped on component to suppress leading blank spacer line via tool-execution-patch
+        // When grouped (and not the first tool), suppress leading blank spacer line
+        const shouldSuppressSpacer = isGrouped && !isFirst;
+
         if (context) {
-          context.isGrouped = isGrouped;
-          context.suppressLeadingSpacer = isGrouped;
+          context.isGrouped = shouldSuppressSpacer;
+          context.suppressLeadingSpacer = shouldSuppressSpacer;
+          if (context.component) {
+            context.component.isGrouped = shouldSuppressSpacer;
+            context.component.suppressLeadingSpacer = shouldSuppressSpacer;
+          }
         }
 
-        const glyph = isGrouped ? (isLast ? '└ ' : '├ ') : '';
+        const glyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
         const titleText = `${glyph}${icon} ${toolName}`;
         const styled = theme.fg('toolTitle', titleText);
         return new Text(styled, 0, 0);

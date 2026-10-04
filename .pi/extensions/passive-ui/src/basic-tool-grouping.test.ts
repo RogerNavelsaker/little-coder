@@ -51,12 +51,19 @@ describe("basic-tool-grouping", () => {
     // 1st tool: read (standalone initially)
     const t1 = tracker.recordToolStart("call_1", "read");
     expect(t1.isGrouped).toBe(false);
+    expect(t1.isFirst).toBe(true);
     expect(t1.prefix).toBe("◫ ");
 
-    // 2nd tool: grep (consecutive structural -> grouped with ├)
+    // 2nd tool: grep (consecutive structural -> grouped with ├, and retrofits 1st tool to ┌)
     const t2 = tracker.recordToolStart("call_2", "grep");
     expect(t2.isGrouped).toBe(true);
     expect(t2.prefix).toBe("├ ◫ ");
+
+    // Verify retro-fitted 1st tool
+    const retroT1 = tracker.getInfo("call_1");
+    expect(retroT1?.isGrouped).toBe(true);
+    expect(retroT1?.isFirst).toBe(true);
+    expect(retroT1?.prefix).toBe("┌ ◫ ");
 
     // 3rd tool: edit (consecutive structural -> grouped with ├)
     const t3 = tracker.recordToolStart("call_3", "edit");
