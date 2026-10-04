@@ -170,6 +170,7 @@ if (isDev) {
     }
     let dirty = false;
     if (s.quietStartup !== true) { s.quietStartup = true; dirty = true; }
+    if ("enabledModels" in s) { delete s.enabledModels; dirty = true; }
     let piVer: string | undefined;
     try { piVer = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"))?.version; } catch { /* ok */ }
     if (piVer && s.lastChangelogVersion !== piVer) { s.lastChangelogVersion = piVer; dirty = true; }
