@@ -29,6 +29,8 @@ export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   'ast-search': '⌕',
   revert_file: '↩',
   revert: '↩',
+  'basic-tools': '🛠',
+  basic_tools: '🛠',
 };
 
 export function isStructuralTool(toolName: string): boolean {
@@ -244,7 +246,18 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
         }
 
         const glyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
-        const titleText = `${glyph}${icon} ${toolName}`;
+        let label = toolName;
+        if ((toolName === 'basic-tools' || toolName === 'basic_tools') && Array.isArray(args?.ops) && args.ops.length > 0) {
+          const firstOp = args.ops[0];
+          const opType = firstOp?.type ?? (firstOp?.command ? 'sh' : (firstOp?.edits ? 'edit' : (firstOp?.content ? 'write' : 'op')));
+          if (args.ops.length === 1) {
+            const opTarget = firstOp?.command ? ` ${firstOp.command.split('\n')[0].slice(0, 40)}` : (firstOp?.path ? ` ${firstOp.path}` : '');
+            label = `${toolName} (${opType}${opTarget})`;
+          } else {
+            label = `${toolName} (${args.ops.length} ops: ${opType}...)`;
+          }
+        }
+        const titleText = `${glyph}${icon} ${label}`;
         const styled = theme.fg('toolTitle', titleText);
         return new Text(styled, 0, 0);
       },

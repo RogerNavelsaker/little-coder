@@ -145,5 +145,30 @@ describe("basic-tool-grouping", () => {
     const mockTheme = { fg: (_c: string, t: string) => t };
     const rendered = readOverride.renderCall({}, mockTheme, {});
     expect(rendered.text).toContain("◫ read");
+
+    // Check basic-tools override
+    const btOverride = getToolDefinitionOverride("basic-tools");
+    expect(btOverride).toBeDefined();
+    expect(typeof btOverride.renderCall).toBe("function");
+    const btRendered = btOverride.renderCall(
+      { ops: [{ type: "sh", command: "git status" }] },
+      mockTheme,
+      {}
+    );
+    expect(btRendered.text).toContain("🛠 basic-tools (sh git status)");
+  });
+
+  it("handles consecutive basic-tools grouping", () => {
+    const t1 = tracker.recordToolStart("c_bt1", "basic-tools");
+    expect(t1.isGrouped).toBe(false);
+    expect(t1.prefix).toBe("🛠 ");
+
+    const t2 = tracker.recordToolStart("c_bt2", "basic-tools");
+    expect(t2.isGrouped).toBe(true);
+    expect(t2.prefix).toBe("├ 🛠 ");
+
+    const retroT1 = tracker.getInfo("c_bt1");
+    expect(retroT1?.isGrouped).toBe(true);
+    expect(retroT1?.prefix).toBe("┌ 🛠 ");
   });
 });
