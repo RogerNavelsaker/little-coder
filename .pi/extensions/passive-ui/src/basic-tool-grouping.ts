@@ -17,18 +17,48 @@ import { Text } from '@earendil-works/pi-tui';
 import { registerToolDefinitionOverride } from '../../_shared/tool-execution-patch.js';
 
 export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
+  // Precision filesystem / editor tools
   read: '◫',
   grep: '◫',
   find: '◫',
   ls: '◫',
   edit: '✎',
   write: '✎',
-  shell: '❯',
-  sh: '❯',
-  ast_search: '⌕',
-  'ast-search': '⌕',
   revert_file: '↩',
   revert: '↩',
+  ast_search: '⌕',
+  'ast-search': '⌕',
+
+  // Shell execution
+  shell: '❯',
+  sh: '❯',
+
+  // Web tools
+  web_search: '🔍',
+  web_fetch: '🌐',
+  web_control: '🎛',
+  web_source: '📄',
+
+  // Extra / Workspace tools
+  outline: '📑',
+  repo_map: '🗺',
+  scratchpad: '📋',
+  session: '⚡',
+  command_history: '📜',
+  project_context: '🏷',
+
+  // Grove expertise & issue tracking tools
+  grove_read: '🌱',
+  grove_write: '🌱',
+  grove_search: '🔍',
+  grove_promote: '🌿',
+
+  // Document processing tools
+  doc_read: '📖',
+  doc_ocr: '👁',
+  doc_extract: '📑',
+
+  // Legacy/meta compat
   'basic-tools': '🛠',
   basic_tools: '🛠',
 };
@@ -278,6 +308,22 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
           const p = first?.path ?? '';
           const count = writes.length > 1 ? ` [${writes.length} files]` : '';
           styled = `${glyph}${icon} ${theme.fg('toolTitle', 'write')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+        } else if (toolName === 'web_search') {
+          const q = args?.query ?? (Array.isArray(args?.ops) ? args.ops[0]?.query : '');
+          const queryText = q ? ` ("${q.split('\n')[0].slice(0, 50)}")` : '';
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'web_search')}${theme.fg('accent', queryText)}`;
+        } else if (toolName === 'web_fetch') {
+          const u = args?.url ?? (Array.isArray(args?.urls) ? args.urls[0] : (Array.isArray(args?.ops) ? args.ops[0]?.url : ''));
+          const urlText = u ? ` (${u.split('\n')[0].slice(0, 60)})` : '';
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'web_fetch')}${theme.fg('accent', urlText)}`;
+        } else if (toolName === 'outline') {
+          const p = args?.path ?? (Array.isArray(args?.ops) ? args.ops[0]?.path : '');
+          const pathText = p ? ` (${p.split('/').pop() ?? p})` : '';
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'outline')}${theme.fg('accent', pathText)}`;
+        } else if (toolName === 'session') {
+          const act = args?.action ?? (args?.command ? 'exec' : 'list');
+          const id = args?.id ? ` [${args.id}]` : '';
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'session')} ${theme.fg('accent', `${act}${id}`)}`;
         } else {
           let label = toolName;
           if ((toolName === 'basic-tools' || toolName === 'basic_tools') && Array.isArray(args?.ops) && args.ops.length > 0) {

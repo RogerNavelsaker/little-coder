@@ -35,15 +35,24 @@ describe("basic-tool-grouping", () => {
     expect(getToolRoleIcon("ast_search")).toBe("⌕");
     expect(getToolRoleIcon("ast-search")).toBe("⌕");
 
-    // ↩ revert_file/revert
-    expect(getToolRoleIcon("revert_file")).toBe("↩");
-    expect(getToolRoleIcon("revert")).toBe("↩");
+    // 🔍 web_search
+    expect(getToolRoleIcon("web_search")).toBe("🔍");
+    // 🌐 web_fetch
+    expect(getToolRoleIcon("web_fetch")).toBe("🌐");
+    // 📑 outline
+    expect(getToolRoleIcon("outline")).toBe("📑");
+    // ⚡ session
+    expect(getToolRoleIcon("session")).toBe("⚡");
 
     expect(isStructuralTool("read")).toBe(true);
     expect(isStructuralTool("edit")).toBe(true);
     expect(isStructuralTool("shell")).toBe(true);
     expect(isStructuralTool("ast_search")).toBe(true);
     expect(isStructuralTool("revert_file")).toBe(true);
+    expect(isStructuralTool("web_search")).toBe(true);
+    expect(isStructuralTool("web_fetch")).toBe(true);
+    expect(isStructuralTool("outline")).toBe(true);
+    expect(isStructuralTool("session")).toBe(true);
     expect(isStructuralTool("unknown_tool")).toBe(false);
   });
 
