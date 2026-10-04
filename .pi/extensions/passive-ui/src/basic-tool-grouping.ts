@@ -245,7 +245,9 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
           }
         }
 
-        const glyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
+        // Tree glyphs in bold white: '\x1b[1m\x1b[37m'
+        const rawGlyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
+        const glyph = rawGlyph ? theme.bold(theme.fg('white', rawGlyph)) : '';
         let styled: string;
 
         if (toolName === 'sh' || toolName === 'shell') {
@@ -255,7 +257,7 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
           const isError = context?.isError;
           const isFinished = context?.isPartial === false || (context?.result !== undefined);
           const iconColor = isFinished ? (isError ? 'error' : 'success') : 'accent';
-          styled = `${glyph ? theme.fg('dim', glyph) : ''}${theme.fg(iconColor, '❯')} ${theme.fg('toolTitle', firstLineCmd)}`;
+          styled = `${glyph}${theme.fg(iconColor, '❯')} ${theme.fg('toolTitle', firstLineCmd)}`;
         } else if (toolName === 'read') {
           const files = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path, offset: args.offset, limit: args.limit }] : []);
           const first = files[0];
@@ -263,19 +265,19 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
           const from = first?.offset ?? 1;
           const to = first?.limit ? `${from}-${Number(from) + Number(first.limit) - 1}` : `${from}..`;
           const range = files.length === 1 ? ` [${to}]` : ` [${files.length} files]`;
-          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'read')} (${theme.fg('accent', p)})${theme.fg('dim', range)}`;
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'read')} (${theme.fg('accent', p)})${theme.fg('dim', range)}`;
         } else if (toolName === 'edit') {
           const edits = args?.edits ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
           const first = edits[0];
           const p = first?.path ?? '';
           const count = edits.length > 1 ? ` [${edits.length} edits]` : '';
-          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'edit')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'edit')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
         } else if (toolName === 'write') {
           const writes = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
           const first = writes[0];
           const p = first?.path ?? '';
           const count = writes.length > 1 ? ` [${writes.length} files]` : '';
-          styled = `${glyph ? theme.fg('dim', glyph) : ''}${icon} ${theme.fg('toolTitle', 'write')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'write')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
         } else {
           let label = toolName;
           if ((toolName === 'basic-tools' || toolName === 'basic_tools') && Array.isArray(args?.ops) && args.ops.length > 0) {
@@ -288,8 +290,8 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
               label = `${toolName} (${args.ops.length} ops: ${opType}...)`;
             }
           }
-          const titleText = `${glyph}${icon} ${label}`;
-          styled = theme.fg('toolTitle', titleText);
+          const titleText = `${icon} ${label}`;
+          styled = `${glyph}${theme.fg('toolTitle', titleText)}`;
         }
 
         return new Text(styled, 0, 0);

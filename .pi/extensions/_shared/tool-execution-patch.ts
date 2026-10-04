@@ -51,12 +51,29 @@ export function patchToolExecutionComponent(): void {
   const origRender = proto.render;
   proto.render = function (width: number) {
     if (this.hideComponent) return [];
-    const lines = origRender.call(this, width);
+    let lines = origRender.call(this, width);
     if (this.suppressLeadingSpacer || this.isGrouped) {
       if (lines.length > 0 && lines[0] === '') {
         lines.shift();
       }
     }
+
+    // 1-Line Compact consolidation: if not expanded and lines consist of [callHeader, '', resultSummary]
+    // or [callHeader, resultSummary], inline them into a single line like: `├ ❯ <cmd>  (323ms: summary)`
+    if (!this.expanded && lines.length >= 2 && lines.length <= 4) {
+      const nonBlank = lines.filter((l: string) => l.trim().length > 0);
+      if (nonBlank.length === 2) {
+        const line1 = nonBlank[0];
+        const line2 = nonBlank[1].trim();
+        // Only compact if combined line comfortably fits the terminal width
+        const plain1 = line1.replace(/\x1b\[[0-9;]*m/g, '');
+        const plain2 = line2.replace(/\x1b\[[0-9;]*m/g, '');
+        if (plain1.length + plain2.length + 3 <= width) {
+          lines = [`${line1}  \x1b[2m(${line2})\x1b[0m`];
+        }
+      }
+    }
+
     return lines;
   };
 
