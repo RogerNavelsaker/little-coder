@@ -600,3 +600,44 @@ export function batContextBold(filePath: string, matchLines: number[], contextLi
   });
   return bolded.join('\n').trimEnd();
 }
+
+// ---- Shell Command Syntax Highlighting ----
+
+const commandHighlightCache = new Map<string, string>();
+const MAX_HIGHLIGHT_CACHE = 200;
+
+/**
+ * Syntax-highlight a shell command using `bat` with language=bash.
+ * Returns ANSI-highlighted string or original command if bat fails.
+ */
+export function highlightShellCommand(command: string): string {
+  if (!command || !command.trim()) return command;
+  const cached = commandHighlightCache.get(command);
+  if (cached !== undefined) return cached;
+
+  try {
+    const res = spawnSync(BAT_BIN, [
+      '--color=always',
+      '--plain',
+      '--language=bash',
+      '--paging=never',
+    ], {
+      input: command,
+      encoding: 'utf-8',
+      timeout: 2000,
+    });
+
+    if (res.status === 0 && res.stdout) {
+      const highlighted = res.stdout.trimEnd();
+      if (commandHighlightCache.size >= MAX_HIGHLIGHT_CACHE) {
+        commandHighlightCache.clear();
+      }
+      commandHighlightCache.set(command, highlighted);
+      return highlighted;
+    }
+  } catch {
+    // fallback gracefully
+  }
+
+  return command;
+}

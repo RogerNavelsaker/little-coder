@@ -15,6 +15,7 @@ import { Type } from '@sinclair/typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 import { registerToolDefinitionOverride } from '../../_shared/tool-execution-patch.js';
+import { highlightShellCommand } from '../../_shared/display.js';
 
 export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   // Precision filesystem / editor tools
@@ -283,11 +284,12 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
         if (toolName === 'sh' || toolName === 'shell') {
           const cmd = args?.command ?? (Array.isArray(args?.commands) ? args.commands[0] : '');
           const firstLineCmd = (cmd || '(empty)').split('\n')[0].trim();
+          const highlightedCmd = highlightShellCommand(firstLineCmd);
           // Color of ❯ depends on exit status (green for 0, red for error, muted/accent while running)
           const isError = context?.isError;
           const isFinished = context?.isPartial === false || (context?.result !== undefined);
           const iconColor = isFinished ? (isError ? 'error' : 'success') : 'accent';
-          styled = `${glyph}${theme.fg(iconColor, '❯')} ${theme.fg('toolTitle', firstLineCmd)}`;
+          styled = `${glyph}${theme.fg('muted', 'Shell ')}${theme.fg(iconColor, '❯')} ${highlightedCmd}`;
         } else if (toolName === 'read') {
           const files = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path, offset: args.offset, limit: args.limit }] : []);
           const first = files[0];

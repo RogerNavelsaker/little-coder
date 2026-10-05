@@ -155,11 +155,13 @@ describe("basic-tool-grouping", () => {
     const rendered = readOverride.renderCall({ path: "src/foo.ts", offset: 1, limit: 10 }, mockTheme, {});
     expect(rendered.text).toContain("◫ read (src/foo.ts) [1-10]");
 
-    // Check sh override with ❯
+    // Check sh override with Shell ❯
     const shOverride = getToolDefinitionOverride("sh");
     expect(shOverride).toBeDefined();
     const shRendered = shOverride.renderCall({ command: "git status" }, mockTheme, { isError: false });
-    expect(shRendered.text).toContain("❯ git status");
+    expect(shRendered.text).toContain("Shell ❯");
+    expect(shRendered.text).toContain("git");
+    expect(shRendered.text).toContain("status");
 
     // Check basic-tools override
     const btOverride = getToolDefinitionOverride("basic-tools");
