@@ -148,43 +148,44 @@ export function patchToolExecutionComponent(): void {
   const origRender = proto.render;
   proto.render = function (width: number) {
     if (this.hideComponent) return [];
-    let lines = origRender.call(this, width);
-    if (this.suppressLeadingSpacer || this.isGrouped) {
-      if (lines.length > 0 && lines[0] === '') {
-        lines.shift();
-      }
-    }
+    const rawLines = origRender.call(this, width);
+    // Strip Box container padding and empty boundary lines
+    const trimmed = rawLines.map((l: string) => l.trimEnd());
+    const nonBlank = trimmed.filter((l: string) => l.trim().length > 0);
+    if (nonBlank.length === 0) return [];
 
-    // 1-Line Compact consolidation: if not expanded and lines consist of [callHeader, '', resultSummary]
-    // or [callHeader, resultSummary], inline them into a single line like: `├ ❯ <cmd>  (323ms: summary)`
-    if (!this.expanded && lines.length >= 2 && lines.length <= 4) {
-      const nonBlank = lines.filter((l: string) => l.trim().length > 0);
-      if (nonBlank.length === 2) {
-        const line1 = nonBlank[0];
-        const line2 = nonBlank[1].trim();
-        // Only compact if combined line comfortably fits the terminal width
-        const plain1 = line1.replace(/\x1b\[[0-9;]*m/g, '');
-        const plain2 = line2.replace(/\x1b\[[0-9;]*m/g, '');
-        if (plain1.length + plain2.length + 3 <= width) {
-          lines = [`${line1}  \x1b[2m(${line2})\x1b[0m`];
+    const header = nonBlank[0];
+    const rest = nonBlank.slice(1);
+    const hasLeadingSpacer = !this.suppressLeadingSpacer && !this.isGrouped;
+
+    // 1-Line Compact consolidation when collapsed (!expanded):
+    // Combines header and brief summary on a single line: `┣ ● Shell ❯ git status (clean)`
+    if (!this.expanded) {
+      let consolidated = header;
+      if (rest.length > 0) {
+        const summary = rest[0].trim().slice(0, 50);
+        const plainHeader = header.replace(/\x1b\[[0-9;]*m/g, '');
+        const plainSummary = summary.replace(/\x1b\[[0-9;]*m/g, '');
+        if (plainHeader.length + plainSummary.length + 4 <= width) {
+          consolidated = `${header}  \x1b[2m(${summary})\x1b[0m`;
         }
       }
+      return hasLeadingSpacer ? ['', consolidated] : [consolidated];
     }
 
-    // Codex/Tree connector glyph: If tool is grouped and has multiple lines (e.g. output diff or results),
-    // connect line 2..N with '┃ ' so the tree visual remains unbroken from ┏ / ┣ down to ┗.
-    if ((this.isGrouped || this.suppressLeadingSpacer) && lines.length > 1) {
-      const isLast = Boolean(this.isLast);
-      const connectorPrefix = isLast ? '  ' : '\x1b[1m\x1b[97m┃\x1b[0m ';
-      lines = lines.map((l: string, idx: number) => {
-        if (idx === 0) return l;
-        // Don't double-prefix if already prefixed
-        if (l.startsWith('┃ ') || l.startsWith('│ ') || l.startsWith('┣ ') || l.startsWith('┗ ') || l.startsWith('┏ ')) return l;
-        return `${connectorPrefix}${l}`;
-      });
-    }
-
-    return lines;
+    // Expanded (Ctrl+O): keep header and connect subsequent output lines with unbroken ┃ tree bar
+    const isLast = Boolean(this.isLast);
+    const connectorPrefix = isLast ? '  ' : '\x1b[1m\x1b[97m┃\x1b[0m ';
+    const expandedLines = [
+      header,
+      ...rest.map((l: string) => {
+        if (l.startsWith('┃ ') || l.startsWith('│ ') || l.startsWith('┣ ') || l.startsWith('┗ ') || l.startsWith('┏ ')) {
+          return l;
+        }
+        return `${connectorPrefix}${l.trim()}`;
+      }),
+    ];
+    return hasLeadingSpacer ? ['', ...expandedLines] : expandedLines;
   };
 
   const origHasRendererDefinition = proto.hasRendererDefinition;

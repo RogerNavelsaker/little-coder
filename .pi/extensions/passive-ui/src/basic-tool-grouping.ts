@@ -86,22 +86,28 @@ export function getToolRoleIcon(toolName: string): string {
 
 /**
  * Returns Codex/AGY status bullet with color:
- * - running / in-progress: cyan '\x1b[36m●\x1b[0m'
- * - success / finished: green '\x1b[32m●\x1b[0m'
- * - error: red '\x1b[31m●\x1b[0m'
- * - warning: amber '\x1b[33m●\x1b[0m'
+ * - hollow circle ('○') for meta/cognitive steps (thought, recap)
+ * - filled circle ('●') for active tool execution
+ * - running / in-progress: cyan
+ * - success / finished: green
+ * - error: red
+ * - warning: amber
  */
-export function getStatusBullet(status: 'running' | 'success' | 'error' | 'warning' = 'success'): string {
+export function getStatusBullet(
+  status: 'running' | 'success' | 'error' | 'warning' = 'success',
+  hollow: boolean = false
+): string {
+  const sym = hollow ? '○' : '●';
   switch (status) {
     case 'running':
-      return '\x1b[36m●\x1b[0m';
+      return `\x1b[36m${sym}\x1b[0m`;
     case 'error':
-      return '\x1b[31m●\x1b[0m';
+      return `\x1b[31m${sym}\x1b[0m`;
     case 'warning':
-      return '\x1b[33m●\x1b[0m';
+      return `\x1b[33m${sym}\x1b[0m`;
     case 'success':
     default:
-      return '\x1b[32m●\x1b[0m';
+      return `\x1b[32m${sym}\x1b[0m`;
   }
 }
 
@@ -359,11 +365,12 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
         // Heavy tree glyphs in bright white: '\x1b[1m\x1b[97m'
         const rawGlyph = isGrouped ? (isFirst ? '┏ ' : (isLast ? '┗ ' : '┣ ')) : '';
         const glyph = rawGlyph ? `\x1b[1m\x1b[97m${rawGlyph}\x1b[0m` : '';
-        // Codex/AGY status bullet with execution state color
+        // Codex/AGY status bullet with execution state color (hollow ○ for recap/thoughts, filled ● for actions)
         const isError = Boolean(context?.isError);
         const isFinished = context?.isPartial === false || (context?.result !== undefined);
         const bulletStatus = !isFinished ? 'running' : (isError ? 'error' : 'success');
-        const bullet = getStatusBullet(bulletStatus);
+        const isHollow = toolName === 'recap';
+        const bullet = getStatusBullet(bulletStatus, isHollow);
         let styled: string;
 
         if (toolName === 'sh' || toolName === 'shell') {

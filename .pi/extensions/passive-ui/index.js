@@ -185935,7 +185935,97 @@ function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
   return finalizeTruncatedResult(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);
 }
 var pooledStyleTracker = new AnsiCodeTracker;
+
+// node_modules/@earendil-works/pi-tui/dist/components/box.js
+class Box {
+  children = [];
+  paddingX;
+  paddingY;
+  bgFn;
+  cache;
+  constructor(paddingX = 1, paddingY = 1, bgFn) {
+    this.paddingX = paddingX;
+    this.paddingY = paddingY;
+    this.bgFn = bgFn;
+  }
+  addChild(component) {
+    this.children.push(component);
+    this.invalidateCache();
+  }
+  removeChild(component) {
+    const index = this.children.indexOf(component);
+    if (index !== -1) {
+      this.children.splice(index, 1);
+      this.invalidateCache();
+    }
+  }
+  clear() {
+    this.children = [];
+    this.invalidateCache();
+  }
+  setBgFn(bgFn) {
+    this.bgFn = bgFn;
+  }
+  invalidateCache() {
+    this.cache = undefined;
+  }
+  matchCache(width, childLines, bgSample) {
+    const cache = this.cache;
+    return !!cache && cache.width === width && cache.bgSample === bgSample && cache.childLines.length === childLines.length && cache.childLines.every((line, i) => line === childLines[i]);
+  }
+  invalidate() {
+    this.invalidateCache();
+    for (const child of this.children) {
+      child.invalidate?.();
+    }
+  }
+  render(width) {
+    if (this.children.length === 0) {
+      return [];
+    }
+    const contentWidth = Math.max(1, width - this.paddingX * 2);
+    const leftPad = " ".repeat(this.paddingX);
+    const childLines = [];
+    for (const child of this.children) {
+      if (!child || typeof child.render !== "function")
+        continue;
+      const lines = child.render(contentWidth);
+      for (const line of lines) {
+        childLines.push(leftPad + line);
+      }
+    }
+    if (childLines.length === 0) {
+      return [];
+    }
+    const bgSample = this.bgFn ? this.bgFn("test") : undefined;
+    if (this.matchCache(width, childLines, bgSample)) {
+      return this.cache.lines;
+    }
+    const result = [];
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(this.applyBg("", width));
+    }
+    for (const line of childLines) {
+      result.push(this.applyBg(line, width));
+    }
+    for (let i = 0;i < this.paddingY; i++) {
+      result.push(this.applyBg("", width));
+    }
+    this.cache = { childLines, width, bgSample, lines: result };
+    return result;
+  }
+  applyBg(line, width) {
+    const visLen = visibleWidth(line);
+    const padNeeded = Math.max(0, width - visLen);
+    const padded = line + " ".repeat(padNeeded);
+    if (this.bgFn) {
+      return applyBackgroundToLine(padded, width, this.bgFn);
+    }
+    return padded;
+  }
+}
 // node_modules/@earendil-works/pi-tui/dist/keys.js
+var _kittyProtocolActive = false;
 var SYMBOL_KEYS = new Set([
   "`",
   "-",
@@ -185976,6 +186066,14 @@ var MODIFIERS = {
   super: 8
 };
 var LOCK_MASK = 64 + 128;
+var CODEPOINTS = {
+  escape: 27,
+  tab: 9,
+  enter: 13,
+  space: 32,
+  backspace: 127,
+  kpEnter: 57414
+};
 var ARROW_CODEPOINTS = {
   up: -1,
   down: -2,
@@ -186019,7 +186117,633 @@ var KITTY_FUNCTIONAL_KEY_EQUIVALENTS = new Map([
   [57425, FUNCTIONAL_CODEPOINTS.insert],
   [57426, FUNCTIONAL_CODEPOINTS.delete]
 ]);
+function normalizeKittyFunctionalCodepoint(codepoint) {
+  return KITTY_FUNCTIONAL_KEY_EQUIVALENTS.get(codepoint) ?? codepoint;
+}
+function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
+  const effectiveModifier = modifier & ~LOCK_MASK;
+  if ((effectiveModifier & MODIFIERS.shift) !== 0 && codepoint >= 65 && codepoint <= 90) {
+    return codepoint + 32;
+  }
+  return codepoint;
+}
+var LEGACY_KEY_SEQUENCES = {
+  up: ["\x1B[A", "\x1BOA"],
+  down: ["\x1B[B", "\x1BOB"],
+  right: ["\x1B[C", "\x1BOC"],
+  left: ["\x1B[D", "\x1BOD"],
+  home: ["\x1B[H", "\x1BOH", "\x1B[1~", "\x1B[7~"],
+  end: ["\x1B[F", "\x1BOF", "\x1B[4~", "\x1B[8~"],
+  insert: ["\x1B[2~"],
+  delete: ["\x1B[3~"],
+  pageUp: ["\x1B[5~", "\x1B[[5~"],
+  pageDown: ["\x1B[6~", "\x1B[[6~"],
+  clear: ["\x1B[E", "\x1BOE"],
+  f1: ["\x1BOP", "\x1B[11~", "\x1B[[A"],
+  f2: ["\x1BOQ", "\x1B[12~", "\x1B[[B"],
+  f3: ["\x1BOR", "\x1B[13~", "\x1B[[C"],
+  f4: ["\x1BOS", "\x1B[14~", "\x1B[[D"],
+  f5: ["\x1B[15~", "\x1B[[E"],
+  f6: ["\x1B[17~"],
+  f7: ["\x1B[18~"],
+  f8: ["\x1B[19~"],
+  f9: ["\x1B[20~"],
+  f10: ["\x1B[21~"],
+  f11: ["\x1B[23~"],
+  f12: ["\x1B[24~"]
+};
+var LEGACY_SHIFT_SEQUENCES = {
+  up: ["\x1B[a"],
+  down: ["\x1B[b"],
+  right: ["\x1B[c"],
+  left: ["\x1B[d"],
+  clear: ["\x1B[e"],
+  insert: ["\x1B[2$"],
+  delete: ["\x1B[3$"],
+  pageUp: ["\x1B[5$"],
+  pageDown: ["\x1B[6$"],
+  home: ["\x1B[7$"],
+  end: ["\x1B[8$"]
+};
+var LEGACY_CTRL_SEQUENCES = {
+  up: ["\x1BOa"],
+  down: ["\x1BOb"],
+  right: ["\x1BOc"],
+  left: ["\x1BOd"],
+  clear: ["\x1BOe"],
+  insert: ["\x1B[2^"],
+  delete: ["\x1B[3^"],
+  pageUp: ["\x1B[5^"],
+  pageDown: ["\x1B[6^"],
+  home: ["\x1B[7^"],
+  end: ["\x1B[8^"]
+};
+var matchesLegacySequence = (data, sequences) => sequences.includes(data);
+var matchesLegacyModifierSequence = (data, key, modifier) => {
+  if (modifier === MODIFIERS.shift) {
+    return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
+  }
+  if (modifier === MODIFIERS.ctrl) {
+    return matchesLegacySequence(data, LEGACY_CTRL_SEQUENCES[key]);
+  }
+  return false;
+};
+var _lastEventType = "press";
+function parseEventType(eventTypeStr) {
+  if (!eventTypeStr)
+    return "press";
+  const eventType = parseInt(eventTypeStr, 10);
+  if (eventType === 2)
+    return "repeat";
+  if (eventType === 3)
+    return "release";
+  return "press";
+}
+function parseKittySequence(data) {
+  const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
+  if (csiUMatch) {
+    const codepoint = parseInt(csiUMatch[1], 10);
+    const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : undefined;
+    const baseLayoutKey = csiUMatch[3] ? parseInt(csiUMatch[3], 10) : undefined;
+    const modValue = csiUMatch[4] ? parseInt(csiUMatch[4], 10) : 1;
+    const eventType = parseEventType(csiUMatch[5]);
+    _lastEventType = eventType;
+    return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1, eventType };
+  }
+  const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
+  if (arrowMatch) {
+    const modValue = parseInt(arrowMatch[1], 10);
+    const eventType = parseEventType(arrowMatch[2]);
+    const arrowCodes = { A: -1, B: -2, C: -3, D: -4 };
+    _lastEventType = eventType;
+    return { codepoint: arrowCodes[arrowMatch[3]], modifier: modValue - 1, eventType };
+  }
+  const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
+  if (funcMatch) {
+    const keyNum = parseInt(funcMatch[1], 10);
+    const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
+    const eventType = parseEventType(funcMatch[3]);
+    const funcCodes = {
+      2: FUNCTIONAL_CODEPOINTS.insert,
+      3: FUNCTIONAL_CODEPOINTS.delete,
+      5: FUNCTIONAL_CODEPOINTS.pageUp,
+      6: FUNCTIONAL_CODEPOINTS.pageDown,
+      7: FUNCTIONAL_CODEPOINTS.home,
+      8: FUNCTIONAL_CODEPOINTS.end
+    };
+    const codepoint = funcCodes[keyNum];
+    if (codepoint !== undefined) {
+      _lastEventType = eventType;
+      return { codepoint, modifier: modValue - 1, eventType };
+    }
+  }
+  const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
+  if (homeEndMatch) {
+    const modValue = parseInt(homeEndMatch[1], 10);
+    const eventType = parseEventType(homeEndMatch[2]);
+    const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS.home : FUNCTIONAL_CODEPOINTS.end;
+    _lastEventType = eventType;
+    return { codepoint, modifier: modValue - 1, eventType };
+  }
+  return null;
+}
+function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
+  const parsed = parseKittySequence(data);
+  if (!parsed)
+    return false;
+  const actualMod = parsed.modifier & ~LOCK_MASK;
+  const expectedMod = expectedModifier & ~LOCK_MASK;
+  if (actualMod !== expectedMod)
+    return false;
+  const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
+  const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
+  if (normalizedCodepoint === normalizedExpectedCodepoint)
+    return true;
+  if (parsed.baseLayoutKey !== undefined && parsed.baseLayoutKey === expectedCodepoint) {
+    const cp = normalizedCodepoint;
+    const isLatinLetter = cp >= 97 && cp <= 122;
+    const isKnownSymbol = SYMBOL_KEYS.has(String.fromCharCode(cp));
+    if (!isLatinLetter && !isKnownSymbol)
+      return true;
+  }
+  return false;
+}
+function parseModifyOtherKeysSequence(data) {
+  const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
+  if (!match)
+    return null;
+  const modValue = parseInt(match[1], 10);
+  const codepoint = parseInt(match[2], 10);
+  return { codepoint, modifier: modValue - 1 };
+}
+function matchesModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed)
+    return false;
+  return parsed.codepoint === expectedKeycode && parsed.modifier === expectedModifier;
+}
+function isWindowsTerminalSession() {
+  return Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY;
+}
+function matchesRawBackspace(data, expectedModifier) {
+  if (data === "\x7F")
+    return expectedModifier === 0;
+  if (data !== "\b")
+    return false;
+  return isWindowsTerminalSession() ? expectedModifier === MODIFIERS.ctrl : expectedModifier === 0;
+}
+function rawCtrlChar(key) {
+  const char = key.toLowerCase();
+  const code = char.charCodeAt(0);
+  if (code >= 97 && code <= 122 || char === "[" || char === "\\" || char === "]" || char === "_") {
+    return String.fromCharCode(code & 31);
+  }
+  if (char === "-") {
+    return String.fromCharCode(31);
+  }
+  return null;
+}
+function isDigitKey(key) {
+  return key >= "0" && key <= "9";
+}
+function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
+  if (expectedModifier === 0)
+    return false;
+  const parsed = parseModifyOtherKeysSequence(data);
+  if (!parsed || parsed.modifier !== expectedModifier)
+    return false;
+  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
+}
+function parseKeyId(keyId) {
+  const parts = keyId.toLowerCase().split("+");
+  const key = parts[parts.length - 1];
+  if (!key)
+    return null;
+  return {
+    key,
+    ctrl: parts.includes("ctrl"),
+    shift: parts.includes("shift"),
+    alt: parts.includes("alt"),
+    super: parts.includes("super")
+  };
+}
+function matchesKey(data, keyId) {
+  const parsed = parseKeyId(keyId);
+  if (!parsed)
+    return false;
+  const { key, ctrl, shift, alt, super: superModifier } = parsed;
+  let modifier = 0;
+  if (shift)
+    modifier |= MODIFIERS.shift;
+  if (alt)
+    modifier |= MODIFIERS.alt;
+  if (ctrl)
+    modifier |= MODIFIERS.ctrl;
+  if (superModifier)
+    modifier |= MODIFIERS.super;
+  switch (key) {
+    case "escape":
+    case "esc":
+      if (modifier !== 0)
+        return false;
+      return data === "\x1B" || matchesKittySequence(data, CODEPOINTS.escape, 0) || matchesModifyOtherKeys(data, CODEPOINTS.escape, 0);
+    case "space":
+      if (!_kittyProtocolActive) {
+        if (modifier === MODIFIERS.ctrl && data === "\x00") {
+          return true;
+        }
+        if (modifier === MODIFIERS.alt && data === "\x1B ") {
+          return true;
+        }
+      }
+      if (modifier === 0) {
+        return data === " " || matchesKittySequence(data, CODEPOINTS.space, 0) || matchesModifyOtherKeys(data, CODEPOINTS.space, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.space, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.space, modifier);
+    case "tab":
+      if (modifier === MODIFIERS.shift) {
+        return data === "\x1B[Z" || matchesKittySequence(data, CODEPOINTS.tab, MODIFIERS.shift) || matchesModifyOtherKeys(data, CODEPOINTS.tab, MODIFIERS.shift);
+      }
+      if (modifier === 0) {
+        return data === "\t" || matchesKittySequence(data, CODEPOINTS.tab, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.tab, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier);
+    case "enter":
+    case "return":
+      if (modifier === MODIFIERS.shift) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.shift) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.shift)) {
+          return true;
+        }
+        if (_kittyProtocolActive) {
+          return data === "\x1B\r" || data === `
+`;
+        }
+        return false;
+      }
+      if (modifier === MODIFIERS.alt) {
+        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS.alt) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.alt)) {
+          return true;
+        }
+        if (!_kittyProtocolActive) {
+          return data === "\x1B\r";
+        }
+        return false;
+      }
+      if (modifier === 0) {
+        return data === "\r" || !_kittyProtocolActive && data === `
+` || data === "\x1BOM" || matchesKittySequence(data, CODEPOINTS.enter, 0) || matchesKittySequence(data, CODEPOINTS.kpEnter, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.enter, modifier) || matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier);
+    case "backspace":
+      if (modifier === MODIFIERS.alt) {
+        if (data === "\x1B\x7F" || data === "\x1B\b") {
+          return true;
+        }
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.alt) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        if (matchesRawBackspace(data, MODIFIERS.ctrl))
+          return true;
+        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS.ctrl) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesRawBackspace(data, 0) || matchesKittySequence(data, CODEPOINTS.backspace, 0) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, 0);
+      }
+      return matchesKittySequence(data, CODEPOINTS.backspace, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier);
+    case "insert":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "insert", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, modifier);
+    case "delete":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "delete", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, modifier);
+    case "clear":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
+      }
+      return matchesLegacyModifierSequence(data, "clear", modifier);
+    case "home":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "home", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, modifier);
+    case "end":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "end", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
+    case "pageup":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
+    case "pagedown":
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
+    case "up":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bp" || matchesKittySequence(data, ARROW_CODEPOINTS.up, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) || matchesKittySequence(data, ARROW_CODEPOINTS.up, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "up", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.up, modifier);
+    case "down":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1Bn" || matchesKittySequence(data, ARROW_CODEPOINTS.down, MODIFIERS.alt);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) || matchesKittySequence(data, ARROW_CODEPOINTS.down, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "down", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.down, modifier);
+    case "left":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3D" || !_kittyProtocolActive && data === "\x1BB" || data === "\x1Bb" || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5D" || matchesLegacyModifierSequence(data, "left", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) || matchesKittySequence(data, ARROW_CODEPOINTS.left, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "left", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.left, modifier);
+    case "right":
+      if (modifier === MODIFIERS.alt) {
+        return data === "\x1B[1;3C" || !_kittyProtocolActive && data === "\x1BF" || data === "\x1Bf" || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt);
+      }
+      if (modifier === MODIFIERS.ctrl) {
+        return data === "\x1B[1;5C" || matchesLegacyModifierSequence(data, "right", MODIFIERS.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.ctrl);
+      }
+      if (modifier === 0) {
+        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) || matchesKittySequence(data, ARROW_CODEPOINTS.right, 0);
+      }
+      if (matchesLegacyModifierSequence(data, "right", modifier)) {
+        return true;
+      }
+      return matchesKittySequence(data, ARROW_CODEPOINTS.right, modifier);
+    case "f1":
+    case "f2":
+    case "f3":
+    case "f4":
+    case "f5":
+    case "f6":
+    case "f7":
+    case "f8":
+    case "f9":
+    case "f10":
+    case "f11":
+    case "f12": {
+      if (modifier !== 0) {
+        return false;
+      }
+      const functionKey = key;
+      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
+    }
+  }
+  if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS.has(key))) {
+    const codepoint = key.charCodeAt(0);
+    const rawCtrl = rawCtrlChar(key);
+    const isLetter = key >= "a" && key <= "z";
+    const isDigit = isDigitKey(key);
+    if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && !_kittyProtocolActive && rawCtrl) {
+      if (data === `\x1B${rawCtrl}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit)) {
+      if (data === `\x1B${key}`)
+        return true;
+    }
+    if (modifier === MODIFIERS.ctrl) {
+      if (rawCtrl && data === rawCtrl)
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift + MODIFIERS.ctrl) {
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl);
+    }
+    if (modifier === MODIFIERS.shift) {
+      if (isLetter && data === key.toUpperCase())
+        return true;
+      return matchesKittySequence(data, codepoint, MODIFIERS.shift) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS.shift);
+    }
+    if (modifier !== 0) {
+      return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
+    }
+    return data === key || matchesKittySequence(data, codepoint, 0);
+  }
+  return false;
+}
 var KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
+
+// node_modules/@earendil-works/pi-tui/dist/keybindings.js
+var TUI_KEYBINDINGS = {
+  "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
+  "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
+  "tui.editor.cursorLeft": {
+    defaultKeys: ["left", "ctrl+b"],
+    description: "Move cursor left"
+  },
+  "tui.editor.cursorRight": {
+    defaultKeys: ["right", "ctrl+f"],
+    description: "Move cursor right"
+  },
+  "tui.editor.cursorWordLeft": {
+    defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+    description: "Move cursor word left"
+  },
+  "tui.editor.cursorWordRight": {
+    defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+    description: "Move cursor word right"
+  },
+  "tui.editor.cursorLineStart": {
+    defaultKeys: ["home", "ctrl+a"],
+    description: "Move to line start"
+  },
+  "tui.editor.cursorLineEnd": {
+    defaultKeys: ["end", "ctrl+e"],
+    description: "Move to line end"
+  },
+  "tui.editor.jumpForward": {
+    defaultKeys: "ctrl+]",
+    description: "Jump forward to character"
+  },
+  "tui.editor.jumpBackward": {
+    defaultKeys: "ctrl+alt+]",
+    description: "Jump backward to character"
+  },
+  "tui.editor.pageUp": { defaultKeys: "pageUp", description: "Page up" },
+  "tui.editor.pageDown": { defaultKeys: "pageDown", description: "Page down" },
+  "tui.editor.deleteCharBackward": {
+    defaultKeys: "backspace",
+    description: "Delete character backward"
+  },
+  "tui.editor.deleteCharForward": {
+    defaultKeys: ["delete", "ctrl+d"],
+    description: "Delete character forward"
+  },
+  "tui.editor.deleteWordBackward": {
+    defaultKeys: ["ctrl+w", "alt+backspace"],
+    description: "Delete word backward"
+  },
+  "tui.editor.deleteWordForward": {
+    defaultKeys: ["alt+d", "alt+delete"],
+    description: "Delete word forward"
+  },
+  "tui.editor.deleteToLineStart": {
+    defaultKeys: "ctrl+u",
+    description: "Delete to line start"
+  },
+  "tui.editor.deleteToLineEnd": {
+    defaultKeys: "ctrl+k",
+    description: "Delete to line end"
+  },
+  "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
+  "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
+  "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
+  "tui.input.newLine": { defaultKeys: "shift+enter", description: "Insert newline" },
+  "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
+  "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
+  "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
+  "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
+  "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
+  "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
+  "tui.select.pageDown": {
+    defaultKeys: "pageDown",
+    description: "Selection page down"
+  },
+  "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
+  "tui.select.cancel": {
+    defaultKeys: ["escape", "ctrl+c"],
+    description: "Cancel selection"
+  }
+};
+function normalizeKeys(keys) {
+  if (keys === undefined)
+    return [];
+  const keyList = Array.isArray(keys) ? keys : [keys];
+  const seen = new Set;
+  const result = [];
+  for (const key of keyList) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+class KeybindingsManager {
+  definitions;
+  userBindings;
+  keysById = new Map;
+  conflicts = [];
+  constructor(definitions, userBindings = {}) {
+    this.definitions = definitions;
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  rebuild() {
+    this.keysById.clear();
+    this.conflicts = [];
+    const userClaims = new Map;
+    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
+      if (!(keybinding in this.definitions))
+        continue;
+      for (const key of normalizeKeys(keys)) {
+        const claimants = userClaims.get(key) ?? new Set;
+        claimants.add(keybinding);
+        userClaims.set(key, claimants);
+      }
+    }
+    for (const [key, keybindings] of userClaims) {
+      if (keybindings.size > 1) {
+        this.conflicts.push({ key, keybindings: [...keybindings] });
+      }
+    }
+    for (const [id, definition] of Object.entries(this.definitions)) {
+      const userKeys = this.userBindings[id];
+      const keys = userKeys === undefined ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
+      this.keysById.set(id, keys);
+    }
+  }
+  matches(data, keybinding) {
+    const keys = this.keysById.get(keybinding) ?? [];
+    for (const key of keys) {
+      if (matchesKey(data, key))
+        return true;
+    }
+    return false;
+  }
+  getKeys(keybinding) {
+    return [...this.keysById.get(keybinding) ?? []];
+  }
+  getDefinition(keybinding) {
+    return this.definitions[keybinding];
+  }
+  getConflicts() {
+    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
+  }
+  setUserBindings(userBindings) {
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  getUserBindings() {
+    return { ...this.userBindings };
+  }
+  getResolvedBindings() {
+    const resolved = {};
+    for (const id of Object.keys(this.definitions)) {
+      const keys = this.keysById.get(id) ?? [];
+      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
+    }
+    return resolved;
+  }
+}
+var globalKeybindings = null;
+function getKeybindings() {
+  if (!globalKeybindings) {
+    globalKeybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+  }
+  return globalKeybindings;
+}
 
 // node_modules/@earendil-works/pi-tui/dist/components/text.js
 class Text {
@@ -186095,6 +186819,10 @@ class Text {
 }
 // node_modules/@earendil-works/pi-tui/dist/terminal-image.js
 var cachedCapabilities = null;
+var cellDimensions = { widthPx: 9, heightPx: 18 };
+function getCellDimensions() {
+  return cellDimensions;
+}
 function detectCapabilities() {
   const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
   const term = process.env.TERM?.toLowerCase() || "";
@@ -186138,12 +186866,342 @@ function isImageLine(line) {
   }
   return line.includes(KITTY_PREFIX) || line.includes(ITERM2_PREFIX);
 }
+function allocateImageId() {
+  return Math.floor(Math.random() * 4294967294) + 1;
+}
+function encodeKitty(base64Data, options = {}) {
+  const CHUNK_SIZE = 4096;
+  const params = ["a=T", "f=100", "q=2"];
+  if (options.moveCursor === false)
+    params.push("C=1");
+  if (options.columns)
+    params.push(`c=${options.columns}`);
+  if (options.rows)
+    params.push(`r=${options.rows}`);
+  if (options.imageId)
+    params.push(`i=${options.imageId}`);
+  if (base64Data.length <= CHUNK_SIZE) {
+    return `\x1B_G${params.join(",")};${base64Data}\x1B\\`;
+  }
+  const chunks = [];
+  let offset = 0;
+  let isFirst = true;
+  while (offset < base64Data.length) {
+    const chunk = base64Data.slice(offset, offset + CHUNK_SIZE);
+    const isLast = offset + CHUNK_SIZE >= base64Data.length;
+    if (isFirst) {
+      chunks.push(`\x1B_G${params.join(",")},m=1;${chunk}\x1B\\`);
+      isFirst = false;
+    } else if (isLast) {
+      chunks.push(`\x1B_Gm=0;${chunk}\x1B\\`);
+    } else {
+      chunks.push(`\x1B_Gm=1;${chunk}\x1B\\`);
+    }
+    offset += CHUNK_SIZE;
+  }
+  return chunks.join("");
+}
+function encodeITerm2(base64Data, options = {}) {
+  const params = [`inline=${options.inline !== false ? 1 : 0}`];
+  if (options.width !== undefined)
+    params.push(`width=${options.width}`);
+  if (options.height !== undefined)
+    params.push(`height=${options.height}`);
+  if (options.name) {
+    const nameBase64 = Buffer.from(options.name).toString("base64");
+    params.push(`name=${nameBase64}`);
+  }
+  if (options.preserveAspectRatio === false) {
+    params.push("preserveAspectRatio=0");
+  }
+  return `\x1B]1337;File=${params.join(";")}:${base64Data}\x07`;
+}
+function calculateImageCellSize(imageDimensions, maxWidthCells, maxHeightCells, cellDimensions = { widthPx: 9, heightPx: 18 }) {
+  const maxWidth = Math.max(1, Math.floor(maxWidthCells));
+  const maxHeight = maxHeightCells === undefined ? undefined : Math.max(1, Math.floor(maxHeightCells));
+  const imageWidth = Math.max(1, imageDimensions.widthPx);
+  const imageHeight = Math.max(1, imageDimensions.heightPx);
+  const widthScale = maxWidth * cellDimensions.widthPx / imageWidth;
+  const heightScale = maxHeight === undefined ? widthScale : maxHeight * cellDimensions.heightPx / imageHeight;
+  const scale = Math.min(widthScale, heightScale);
+  const scaledWidthPx = imageWidth * scale;
+  const scaledHeightPx = imageHeight * scale;
+  const columns = Math.ceil(scaledWidthPx / cellDimensions.widthPx);
+  const rows = Math.ceil(scaledHeightPx / cellDimensions.heightPx);
+  return {
+    columns: Math.max(1, Math.min(maxWidth, columns)),
+    rows: Math.max(1, maxHeight === undefined ? rows : Math.min(maxHeight, rows))
+  };
+}
+function getPngDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 24) {
+      return null;
+    }
+    if (buffer[0] !== 137 || buffer[1] !== 80 || buffer[2] !== 78 || buffer[3] !== 71) {
+      return null;
+    }
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    return { widthPx: width, heightPx: height };
+  } catch {
+    return null;
+  }
+}
+function getJpegDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 2) {
+      return null;
+    }
+    if (buffer[0] !== 255 || buffer[1] !== 216) {
+      return null;
+    }
+    let offset = 2;
+    while (offset < buffer.length - 9) {
+      if (buffer[offset] !== 255) {
+        offset++;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker >= 192 && marker <= 194) {
+        const height = buffer.readUInt16BE(offset + 5);
+        const width = buffer.readUInt16BE(offset + 7);
+        return { widthPx: width, heightPx: height };
+      }
+      if (offset + 3 >= buffer.length) {
+        return null;
+      }
+      const length = buffer.readUInt16BE(offset + 2);
+      if (length < 2) {
+        return null;
+      }
+      offset += 2 + length;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function getGifDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 10) {
+      return null;
+    }
+    const sig = buffer.slice(0, 6).toString("ascii");
+    if (sig !== "GIF87a" && sig !== "GIF89a") {
+      return null;
+    }
+    const width = buffer.readUInt16LE(6);
+    const height = buffer.readUInt16LE(8);
+    return { widthPx: width, heightPx: height };
+  } catch {
+    return null;
+  }
+}
+function getWebpDimensions(base64Data) {
+  try {
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length < 30) {
+      return null;
+    }
+    const riff = buffer.slice(0, 4).toString("ascii");
+    const webp = buffer.slice(8, 12).toString("ascii");
+    if (riff !== "RIFF" || webp !== "WEBP") {
+      return null;
+    }
+    const chunk = buffer.slice(12, 16).toString("ascii");
+    if (chunk === "VP8 ") {
+      if (buffer.length < 30)
+        return null;
+      const width = buffer.readUInt16LE(26) & 16383;
+      const height = buffer.readUInt16LE(28) & 16383;
+      return { widthPx: width, heightPx: height };
+    } else if (chunk === "VP8L") {
+      if (buffer.length < 25)
+        return null;
+      const bits = buffer.readUInt32LE(21);
+      const width = (bits & 16383) + 1;
+      const height = (bits >> 14 & 16383) + 1;
+      return { widthPx: width, heightPx: height };
+    } else if (chunk === "VP8X") {
+      if (buffer.length < 30)
+        return null;
+      const width = (buffer[24] | buffer[25] << 8 | buffer[26] << 16) + 1;
+      const height = (buffer[27] | buffer[28] << 8 | buffer[29] << 16) + 1;
+      return { widthPx: width, heightPx: height };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function getImageDimensions(base64Data, mimeType) {
+  if (mimeType === "image/png") {
+    return getPngDimensions(base64Data);
+  }
+  if (mimeType === "image/jpeg") {
+    return getJpegDimensions(base64Data);
+  }
+  if (mimeType === "image/gif") {
+    return getGifDimensions(base64Data);
+  }
+  if (mimeType === "image/webp") {
+    return getWebpDimensions(base64Data);
+  }
+  return null;
+}
+function renderImage(base64Data, imageDimensions, options = {}) {
+  const caps = getCapabilities();
+  if (!caps.images) {
+    return null;
+  }
+  const maxWidth = options.maxWidthCells ?? 80;
+  const size = calculateImageCellSize(imageDimensions, maxWidth, options.maxHeightCells, getCellDimensions());
+  if (caps.images === "kitty") {
+    const sequence = encodeKitty(base64Data, {
+      columns: size.columns,
+      rows: size.rows,
+      imageId: options.imageId,
+      moveCursor: options.moveCursor
+    });
+    return { sequence, rows: size.rows, imageId: options.imageId };
+  }
+  if (caps.images === "iterm2") {
+    const sequence = encodeITerm2(base64Data, {
+      width: size.columns,
+      height: "auto",
+      preserveAspectRatio: options.preserveAspectRatio ?? true
+    });
+    return { sequence, rows: size.rows };
+  }
+  return null;
+}
 function hyperlink(text, url) {
   return `\x1B]8;;${url}\x1B\\${text}\x1B]8;;\x1B\\`;
+}
+function imageFallback(mimeType, dimensions, filename) {
+  const parts = [];
+  if (filename)
+    parts.push(filename);
+  parts.push(`[${mimeType}]`);
+  if (dimensions)
+    parts.push(`${dimensions.widthPx}x${dimensions.heightPx}`);
+  return `[Image: ${parts.join(" ")}]`;
+}
+
+// node_modules/@earendil-works/pi-tui/dist/tui.js
+class Container {
+  children = [];
+  addChild(component) {
+    this.children.push(component);
+  }
+  removeChild(component) {
+    const index = this.children.indexOf(component);
+    if (index !== -1) {
+      this.children.splice(index, 1);
+    }
+  }
+  clear() {
+    this.children = [];
+  }
+  invalidate() {
+    for (const child of this.children) {
+      child.invalidate?.();
+    }
+  }
+  render(width) {
+    const lines = [];
+    for (const child of this.children) {
+      const childLines = child.render(width);
+      for (const line of childLines) {
+        lines.push(line);
+      }
+    }
+    return lines;
+  }
 }
 
 // node_modules/@earendil-works/pi-tui/dist/components/editor.js
 var baseSegmenter = getSegmenter();
+// node_modules/@earendil-works/pi-tui/dist/components/image.js
+class Image {
+  base64Data;
+  mimeType;
+  dimensions;
+  theme;
+  options;
+  imageId;
+  cachedLines;
+  cachedWidth;
+  constructor(base64Data, mimeType, theme, options = {}, dimensions) {
+    this.base64Data = base64Data;
+    this.mimeType = mimeType;
+    this.theme = theme;
+    this.options = options;
+    this.dimensions = dimensions || getImageDimensions(base64Data, mimeType) || { widthPx: 800, heightPx: 600 };
+    this.imageId = options.imageId;
+  }
+  getImageId() {
+    return this.imageId;
+  }
+  invalidate() {
+    this.cachedLines = undefined;
+    this.cachedWidth = undefined;
+  }
+  render(width) {
+    if (this.cachedLines && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+    const maxWidth = Math.max(1, Math.min(width - 2, this.options.maxWidthCells ?? 60));
+    const cellDimensions = getCellDimensions();
+    const defaultMaxHeight = Math.max(1, Math.ceil(maxWidth * cellDimensions.widthPx / cellDimensions.heightPx));
+    const maxHeight = this.options.maxHeightCells ?? defaultMaxHeight;
+    const caps = getCapabilities();
+    let lines;
+    if (caps.images) {
+      if (caps.images === "kitty" && this.imageId === undefined) {
+        this.imageId = allocateImageId();
+      }
+      const result = renderImage(this.base64Data, this.dimensions, {
+        maxWidthCells: maxWidth,
+        maxHeightCells: maxHeight,
+        imageId: this.imageId,
+        moveCursor: false
+      });
+      if (result) {
+        if (result.imageId) {
+          this.imageId = result.imageId;
+        }
+        if (caps.images === "kitty") {
+          lines = [result.sequence];
+          for (let i = 0;i < result.rows - 1; i++) {
+            lines.push("");
+          }
+        } else {
+          lines = [];
+          for (let i = 0;i < result.rows - 1; i++) {
+            lines.push("");
+          }
+          const rowOffset = result.rows - 1;
+          const moveUp = rowOffset > 0 ? `\x1B[${rowOffset}A` : "";
+          lines.push(moveUp + result.sequence);
+        }
+      } else {
+        const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
+        lines = [this.theme.fallbackColor(fallback)];
+      }
+    } else {
+      const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
+      lines = [this.theme.fallbackColor(fallback)];
+    }
+    this.cachedLines = lines;
+    this.cachedWidth = width;
+    return lines;
+  }
+}
 // node_modules/@earendil-works/pi-tui/dist/components/input.js
 var segmenter2 = getSegmenter();
 // node_modules/marked/lib/marked.esm.js
@@ -197135,2568 +198193,6 @@ function Compile(...args) {
 // node_modules/@earendil-works/pi-ai/dist/utils/validation.js
 var validatorCache = new WeakMap;
 var TYPEBOX_KIND = Symbol.for("TypeBox.Kind");
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/autocomplete.js
-var PATH_DELIMITERS2 = new Set([" ", "\t", '"', "'", "="]);
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/utils.js
-var segmenter3 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-function getSegmenter2() {
-  return segmenter3;
-}
-function couldBeEmoji2(segment) {
-  const cp = segment.codePointAt(0);
-  return cp >= 126976 && cp <= 130047 || cp >= 8960 && cp <= 9215 || cp >= 9728 && cp <= 10175 || cp >= 11088 && cp <= 11093 || segment.includes("\uFE0F") || segment.length > 2;
-}
-var zeroWidthRegex2 = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark}|\p{Surrogate})+$/v;
-var leadingNonPrintingRegex2 = /^[\p{Default_Ignorable_Code_Point}\p{Control}\p{Format}\p{Mark}\p{Surrogate}]+/v;
-var rgiEmojiRegex2 = /^\p{RGI_Emoji}$/v;
-var WIDTH_CACHE_SIZE2 = 512;
-var widthCache2 = new Map;
-function isPrintableAscii2(str) {
-  for (let i = 0;i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (code < 32 || code > 126) {
-      return false;
-    }
-  }
-  return true;
-}
-function truncateFragmentToWidth2(text, maxWidth) {
-  if (maxWidth <= 0 || text.length === 0) {
-    return { text: "", width: 0 };
-  }
-  if (isPrintableAscii2(text)) {
-    const clipped = text.slice(0, maxWidth);
-    return { text: clipped, width: clipped.length };
-  }
-  const hasAnsi = text.includes("\x1B");
-  const hasTabs = text.includes("\t");
-  if (!hasAnsi && !hasTabs) {
-    let result = "";
-    let width = 0;
-    for (const { segment } of segmenter3.segment(text)) {
-      const w = graphemeWidth2(segment);
-      if (width + w > maxWidth) {
-        break;
-      }
-      result += segment;
-      width += w;
-    }
-    return { text: result, width };
-  }
-  let result = "";
-  let width = 0;
-  let i = 0;
-  let pendingAnsi = "";
-  while (i < text.length) {
-    const ansi = extractAnsiCode2(text, i);
-    if (ansi) {
-      pendingAnsi += ansi.code;
-      i += ansi.length;
-      continue;
-    }
-    if (text[i] === "\t") {
-      if (width + 3 > maxWidth) {
-        break;
-      }
-      if (pendingAnsi) {
-        result += pendingAnsi;
-        pendingAnsi = "";
-      }
-      result += "\t";
-      width += 3;
-      i++;
-      continue;
-    }
-    let end = i;
-    while (end < text.length && text[end] !== "\t") {
-      const nextAnsi = extractAnsiCode2(text, end);
-      if (nextAnsi) {
-        break;
-      }
-      end++;
-    }
-    for (const { segment } of segmenter3.segment(text.slice(i, end))) {
-      const w = graphemeWidth2(segment);
-      if (width + w > maxWidth) {
-        return { text: result, width };
-      }
-      if (pendingAnsi) {
-        result += pendingAnsi;
-        pendingAnsi = "";
-      }
-      result += segment;
-      width += w;
-    }
-    i = end;
-  }
-  return { text: result, width };
-}
-function finalizeTruncatedResult2(prefix, prefixWidth, ellipsis, ellipsisWidth, maxWidth, pad) {
-  const reset = "\x1B[0m";
-  const visibleWidth = prefixWidth + ellipsisWidth;
-  let result;
-  if (ellipsis.length > 0) {
-    result = `${prefix}${reset}${ellipsis}${reset}`;
-  } else {
-    result = `${prefix}${reset}`;
-  }
-  return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth)) : result;
-}
-function graphemeWidth2(segment) {
-  if (zeroWidthRegex2.test(segment)) {
-    return 0;
-  }
-  if (couldBeEmoji2(segment) && rgiEmojiRegex2.test(segment)) {
-    return 2;
-  }
-  const base = segment.replace(leadingNonPrintingRegex2, "");
-  const cp = base.codePointAt(0);
-  if (cp === undefined) {
-    return 0;
-  }
-  if (cp >= 127462 && cp <= 127487) {
-    return 2;
-  }
-  let width = eastAsianWidth(cp);
-  if (segment.length > 1) {
-    for (const char of segment.slice(1)) {
-      const c = char.codePointAt(0);
-      if (c >= 65280 && c <= 65519) {
-        width += eastAsianWidth(c);
-      } else if (c === 3635 || c === 3763) {
-        width += 1;
-      }
-    }
-  }
-  return width;
-}
-function visibleWidth2(str) {
-  if (str.length === 0) {
-    return 0;
-  }
-  if (isPrintableAscii2(str)) {
-    return str.length;
-  }
-  const cached = widthCache2.get(str);
-  if (cached !== undefined) {
-    return cached;
-  }
-  let clean = str;
-  if (str.includes("\t")) {
-    clean = clean.replace(/\t/g, "   ");
-  }
-  if (clean.includes("\x1B")) {
-    let stripped = "";
-    let i = 0;
-    while (i < clean.length) {
-      const ansi = extractAnsiCode2(clean, i);
-      if (ansi) {
-        i += ansi.length;
-        continue;
-      }
-      stripped += clean[i];
-      i++;
-    }
-    clean = stripped;
-  }
-  let width = 0;
-  for (const { segment } of segmenter3.segment(clean)) {
-    width += graphemeWidth2(segment);
-  }
-  if (widthCache2.size >= WIDTH_CACHE_SIZE2) {
-    const firstKey = widthCache2.keys().next().value;
-    if (firstKey !== undefined) {
-      widthCache2.delete(firstKey);
-    }
-  }
-  widthCache2.set(str, width);
-  return width;
-}
-function extractAnsiCode2(str, pos) {
-  if (pos >= str.length || str[pos] !== "\x1B")
-    return null;
-  const next = str[pos + 1];
-  if (next === "[") {
-    let j = pos + 2;
-    while (j < str.length && !/[mGKHJ]/.test(str[j]))
-      j++;
-    if (j < str.length)
-      return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-    return null;
-  }
-  if (next === "]") {
-    let j = pos + 2;
-    while (j < str.length) {
-      if (str[j] === "\x07")
-        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-      if (str[j] === "\x1B" && str[j + 1] === "\\")
-        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
-      j++;
-    }
-    return null;
-  }
-  if (next === "_") {
-    let j = pos + 2;
-    while (j < str.length) {
-      if (str[j] === "\x07")
-        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-      if (str[j] === "\x1B" && str[j + 1] === "\\")
-        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
-      j++;
-    }
-    return null;
-  }
-  return null;
-}
-function parseOsc8Hyperlink2(ansiCode) {
-  if (!ansiCode.startsWith("\x1B]8;")) {
-    return;
-  }
-  const terminator = ansiCode.endsWith("\x07") ? "\x07" : "\x1B\\";
-  const body = ansiCode.slice(4, terminator === "\x07" ? -1 : -2);
-  const separatorIndex = body.indexOf(";");
-  if (separatorIndex === -1) {
-    return;
-  }
-  const params = body.slice(0, separatorIndex);
-  const url = body.slice(separatorIndex + 1);
-  if (!url) {
-    return null;
-  }
-  return { params, url, terminator };
-}
-function formatOsc8Hyperlink2(hyperlink) {
-  return `\x1B]8;${hyperlink.params};${hyperlink.url}${hyperlink.terminator}`;
-}
-function formatOsc8Close2(terminator) {
-  return `\x1B]8;;${terminator}`;
-}
-
-class AnsiCodeTracker2 {
-  bold = false;
-  dim = false;
-  italic = false;
-  underline = false;
-  blink = false;
-  inverse = false;
-  hidden = false;
-  strikethrough = false;
-  fgColor = null;
-  bgColor = null;
-  activeHyperlink = null;
-  process(ansiCode) {
-    const hyperlink = parseOsc8Hyperlink2(ansiCode);
-    if (hyperlink !== undefined) {
-      this.activeHyperlink = hyperlink;
-      return;
-    }
-    if (!ansiCode.endsWith("m")) {
-      return;
-    }
-    const match = ansiCode.match(/\x1b\[([\d;]*)m/);
-    if (!match)
-      return;
-    const params = match[1];
-    if (params === "" || params === "0") {
-      this.reset();
-      return;
-    }
-    const parts = params.split(";");
-    let i = 0;
-    while (i < parts.length) {
-      const code = Number.parseInt(parts[i], 10);
-      if (code === 38 || code === 48) {
-        if (parts[i + 1] === "5" && parts[i + 2] !== undefined) {
-          const colorCode = `${parts[i]};${parts[i + 1]};${parts[i + 2]}`;
-          if (code === 38) {
-            this.fgColor = colorCode;
-          } else {
-            this.bgColor = colorCode;
-          }
-          i += 3;
-          continue;
-        } else if (parts[i + 1] === "2" && parts[i + 4] !== undefined) {
-          const colorCode = `${parts[i]};${parts[i + 1]};${parts[i + 2]};${parts[i + 3]};${parts[i + 4]}`;
-          if (code === 38) {
-            this.fgColor = colorCode;
-          } else {
-            this.bgColor = colorCode;
-          }
-          i += 5;
-          continue;
-        }
-      }
-      switch (code) {
-        case 0:
-          this.reset();
-          break;
-        case 1:
-          this.bold = true;
-          break;
-        case 2:
-          this.dim = true;
-          break;
-        case 3:
-          this.italic = true;
-          break;
-        case 4:
-          this.underline = true;
-          break;
-        case 5:
-          this.blink = true;
-          break;
-        case 7:
-          this.inverse = true;
-          break;
-        case 8:
-          this.hidden = true;
-          break;
-        case 9:
-          this.strikethrough = true;
-          break;
-        case 21:
-          this.bold = false;
-          break;
-        case 22:
-          this.bold = false;
-          this.dim = false;
-          break;
-        case 23:
-          this.italic = false;
-          break;
-        case 24:
-          this.underline = false;
-          break;
-        case 25:
-          this.blink = false;
-          break;
-        case 27:
-          this.inverse = false;
-          break;
-        case 28:
-          this.hidden = false;
-          break;
-        case 29:
-          this.strikethrough = false;
-          break;
-        case 39:
-          this.fgColor = null;
-          break;
-        case 49:
-          this.bgColor = null;
-          break;
-        default:
-          if (code >= 30 && code <= 37 || code >= 90 && code <= 97) {
-            this.fgColor = String(code);
-          } else if (code >= 40 && code <= 47 || code >= 100 && code <= 107) {
-            this.bgColor = String(code);
-          }
-          break;
-      }
-      i++;
-    }
-  }
-  reset() {
-    this.bold = false;
-    this.dim = false;
-    this.italic = false;
-    this.underline = false;
-    this.blink = false;
-    this.inverse = false;
-    this.hidden = false;
-    this.strikethrough = false;
-    this.fgColor = null;
-    this.bgColor = null;
-  }
-  clear() {
-    this.reset();
-    this.activeHyperlink = null;
-  }
-  getActiveCodes() {
-    const codes = [];
-    if (this.bold)
-      codes.push("1");
-    if (this.dim)
-      codes.push("2");
-    if (this.italic)
-      codes.push("3");
-    if (this.underline)
-      codes.push("4");
-    if (this.blink)
-      codes.push("5");
-    if (this.inverse)
-      codes.push("7");
-    if (this.hidden)
-      codes.push("8");
-    if (this.strikethrough)
-      codes.push("9");
-    if (this.fgColor)
-      codes.push(this.fgColor);
-    if (this.bgColor)
-      codes.push(this.bgColor);
-    let result = codes.length > 0 ? `\x1B[${codes.join(";")}m` : "";
-    if (this.activeHyperlink) {
-      result += formatOsc8Hyperlink2(this.activeHyperlink);
-    }
-    return result;
-  }
-  hasActiveCodes() {
-    return this.bold || this.dim || this.italic || this.underline || this.blink || this.inverse || this.hidden || this.strikethrough || this.fgColor !== null || this.bgColor !== null || this.activeHyperlink !== null;
-  }
-  getLineEndReset() {
-    let result = "";
-    if (this.underline) {
-      result += "\x1B[24m";
-    }
-    if (this.activeHyperlink) {
-      result += formatOsc8Close2(this.activeHyperlink.terminator);
-    }
-    return result;
-  }
-}
-function updateTrackerFromText2(text, tracker) {
-  let i = 0;
-  while (i < text.length) {
-    const ansiResult = extractAnsiCode2(text, i);
-    if (ansiResult) {
-      tracker.process(ansiResult.code);
-      i += ansiResult.length;
-    } else {
-      i++;
-    }
-  }
-}
-function splitIntoTokensWithAnsi2(text) {
-  const tokens = [];
-  let current = "";
-  let pendingAnsi = "";
-  let inWhitespace = false;
-  let i = 0;
-  while (i < text.length) {
-    const ansiResult = extractAnsiCode2(text, i);
-    if (ansiResult) {
-      pendingAnsi += ansiResult.code;
-      i += ansiResult.length;
-      continue;
-    }
-    const char = text[i];
-    const charIsSpace = char === " ";
-    if (charIsSpace !== inWhitespace && current) {
-      tokens.push(current);
-      current = "";
-    }
-    if (pendingAnsi) {
-      current += pendingAnsi;
-      pendingAnsi = "";
-    }
-    inWhitespace = charIsSpace;
-    current += char;
-    i++;
-  }
-  if (pendingAnsi) {
-    current += pendingAnsi;
-  }
-  if (current) {
-    tokens.push(current);
-  }
-  return tokens;
-}
-function wrapTextWithAnsi2(text, width) {
-  if (!text) {
-    return [""];
-  }
-  const inputLines = text.split(`
-`);
-  const result = [];
-  const tracker = new AnsiCodeTracker2;
-  for (const inputLine of inputLines) {
-    const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
-    result.push(...wrapSingleLine2(prefix + inputLine, width));
-    updateTrackerFromText2(inputLine, tracker);
-  }
-  return result.length > 0 ? result : [""];
-}
-function wrapSingleLine2(line, width) {
-  if (!line) {
-    return [""];
-  }
-  const visibleLength = visibleWidth2(line);
-  if (visibleLength <= width) {
-    return [line];
-  }
-  const wrapped = [];
-  const tracker = new AnsiCodeTracker2;
-  const tokens = splitIntoTokensWithAnsi2(line);
-  let currentLine = "";
-  let currentVisibleLength = 0;
-  for (const token of tokens) {
-    const tokenVisibleLength = visibleWidth2(token);
-    const isWhitespace = token.trim() === "";
-    if (tokenVisibleLength > width && !isWhitespace) {
-      if (currentLine) {
-        const lineEndReset = tracker.getLineEndReset();
-        if (lineEndReset) {
-          currentLine += lineEndReset;
-        }
-        wrapped.push(currentLine);
-        currentLine = "";
-        currentVisibleLength = 0;
-      }
-      const broken = breakLongWord2(token, width, tracker);
-      wrapped.push(...broken.slice(0, -1));
-      currentLine = broken[broken.length - 1];
-      currentVisibleLength = visibleWidth2(currentLine);
-      continue;
-    }
-    const totalNeeded = currentVisibleLength + tokenVisibleLength;
-    if (totalNeeded > width && currentVisibleLength > 0) {
-      let lineToWrap = currentLine.trimEnd();
-      const lineEndReset = tracker.getLineEndReset();
-      if (lineEndReset) {
-        lineToWrap += lineEndReset;
-      }
-      wrapped.push(lineToWrap);
-      if (isWhitespace) {
-        currentLine = tracker.getActiveCodes();
-        currentVisibleLength = 0;
-      } else {
-        currentLine = tracker.getActiveCodes() + token;
-        currentVisibleLength = tokenVisibleLength;
-      }
-    } else {
-      currentLine += token;
-      currentVisibleLength += tokenVisibleLength;
-    }
-    updateTrackerFromText2(token, tracker);
-  }
-  if (currentLine) {
-    wrapped.push(currentLine);
-  }
-  return wrapped.length > 0 ? wrapped.map((line) => line.trimEnd()) : [""];
-}
-function breakLongWord2(word, width, tracker) {
-  const lines = [];
-  let currentLine = tracker.getActiveCodes();
-  let currentWidth = 0;
-  let i = 0;
-  const segments = [];
-  while (i < word.length) {
-    const ansiResult = extractAnsiCode2(word, i);
-    if (ansiResult) {
-      segments.push({ type: "ansi", value: ansiResult.code });
-      i += ansiResult.length;
-    } else {
-      let end = i;
-      while (end < word.length) {
-        const nextAnsi = extractAnsiCode2(word, end);
-        if (nextAnsi)
-          break;
-        end++;
-      }
-      const textPortion = word.slice(i, end);
-      for (const seg of segmenter3.segment(textPortion)) {
-        segments.push({ type: "grapheme", value: seg.segment });
-      }
-      i = end;
-    }
-  }
-  for (const seg of segments) {
-    if (seg.type === "ansi") {
-      currentLine += seg.value;
-      tracker.process(seg.value);
-      continue;
-    }
-    const grapheme = seg.value;
-    if (!grapheme)
-      continue;
-    const graphemeWidth = visibleWidth2(grapheme);
-    if (currentWidth + graphemeWidth > width) {
-      const lineEndReset = tracker.getLineEndReset();
-      if (lineEndReset) {
-        currentLine += lineEndReset;
-      }
-      lines.push(currentLine);
-      currentLine = tracker.getActiveCodes();
-      currentWidth = 0;
-    }
-    currentLine += grapheme;
-    currentWidth += graphemeWidth;
-  }
-  if (currentLine) {
-    lines.push(currentLine);
-  }
-  return lines.length > 0 ? lines : [""];
-}
-function applyBackgroundToLine2(line, width, bgFn) {
-  const visibleLen = visibleWidth2(line);
-  const paddingNeeded = Math.max(0, width - visibleLen);
-  const padding = " ".repeat(paddingNeeded);
-  const withPadding = line + padding;
-  return bgFn(withPadding);
-}
-function truncateToWidth2(text, maxWidth, ellipsis = "...", pad = false) {
-  if (maxWidth <= 0) {
-    return "";
-  }
-  if (text.length === 0) {
-    return pad ? " ".repeat(maxWidth) : "";
-  }
-  const ellipsisWidth = visibleWidth2(ellipsis);
-  if (ellipsisWidth >= maxWidth) {
-    const textWidth = visibleWidth2(text);
-    if (textWidth <= maxWidth) {
-      return pad ? text + " ".repeat(maxWidth - textWidth) : text;
-    }
-    const clippedEllipsis = truncateFragmentToWidth2(ellipsis, maxWidth);
-    if (clippedEllipsis.width === 0) {
-      return pad ? " ".repeat(maxWidth) : "";
-    }
-    return finalizeTruncatedResult2("", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);
-  }
-  if (isPrintableAscii2(text)) {
-    if (text.length <= maxWidth) {
-      return pad ? text + " ".repeat(maxWidth - text.length) : text;
-    }
-    const targetWidth = maxWidth - ellipsisWidth;
-    return finalizeTruncatedResult2(text.slice(0, targetWidth), targetWidth, ellipsis, ellipsisWidth, maxWidth, pad);
-  }
-  const targetWidth = maxWidth - ellipsisWidth;
-  let result = "";
-  let pendingAnsi = "";
-  let visibleSoFar = 0;
-  let keptWidth = 0;
-  let keepContiguousPrefix = true;
-  let overflowed = false;
-  let exhaustedInput = false;
-  const hasAnsi = text.includes("\x1B");
-  const hasTabs = text.includes("\t");
-  if (!hasAnsi && !hasTabs) {
-    for (const { segment } of segmenter3.segment(text)) {
-      const width = graphemeWidth2(segment);
-      if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-        result += segment;
-        keptWidth += width;
-      } else {
-        keepContiguousPrefix = false;
-      }
-      visibleSoFar += width;
-      if (visibleSoFar > maxWidth) {
-        overflowed = true;
-        break;
-      }
-    }
-    exhaustedInput = !overflowed;
-  } else {
-    let i = 0;
-    while (i < text.length) {
-      const ansi = extractAnsiCode2(text, i);
-      if (ansi) {
-        pendingAnsi += ansi.code;
-        i += ansi.length;
-        continue;
-      }
-      if (text[i] === "\t") {
-        if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
-          if (pendingAnsi) {
-            result += pendingAnsi;
-            pendingAnsi = "";
-          }
-          result += "\t";
-          keptWidth += 3;
-        } else {
-          keepContiguousPrefix = false;
-          pendingAnsi = "";
-        }
-        visibleSoFar += 3;
-        if (visibleSoFar > maxWidth) {
-          overflowed = true;
-          break;
-        }
-        i++;
-        continue;
-      }
-      let end = i;
-      while (end < text.length && text[end] !== "\t") {
-        const nextAnsi = extractAnsiCode2(text, end);
-        if (nextAnsi) {
-          break;
-        }
-        end++;
-      }
-      for (const { segment } of segmenter3.segment(text.slice(i, end))) {
-        const width = graphemeWidth2(segment);
-        if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-          if (pendingAnsi) {
-            result += pendingAnsi;
-            pendingAnsi = "";
-          }
-          result += segment;
-          keptWidth += width;
-        } else {
-          keepContiguousPrefix = false;
-          pendingAnsi = "";
-        }
-        visibleSoFar += width;
-        if (visibleSoFar > maxWidth) {
-          overflowed = true;
-          break;
-        }
-      }
-      if (overflowed) {
-        break;
-      }
-      i = end;
-    }
-    exhaustedInput = i >= text.length;
-  }
-  if (!overflowed && exhaustedInput) {
-    return pad ? text + " ".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;
-  }
-  return finalizeTruncatedResult2(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);
-}
-var pooledStyleTracker2 = new AnsiCodeTracker2;
-
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/box.js
-class Box2 {
-  children = [];
-  paddingX;
-  paddingY;
-  bgFn;
-  cache;
-  constructor(paddingX = 1, paddingY = 1, bgFn) {
-    this.paddingX = paddingX;
-    this.paddingY = paddingY;
-    this.bgFn = bgFn;
-  }
-  addChild(component) {
-    this.children.push(component);
-    this.invalidateCache();
-  }
-  removeChild(component) {
-    const index = this.children.indexOf(component);
-    if (index !== -1) {
-      this.children.splice(index, 1);
-      this.invalidateCache();
-    }
-  }
-  clear() {
-    this.children = [];
-    this.invalidateCache();
-  }
-  setBgFn(bgFn) {
-    this.bgFn = bgFn;
-  }
-  invalidateCache() {
-    this.cache = undefined;
-  }
-  matchCache(width, childLines, bgSample) {
-    const cache = this.cache;
-    return !!cache && cache.width === width && cache.bgSample === bgSample && cache.childLines.length === childLines.length && cache.childLines.every((line, i) => line === childLines[i]);
-  }
-  invalidate() {
-    this.invalidateCache();
-    for (const child of this.children) {
-      child.invalidate?.();
-    }
-  }
-  render(width) {
-    if (this.children.length === 0) {
-      return [];
-    }
-    const contentWidth = Math.max(1, width - this.paddingX * 2);
-    const leftPad = " ".repeat(this.paddingX);
-    const childLines = [];
-    for (const child of this.children) {
-      if (!child || typeof child.render !== "function")
-        continue;
-      const lines = child.render(contentWidth);
-      for (const line of lines) {
-        childLines.push(leftPad + line);
-      }
-    }
-    if (childLines.length === 0) {
-      return [];
-    }
-    const bgSample = this.bgFn ? this.bgFn("test") : undefined;
-    if (this.matchCache(width, childLines, bgSample)) {
-      return this.cache.lines;
-    }
-    const result = [];
-    for (let i = 0;i < this.paddingY; i++) {
-      result.push(this.applyBg("", width));
-    }
-    for (const line of childLines) {
-      result.push(this.applyBg(line, width));
-    }
-    for (let i = 0;i < this.paddingY; i++) {
-      result.push(this.applyBg("", width));
-    }
-    this.cache = { childLines, width, bgSample, lines: result };
-    return result;
-  }
-  applyBg(line, width) {
-    const visLen = visibleWidth2(line);
-    const padNeeded = Math.max(0, width - visLen);
-    const padded = line + " ".repeat(padNeeded);
-    if (this.bgFn) {
-      return applyBackgroundToLine2(padded, width, this.bgFn);
-    }
-    return padded;
-  }
-}
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/keys.js
-var _kittyProtocolActive = false;
-var SYMBOL_KEYS2 = new Set([
-  "`",
-  "-",
-  "=",
-  "[",
-  "]",
-  "\\",
-  ";",
-  "'",
-  ",",
-  ".",
-  "/",
-  "!",
-  "@",
-  "#",
-  "$",
-  "%",
-  "^",
-  "&",
-  "*",
-  "(",
-  ")",
-  "_",
-  "+",
-  "|",
-  "~",
-  "{",
-  "}",
-  ":",
-  "<",
-  ">",
-  "?"
-]);
-var MODIFIERS2 = {
-  shift: 1,
-  alt: 2,
-  ctrl: 4,
-  super: 8
-};
-var LOCK_MASK2 = 64 + 128;
-var CODEPOINTS = {
-  escape: 27,
-  tab: 9,
-  enter: 13,
-  space: 32,
-  backspace: 127,
-  kpEnter: 57414
-};
-var ARROW_CODEPOINTS2 = {
-  up: -1,
-  down: -2,
-  right: -3,
-  left: -4
-};
-var FUNCTIONAL_CODEPOINTS2 = {
-  delete: -10,
-  insert: -11,
-  pageUp: -12,
-  pageDown: -13,
-  home: -14,
-  end: -15
-};
-var KITTY_FUNCTIONAL_KEY_EQUIVALENTS2 = new Map([
-  [57399, 48],
-  [57400, 49],
-  [57401, 50],
-  [57402, 51],
-  [57403, 52],
-  [57404, 53],
-  [57405, 54],
-  [57406, 55],
-  [57407, 56],
-  [57408, 57],
-  [57409, 46],
-  [57410, 47],
-  [57411, 42],
-  [57412, 45],
-  [57413, 43],
-  [57415, 61],
-  [57416, 44],
-  [57417, ARROW_CODEPOINTS2.left],
-  [57418, ARROW_CODEPOINTS2.right],
-  [57419, ARROW_CODEPOINTS2.up],
-  [57420, ARROW_CODEPOINTS2.down],
-  [57421, FUNCTIONAL_CODEPOINTS2.pageUp],
-  [57422, FUNCTIONAL_CODEPOINTS2.pageDown],
-  [57423, FUNCTIONAL_CODEPOINTS2.home],
-  [57424, FUNCTIONAL_CODEPOINTS2.end],
-  [57425, FUNCTIONAL_CODEPOINTS2.insert],
-  [57426, FUNCTIONAL_CODEPOINTS2.delete]
-]);
-function normalizeKittyFunctionalCodepoint(codepoint) {
-  return KITTY_FUNCTIONAL_KEY_EQUIVALENTS2.get(codepoint) ?? codepoint;
-}
-function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
-  const effectiveModifier = modifier & ~LOCK_MASK2;
-  if ((effectiveModifier & MODIFIERS2.shift) !== 0 && codepoint >= 65 && codepoint <= 90) {
-    return codepoint + 32;
-  }
-  return codepoint;
-}
-var LEGACY_KEY_SEQUENCES = {
-  up: ["\x1B[A", "\x1BOA"],
-  down: ["\x1B[B", "\x1BOB"],
-  right: ["\x1B[C", "\x1BOC"],
-  left: ["\x1B[D", "\x1BOD"],
-  home: ["\x1B[H", "\x1BOH", "\x1B[1~", "\x1B[7~"],
-  end: ["\x1B[F", "\x1BOF", "\x1B[4~", "\x1B[8~"],
-  insert: ["\x1B[2~"],
-  delete: ["\x1B[3~"],
-  pageUp: ["\x1B[5~", "\x1B[[5~"],
-  pageDown: ["\x1B[6~", "\x1B[[6~"],
-  clear: ["\x1B[E", "\x1BOE"],
-  f1: ["\x1BOP", "\x1B[11~", "\x1B[[A"],
-  f2: ["\x1BOQ", "\x1B[12~", "\x1B[[B"],
-  f3: ["\x1BOR", "\x1B[13~", "\x1B[[C"],
-  f4: ["\x1BOS", "\x1B[14~", "\x1B[[D"],
-  f5: ["\x1B[15~", "\x1B[[E"],
-  f6: ["\x1B[17~"],
-  f7: ["\x1B[18~"],
-  f8: ["\x1B[19~"],
-  f9: ["\x1B[20~"],
-  f10: ["\x1B[21~"],
-  f11: ["\x1B[23~"],
-  f12: ["\x1B[24~"]
-};
-var LEGACY_SHIFT_SEQUENCES = {
-  up: ["\x1B[a"],
-  down: ["\x1B[b"],
-  right: ["\x1B[c"],
-  left: ["\x1B[d"],
-  clear: ["\x1B[e"],
-  insert: ["\x1B[2$"],
-  delete: ["\x1B[3$"],
-  pageUp: ["\x1B[5$"],
-  pageDown: ["\x1B[6$"],
-  home: ["\x1B[7$"],
-  end: ["\x1B[8$"]
-};
-var LEGACY_CTRL_SEQUENCES = {
-  up: ["\x1BOa"],
-  down: ["\x1BOb"],
-  right: ["\x1BOc"],
-  left: ["\x1BOd"],
-  clear: ["\x1BOe"],
-  insert: ["\x1B[2^"],
-  delete: ["\x1B[3^"],
-  pageUp: ["\x1B[5^"],
-  pageDown: ["\x1B[6^"],
-  home: ["\x1B[7^"],
-  end: ["\x1B[8^"]
-};
-var matchesLegacySequence = (data, sequences) => sequences.includes(data);
-var matchesLegacyModifierSequence = (data, key, modifier) => {
-  if (modifier === MODIFIERS2.shift) {
-    return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
-  }
-  if (modifier === MODIFIERS2.ctrl) {
-    return matchesLegacySequence(data, LEGACY_CTRL_SEQUENCES[key]);
-  }
-  return false;
-};
-var _lastEventType = "press";
-function parseEventType(eventTypeStr) {
-  if (!eventTypeStr)
-    return "press";
-  const eventType = parseInt(eventTypeStr, 10);
-  if (eventType === 2)
-    return "repeat";
-  if (eventType === 3)
-    return "release";
-  return "press";
-}
-function parseKittySequence(data) {
-  const csiUMatch = data.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
-  if (csiUMatch) {
-    const codepoint = parseInt(csiUMatch[1], 10);
-    const shiftedKey = csiUMatch[2] && csiUMatch[2].length > 0 ? parseInt(csiUMatch[2], 10) : undefined;
-    const baseLayoutKey = csiUMatch[3] ? parseInt(csiUMatch[3], 10) : undefined;
-    const modValue = csiUMatch[4] ? parseInt(csiUMatch[4], 10) : 1;
-    const eventType = parseEventType(csiUMatch[5]);
-    _lastEventType = eventType;
-    return { codepoint, shiftedKey, baseLayoutKey, modifier: modValue - 1, eventType };
-  }
-  const arrowMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$/);
-  if (arrowMatch) {
-    const modValue = parseInt(arrowMatch[1], 10);
-    const eventType = parseEventType(arrowMatch[2]);
-    const arrowCodes = { A: -1, B: -2, C: -3, D: -4 };
-    _lastEventType = eventType;
-    return { codepoint: arrowCodes[arrowMatch[3]], modifier: modValue - 1, eventType };
-  }
-  const funcMatch = data.match(/^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$/);
-  if (funcMatch) {
-    const keyNum = parseInt(funcMatch[1], 10);
-    const modValue = funcMatch[2] ? parseInt(funcMatch[2], 10) : 1;
-    const eventType = parseEventType(funcMatch[3]);
-    const funcCodes = {
-      2: FUNCTIONAL_CODEPOINTS2.insert,
-      3: FUNCTIONAL_CODEPOINTS2.delete,
-      5: FUNCTIONAL_CODEPOINTS2.pageUp,
-      6: FUNCTIONAL_CODEPOINTS2.pageDown,
-      7: FUNCTIONAL_CODEPOINTS2.home,
-      8: FUNCTIONAL_CODEPOINTS2.end
-    };
-    const codepoint = funcCodes[keyNum];
-    if (codepoint !== undefined) {
-      _lastEventType = eventType;
-      return { codepoint, modifier: modValue - 1, eventType };
-    }
-  }
-  const homeEndMatch = data.match(/^\x1b\[1;(\d+)(?::(\d+))?([HF])$/);
-  if (homeEndMatch) {
-    const modValue = parseInt(homeEndMatch[1], 10);
-    const eventType = parseEventType(homeEndMatch[2]);
-    const codepoint = homeEndMatch[3] === "H" ? FUNCTIONAL_CODEPOINTS2.home : FUNCTIONAL_CODEPOINTS2.end;
-    _lastEventType = eventType;
-    return { codepoint, modifier: modValue - 1, eventType };
-  }
-  return null;
-}
-function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
-  const parsed = parseKittySequence(data);
-  if (!parsed)
-    return false;
-  const actualMod = parsed.modifier & ~LOCK_MASK2;
-  const expectedMod = expectedModifier & ~LOCK_MASK2;
-  if (actualMod !== expectedMod)
-    return false;
-  const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
-  const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
-  if (normalizedCodepoint === normalizedExpectedCodepoint)
-    return true;
-  if (parsed.baseLayoutKey !== undefined && parsed.baseLayoutKey === expectedCodepoint) {
-    const cp = normalizedCodepoint;
-    const isLatinLetter = cp >= 97 && cp <= 122;
-    const isKnownSymbol = SYMBOL_KEYS2.has(String.fromCharCode(cp));
-    if (!isLatinLetter && !isKnownSymbol)
-      return true;
-  }
-  return false;
-}
-function parseModifyOtherKeysSequence(data) {
-  const match = data.match(/^\x1b\[27;(\d+);(\d+)~$/);
-  if (!match)
-    return null;
-  const modValue = parseInt(match[1], 10);
-  const codepoint = parseInt(match[2], 10);
-  return { codepoint, modifier: modValue - 1 };
-}
-function matchesModifyOtherKeys(data, expectedKeycode, expectedModifier) {
-  const parsed = parseModifyOtherKeysSequence(data);
-  if (!parsed)
-    return false;
-  return parsed.codepoint === expectedKeycode && parsed.modifier === expectedModifier;
-}
-function isWindowsTerminalSession() {
-  return Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY;
-}
-function matchesRawBackspace(data, expectedModifier) {
-  if (data === "\x7F")
-    return expectedModifier === 0;
-  if (data !== "\b")
-    return false;
-  return isWindowsTerminalSession() ? expectedModifier === MODIFIERS2.ctrl : expectedModifier === 0;
-}
-function rawCtrlChar(key) {
-  const char = key.toLowerCase();
-  const code = char.charCodeAt(0);
-  if (code >= 97 && code <= 122 || char === "[" || char === "\\" || char === "]" || char === "_") {
-    return String.fromCharCode(code & 31);
-  }
-  if (char === "-") {
-    return String.fromCharCode(31);
-  }
-  return null;
-}
-function isDigitKey(key) {
-  return key >= "0" && key <= "9";
-}
-function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
-  if (expectedModifier === 0)
-    return false;
-  const parsed = parseModifyOtherKeysSequence(data);
-  if (!parsed || parsed.modifier !== expectedModifier)
-    return false;
-  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
-}
-function parseKeyId(keyId) {
-  const parts = keyId.toLowerCase().split("+");
-  const key = parts[parts.length - 1];
-  if (!key)
-    return null;
-  return {
-    key,
-    ctrl: parts.includes("ctrl"),
-    shift: parts.includes("shift"),
-    alt: parts.includes("alt"),
-    super: parts.includes("super")
-  };
-}
-function matchesKey2(data, keyId) {
-  const parsed = parseKeyId(keyId);
-  if (!parsed)
-    return false;
-  const { key, ctrl, shift, alt, super: superModifier } = parsed;
-  let modifier = 0;
-  if (shift)
-    modifier |= MODIFIERS2.shift;
-  if (alt)
-    modifier |= MODIFIERS2.alt;
-  if (ctrl)
-    modifier |= MODIFIERS2.ctrl;
-  if (superModifier)
-    modifier |= MODIFIERS2.super;
-  switch (key) {
-    case "escape":
-    case "esc":
-      if (modifier !== 0)
-        return false;
-      return data === "\x1B" || matchesKittySequence(data, CODEPOINTS.escape, 0) || matchesModifyOtherKeys(data, CODEPOINTS.escape, 0);
-    case "space":
-      if (!_kittyProtocolActive) {
-        if (modifier === MODIFIERS2.ctrl && data === "\x00") {
-          return true;
-        }
-        if (modifier === MODIFIERS2.alt && data === "\x1B ") {
-          return true;
-        }
-      }
-      if (modifier === 0) {
-        return data === " " || matchesKittySequence(data, CODEPOINTS.space, 0) || matchesModifyOtherKeys(data, CODEPOINTS.space, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.space, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.space, modifier);
-    case "tab":
-      if (modifier === MODIFIERS2.shift) {
-        return data === "\x1B[Z" || matchesKittySequence(data, CODEPOINTS.tab, MODIFIERS2.shift) || matchesModifyOtherKeys(data, CODEPOINTS.tab, MODIFIERS2.shift);
-      }
-      if (modifier === 0) {
-        return data === "\t" || matchesKittySequence(data, CODEPOINTS.tab, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.tab, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier);
-    case "enter":
-    case "return":
-      if (modifier === MODIFIERS2.shift) {
-        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS2.shift) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS2.shift)) {
-          return true;
-        }
-        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS2.shift)) {
-          return true;
-        }
-        if (_kittyProtocolActive) {
-          return data === "\x1B\r" || data === `
-`;
-        }
-        return false;
-      }
-      if (modifier === MODIFIERS2.alt) {
-        if (matchesKittySequence(data, CODEPOINTS.enter, MODIFIERS2.alt) || matchesKittySequence(data, CODEPOINTS.kpEnter, MODIFIERS2.alt)) {
-          return true;
-        }
-        if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS2.alt)) {
-          return true;
-        }
-        if (!_kittyProtocolActive) {
-          return data === "\x1B\r";
-        }
-        return false;
-      }
-      if (modifier === 0) {
-        return data === "\r" || !_kittyProtocolActive && data === `
-` || data === "\x1BOM" || matchesKittySequence(data, CODEPOINTS.enter, 0) || matchesKittySequence(data, CODEPOINTS.kpEnter, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.enter, modifier) || matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier);
-    case "backspace":
-      if (modifier === MODIFIERS2.alt) {
-        if (data === "\x1B\x7F" || data === "\x1B\b") {
-          return true;
-        }
-        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS2.alt) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS2.alt);
-      }
-      if (modifier === MODIFIERS2.ctrl) {
-        if (matchesRawBackspace(data, MODIFIERS2.ctrl))
-          return true;
-        return matchesKittySequence(data, CODEPOINTS.backspace, MODIFIERS2.ctrl) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, MODIFIERS2.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesRawBackspace(data, 0) || matchesKittySequence(data, CODEPOINTS.backspace, 0) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, 0);
-      }
-      return matchesKittySequence(data, CODEPOINTS.backspace, modifier) || matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier);
-    case "insert":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.insert, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "insert", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.insert, modifier);
-    case "delete":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.delete, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "delete", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.delete, modifier);
-    case "clear":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
-      }
-      return matchesLegacyModifierSequence(data, "clear", modifier);
-    case "home":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.home, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "home", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.home, modifier);
-    case "end":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.end, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "end", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.end, modifier);
-    case "pageup":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.pageUp, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.pageUp, modifier);
-    case "pagedown":
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) || matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.pageDown, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS2.pageDown, modifier);
-    case "up":
-      if (modifier === MODIFIERS2.alt) {
-        return data === "\x1Bp" || matchesKittySequence(data, ARROW_CODEPOINTS2.up, MODIFIERS2.alt);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) || matchesKittySequence(data, ARROW_CODEPOINTS2.up, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "up", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS2.up, modifier);
-    case "down":
-      if (modifier === MODIFIERS2.alt) {
-        return data === "\x1Bn" || matchesKittySequence(data, ARROW_CODEPOINTS2.down, MODIFIERS2.alt);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) || matchesKittySequence(data, ARROW_CODEPOINTS2.down, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "down", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS2.down, modifier);
-    case "left":
-      if (modifier === MODIFIERS2.alt) {
-        return data === "\x1B[1;3D" || !_kittyProtocolActive && data === "\x1BB" || data === "\x1Bb" || matchesKittySequence(data, ARROW_CODEPOINTS2.left, MODIFIERS2.alt);
-      }
-      if (modifier === MODIFIERS2.ctrl) {
-        return data === "\x1B[1;5D" || matchesLegacyModifierSequence(data, "left", MODIFIERS2.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS2.left, MODIFIERS2.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) || matchesKittySequence(data, ARROW_CODEPOINTS2.left, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "left", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS2.left, modifier);
-    case "right":
-      if (modifier === MODIFIERS2.alt) {
-        return data === "\x1B[1;3C" || !_kittyProtocolActive && data === "\x1BF" || data === "\x1Bf" || matchesKittySequence(data, ARROW_CODEPOINTS2.right, MODIFIERS2.alt);
-      }
-      if (modifier === MODIFIERS2.ctrl) {
-        return data === "\x1B[1;5C" || matchesLegacyModifierSequence(data, "right", MODIFIERS2.ctrl) || matchesKittySequence(data, ARROW_CODEPOINTS2.right, MODIFIERS2.ctrl);
-      }
-      if (modifier === 0) {
-        return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) || matchesKittySequence(data, ARROW_CODEPOINTS2.right, 0);
-      }
-      if (matchesLegacyModifierSequence(data, "right", modifier)) {
-        return true;
-      }
-      return matchesKittySequence(data, ARROW_CODEPOINTS2.right, modifier);
-    case "f1":
-    case "f2":
-    case "f3":
-    case "f4":
-    case "f5":
-    case "f6":
-    case "f7":
-    case "f8":
-    case "f9":
-    case "f10":
-    case "f11":
-    case "f12": {
-      if (modifier !== 0) {
-        return false;
-      }
-      const functionKey = key;
-      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
-    }
-  }
-  if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS2.has(key))) {
-    const codepoint = key.charCodeAt(0);
-    const rawCtrl = rawCtrlChar(key);
-    const isLetter = key >= "a" && key <= "z";
-    const isDigit = isDigitKey(key);
-    if (modifier === MODIFIERS2.ctrl + MODIFIERS2.alt && !_kittyProtocolActive && rawCtrl) {
-      if (data === `\x1B${rawCtrl}`)
-        return true;
-    }
-    if (modifier === MODIFIERS2.alt && !_kittyProtocolActive && (isLetter || isDigit)) {
-      if (data === `\x1B${key}`)
-        return true;
-    }
-    if (modifier === MODIFIERS2.ctrl) {
-      if (rawCtrl && data === rawCtrl)
-        return true;
-      return matchesKittySequence(data, codepoint, MODIFIERS2.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS2.ctrl);
-    }
-    if (modifier === MODIFIERS2.shift + MODIFIERS2.ctrl) {
-      return matchesKittySequence(data, codepoint, MODIFIERS2.shift + MODIFIERS2.ctrl) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS2.shift + MODIFIERS2.ctrl);
-    }
-    if (modifier === MODIFIERS2.shift) {
-      if (isLetter && data === key.toUpperCase())
-        return true;
-      return matchesKittySequence(data, codepoint, MODIFIERS2.shift) || matchesPrintableModifyOtherKeys(data, codepoint, MODIFIERS2.shift);
-    }
-    if (modifier !== 0) {
-      return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
-    }
-    return data === key || matchesKittySequence(data, codepoint, 0);
-  }
-  return false;
-}
-var KITTY_PRINTABLE_ALLOWED_MODIFIERS2 = MODIFIERS2.shift | LOCK_MASK2;
-
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/keybindings.js
-var TUI_KEYBINDINGS2 = {
-  "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
-  "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
-  "tui.editor.cursorLeft": {
-    defaultKeys: ["left", "ctrl+b"],
-    description: "Move cursor left"
-  },
-  "tui.editor.cursorRight": {
-    defaultKeys: ["right", "ctrl+f"],
-    description: "Move cursor right"
-  },
-  "tui.editor.cursorWordLeft": {
-    defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
-    description: "Move cursor word left"
-  },
-  "tui.editor.cursorWordRight": {
-    defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
-    description: "Move cursor word right"
-  },
-  "tui.editor.cursorLineStart": {
-    defaultKeys: ["home", "ctrl+a"],
-    description: "Move to line start"
-  },
-  "tui.editor.cursorLineEnd": {
-    defaultKeys: ["end", "ctrl+e"],
-    description: "Move to line end"
-  },
-  "tui.editor.jumpForward": {
-    defaultKeys: "ctrl+]",
-    description: "Jump forward to character"
-  },
-  "tui.editor.jumpBackward": {
-    defaultKeys: "ctrl+alt+]",
-    description: "Jump backward to character"
-  },
-  "tui.editor.pageUp": { defaultKeys: "pageUp", description: "Page up" },
-  "tui.editor.pageDown": { defaultKeys: "pageDown", description: "Page down" },
-  "tui.editor.deleteCharBackward": {
-    defaultKeys: "backspace",
-    description: "Delete character backward"
-  },
-  "tui.editor.deleteCharForward": {
-    defaultKeys: ["delete", "ctrl+d"],
-    description: "Delete character forward"
-  },
-  "tui.editor.deleteWordBackward": {
-    defaultKeys: ["ctrl+w", "alt+backspace"],
-    description: "Delete word backward"
-  },
-  "tui.editor.deleteWordForward": {
-    defaultKeys: ["alt+d", "alt+delete"],
-    description: "Delete word forward"
-  },
-  "tui.editor.deleteToLineStart": {
-    defaultKeys: "ctrl+u",
-    description: "Delete to line start"
-  },
-  "tui.editor.deleteToLineEnd": {
-    defaultKeys: "ctrl+k",
-    description: "Delete to line end"
-  },
-  "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
-  "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
-  "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
-  "tui.input.newLine": { defaultKeys: "shift+enter", description: "Insert newline" },
-  "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
-  "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
-  "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
-  "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
-  "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
-  "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
-  "tui.select.pageDown": {
-    defaultKeys: "pageDown",
-    description: "Selection page down"
-  },
-  "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
-  "tui.select.cancel": {
-    defaultKeys: ["escape", "ctrl+c"],
-    description: "Cancel selection"
-  }
-};
-function normalizeKeys(keys) {
-  if (keys === undefined)
-    return [];
-  const keyList = Array.isArray(keys) ? keys : [keys];
-  const seen = new Set;
-  const result = [];
-  for (const key of keyList) {
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(key);
-    }
-  }
-  return result;
-}
-
-class KeybindingsManager2 {
-  definitions;
-  userBindings;
-  keysById = new Map;
-  conflicts = [];
-  constructor(definitions, userBindings = {}) {
-    this.definitions = definitions;
-    this.userBindings = userBindings;
-    this.rebuild();
-  }
-  rebuild() {
-    this.keysById.clear();
-    this.conflicts = [];
-    const userClaims = new Map;
-    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
-      if (!(keybinding in this.definitions))
-        continue;
-      for (const key of normalizeKeys(keys)) {
-        const claimants = userClaims.get(key) ?? new Set;
-        claimants.add(keybinding);
-        userClaims.set(key, claimants);
-      }
-    }
-    for (const [key, keybindings] of userClaims) {
-      if (keybindings.size > 1) {
-        this.conflicts.push({ key, keybindings: [...keybindings] });
-      }
-    }
-    for (const [id, definition] of Object.entries(this.definitions)) {
-      const userKeys = this.userBindings[id];
-      const keys = userKeys === undefined ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
-      this.keysById.set(id, keys);
-    }
-  }
-  matches(data, keybinding) {
-    const keys = this.keysById.get(keybinding) ?? [];
-    for (const key of keys) {
-      if (matchesKey2(data, key))
-        return true;
-    }
-    return false;
-  }
-  getKeys(keybinding) {
-    return [...this.keysById.get(keybinding) ?? []];
-  }
-  getDefinition(keybinding) {
-    return this.definitions[keybinding];
-  }
-  getConflicts() {
-    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
-  }
-  setUserBindings(userBindings) {
-    this.userBindings = userBindings;
-    this.rebuild();
-  }
-  getUserBindings() {
-    return { ...this.userBindings };
-  }
-  getResolvedBindings() {
-    const resolved = {};
-    for (const id of Object.keys(this.definitions)) {
-      const keys = this.keysById.get(id) ?? [];
-      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
-    }
-    return resolved;
-  }
-}
-var globalKeybindings = null;
-function getKeybindings2() {
-  if (!globalKeybindings) {
-    globalKeybindings = new KeybindingsManager2(TUI_KEYBINDINGS2);
-  }
-  return globalKeybindings;
-}
-
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/text.js
-class Text2 {
-  text;
-  paddingX;
-  paddingY;
-  customBgFn;
-  cachedText;
-  cachedWidth;
-  cachedLines;
-  constructor(text = "", paddingX = 1, paddingY = 1, customBgFn) {
-    this.text = text;
-    this.paddingX = paddingX;
-    this.paddingY = paddingY;
-    this.customBgFn = customBgFn;
-  }
-  setText(text) {
-    this.text = text;
-    this.cachedText = undefined;
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-  setCustomBgFn(customBgFn) {
-    this.customBgFn = customBgFn;
-    this.cachedText = undefined;
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-  invalidate() {
-    this.cachedText = undefined;
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-  render(width) {
-    if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-    if (!this.text || this.text.trim() === "") {
-      const result = [];
-      this.cachedText = this.text;
-      this.cachedWidth = width;
-      this.cachedLines = result;
-      return result;
-    }
-    const normalizedText = this.text.replace(/\t/g, "   ");
-    const contentWidth = Math.max(1, width - this.paddingX * 2);
-    const wrappedLines = wrapTextWithAnsi2(normalizedText, contentWidth);
-    const leftMargin = " ".repeat(this.paddingX);
-    const rightMargin = " ".repeat(this.paddingX);
-    const contentLines = [];
-    for (const line of wrappedLines) {
-      const lineWithMargins = leftMargin + line + rightMargin;
-      if (this.customBgFn) {
-        contentLines.push(applyBackgroundToLine2(lineWithMargins, width, this.customBgFn));
-      } else {
-        const visibleLen = visibleWidth2(lineWithMargins);
-        const paddingNeeded = Math.max(0, width - visibleLen);
-        contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
-      }
-    }
-    const emptyLine = " ".repeat(width);
-    const emptyLines = [];
-    for (let i = 0;i < this.paddingY; i++) {
-      const line = this.customBgFn ? applyBackgroundToLine2(emptyLine, width, this.customBgFn) : emptyLine;
-      emptyLines.push(line);
-    }
-    const result = [...emptyLines, ...contentLines, ...emptyLines];
-    this.cachedText = this.text;
-    this.cachedWidth = width;
-    this.cachedLines = result;
-    return result.length > 0 ? result : [""];
-  }
-}
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/terminal-image.js
-var cachedCapabilities2 = null;
-var cellDimensions = { widthPx: 9, heightPx: 18 };
-function getCellDimensions2() {
-  return cellDimensions;
-}
-function detectCapabilities2() {
-  const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
-  const term = process.env.TERM?.toLowerCase() || "";
-  const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
-  const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
-  const inTmuxOrScreen = !!process.env.TMUX || term.startsWith("tmux") || term.startsWith("screen");
-  if (inTmuxOrScreen) {
-    return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
-  }
-  if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "ghostty" || term.includes("ghostty") || process.env.GHOSTTY_RESOURCES_DIR) {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (process.env.WEZTERM_PANE || termProgram === "wezterm") {
-    return { images: "kitty", trueColor: true, hyperlinks: true };
-  }
-  if (process.env.ITERM_SESSION_ID || termProgram === "iterm.app") {
-    return { images: "iterm2", trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "vscode") {
-    return { images: null, trueColor: true, hyperlinks: true };
-  }
-  if (termProgram === "alacritty") {
-    return { images: null, trueColor: true, hyperlinks: true };
-  }
-  return { images: null, trueColor: hasTrueColorHint || !!process.env.WT_SESSION, hyperlinks: false };
-}
-function getCapabilities2() {
-  if (!cachedCapabilities2) {
-    cachedCapabilities2 = detectCapabilities2();
-  }
-  return cachedCapabilities2;
-}
-var KITTY_PREFIX2 = "\x1B_G";
-var ITERM2_PREFIX2 = "\x1B]1337;File=";
-function isImageLine2(line) {
-  if (line.startsWith(KITTY_PREFIX2) || line.startsWith(ITERM2_PREFIX2)) {
-    return true;
-  }
-  return line.includes(KITTY_PREFIX2) || line.includes(ITERM2_PREFIX2);
-}
-function allocateImageId2() {
-  return Math.floor(Math.random() * 4294967294) + 1;
-}
-function encodeKitty2(base64Data, options = {}) {
-  const CHUNK_SIZE = 4096;
-  const params = ["a=T", "f=100", "q=2"];
-  if (options.moveCursor === false)
-    params.push("C=1");
-  if (options.columns)
-    params.push(`c=${options.columns}`);
-  if (options.rows)
-    params.push(`r=${options.rows}`);
-  if (options.imageId)
-    params.push(`i=${options.imageId}`);
-  if (base64Data.length <= CHUNK_SIZE) {
-    return `\x1B_G${params.join(",")};${base64Data}\x1B\\`;
-  }
-  const chunks = [];
-  let offset = 0;
-  let isFirst = true;
-  while (offset < base64Data.length) {
-    const chunk = base64Data.slice(offset, offset + CHUNK_SIZE);
-    const isLast = offset + CHUNK_SIZE >= base64Data.length;
-    if (isFirst) {
-      chunks.push(`\x1B_G${params.join(",")},m=1;${chunk}\x1B\\`);
-      isFirst = false;
-    } else if (isLast) {
-      chunks.push(`\x1B_Gm=0;${chunk}\x1B\\`);
-    } else {
-      chunks.push(`\x1B_Gm=1;${chunk}\x1B\\`);
-    }
-    offset += CHUNK_SIZE;
-  }
-  return chunks.join("");
-}
-function encodeITerm22(base64Data, options = {}) {
-  const params = [`inline=${options.inline !== false ? 1 : 0}`];
-  if (options.width !== undefined)
-    params.push(`width=${options.width}`);
-  if (options.height !== undefined)
-    params.push(`height=${options.height}`);
-  if (options.name) {
-    const nameBase64 = Buffer.from(options.name).toString("base64");
-    params.push(`name=${nameBase64}`);
-  }
-  if (options.preserveAspectRatio === false) {
-    params.push("preserveAspectRatio=0");
-  }
-  return `\x1B]1337;File=${params.join(";")}:${base64Data}\x07`;
-}
-function calculateImageCellSize(imageDimensions, maxWidthCells, maxHeightCells, cellDimensions = { widthPx: 9, heightPx: 18 }) {
-  const maxWidth = Math.max(1, Math.floor(maxWidthCells));
-  const maxHeight = maxHeightCells === undefined ? undefined : Math.max(1, Math.floor(maxHeightCells));
-  const imageWidth = Math.max(1, imageDimensions.widthPx);
-  const imageHeight = Math.max(1, imageDimensions.heightPx);
-  const widthScale = maxWidth * cellDimensions.widthPx / imageWidth;
-  const heightScale = maxHeight === undefined ? widthScale : maxHeight * cellDimensions.heightPx / imageHeight;
-  const scale = Math.min(widthScale, heightScale);
-  const scaledWidthPx = imageWidth * scale;
-  const scaledHeightPx = imageHeight * scale;
-  const columns = Math.ceil(scaledWidthPx / cellDimensions.widthPx);
-  const rows = Math.ceil(scaledHeightPx / cellDimensions.heightPx);
-  return {
-    columns: Math.max(1, Math.min(maxWidth, columns)),
-    rows: Math.max(1, maxHeight === undefined ? rows : Math.min(maxHeight, rows))
-  };
-}
-function getPngDimensions2(base64Data) {
-  try {
-    const buffer = Buffer.from(base64Data, "base64");
-    if (buffer.length < 24) {
-      return null;
-    }
-    if (buffer[0] !== 137 || buffer[1] !== 80 || buffer[2] !== 78 || buffer[3] !== 71) {
-      return null;
-    }
-    const width = buffer.readUInt32BE(16);
-    const height = buffer.readUInt32BE(20);
-    return { widthPx: width, heightPx: height };
-  } catch {
-    return null;
-  }
-}
-function getJpegDimensions2(base64Data) {
-  try {
-    const buffer = Buffer.from(base64Data, "base64");
-    if (buffer.length < 2) {
-      return null;
-    }
-    if (buffer[0] !== 255 || buffer[1] !== 216) {
-      return null;
-    }
-    let offset = 2;
-    while (offset < buffer.length - 9) {
-      if (buffer[offset] !== 255) {
-        offset++;
-        continue;
-      }
-      const marker = buffer[offset + 1];
-      if (marker >= 192 && marker <= 194) {
-        const height = buffer.readUInt16BE(offset + 5);
-        const width = buffer.readUInt16BE(offset + 7);
-        return { widthPx: width, heightPx: height };
-      }
-      if (offset + 3 >= buffer.length) {
-        return null;
-      }
-      const length = buffer.readUInt16BE(offset + 2);
-      if (length < 2) {
-        return null;
-      }
-      offset += 2 + length;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-function getGifDimensions2(base64Data) {
-  try {
-    const buffer = Buffer.from(base64Data, "base64");
-    if (buffer.length < 10) {
-      return null;
-    }
-    const sig = buffer.slice(0, 6).toString("ascii");
-    if (sig !== "GIF87a" && sig !== "GIF89a") {
-      return null;
-    }
-    const width = buffer.readUInt16LE(6);
-    const height = buffer.readUInt16LE(8);
-    return { widthPx: width, heightPx: height };
-  } catch {
-    return null;
-  }
-}
-function getWebpDimensions2(base64Data) {
-  try {
-    const buffer = Buffer.from(base64Data, "base64");
-    if (buffer.length < 30) {
-      return null;
-    }
-    const riff = buffer.slice(0, 4).toString("ascii");
-    const webp = buffer.slice(8, 12).toString("ascii");
-    if (riff !== "RIFF" || webp !== "WEBP") {
-      return null;
-    }
-    const chunk = buffer.slice(12, 16).toString("ascii");
-    if (chunk === "VP8 ") {
-      if (buffer.length < 30)
-        return null;
-      const width = buffer.readUInt16LE(26) & 16383;
-      const height = buffer.readUInt16LE(28) & 16383;
-      return { widthPx: width, heightPx: height };
-    } else if (chunk === "VP8L") {
-      if (buffer.length < 25)
-        return null;
-      const bits = buffer.readUInt32LE(21);
-      const width = (bits & 16383) + 1;
-      const height = (bits >> 14 & 16383) + 1;
-      return { widthPx: width, heightPx: height };
-    } else if (chunk === "VP8X") {
-      if (buffer.length < 30)
-        return null;
-      const width = (buffer[24] | buffer[25] << 8 | buffer[26] << 16) + 1;
-      const height = (buffer[27] | buffer[28] << 8 | buffer[29] << 16) + 1;
-      return { widthPx: width, heightPx: height };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-function getImageDimensions2(base64Data, mimeType) {
-  if (mimeType === "image/png") {
-    return getPngDimensions2(base64Data);
-  }
-  if (mimeType === "image/jpeg") {
-    return getJpegDimensions2(base64Data);
-  }
-  if (mimeType === "image/gif") {
-    return getGifDimensions2(base64Data);
-  }
-  if (mimeType === "image/webp") {
-    return getWebpDimensions2(base64Data);
-  }
-  return null;
-}
-function renderImage2(base64Data, imageDimensions, options = {}) {
-  const caps = getCapabilities2();
-  if (!caps.images) {
-    return null;
-  }
-  const maxWidth = options.maxWidthCells ?? 80;
-  const size = calculateImageCellSize(imageDimensions, maxWidth, options.maxHeightCells, getCellDimensions2());
-  if (caps.images === "kitty") {
-    const sequence = encodeKitty2(base64Data, {
-      columns: size.columns,
-      rows: size.rows,
-      imageId: options.imageId,
-      moveCursor: options.moveCursor
-    });
-    return { sequence, rows: size.rows, imageId: options.imageId };
-  }
-  if (caps.images === "iterm2") {
-    const sequence = encodeITerm22(base64Data, {
-      width: size.columns,
-      height: "auto",
-      preserveAspectRatio: options.preserveAspectRatio ?? true
-    });
-    return { sequence, rows: size.rows };
-  }
-  return null;
-}
-function hyperlink2(text, url) {
-  return `\x1B]8;;${url}\x1B\\${text}\x1B]8;;\x1B\\`;
-}
-function imageFallback2(mimeType, dimensions, filename) {
-  const parts = [];
-  if (filename)
-    parts.push(filename);
-  parts.push(`[${mimeType}]`);
-  if (dimensions)
-    parts.push(`${dimensions.widthPx}x${dimensions.heightPx}`);
-  return `[Image: ${parts.join(" ")}]`;
-}
-
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/tui.js
-class Container2 {
-  children = [];
-  addChild(component) {
-    this.children.push(component);
-  }
-  removeChild(component) {
-    const index = this.children.indexOf(component);
-    if (index !== -1) {
-      this.children.splice(index, 1);
-    }
-  }
-  clear() {
-    this.children = [];
-  }
-  invalidate() {
-    for (const child of this.children) {
-      child.invalidate?.();
-    }
-  }
-  render(width) {
-    const lines = [];
-    for (const child of this.children) {
-      const childLines = child.render(width);
-      for (const line of childLines) {
-        lines.push(line);
-      }
-    }
-    return lines;
-  }
-}
-
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/editor.js
-var baseSegmenter2 = getSegmenter2();
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/image.js
-class Image2 {
-  base64Data;
-  mimeType;
-  dimensions;
-  theme;
-  options;
-  imageId;
-  cachedLines;
-  cachedWidth;
-  constructor(base64Data, mimeType, theme, options = {}, dimensions) {
-    this.base64Data = base64Data;
-    this.mimeType = mimeType;
-    this.theme = theme;
-    this.options = options;
-    this.dimensions = dimensions || getImageDimensions2(base64Data, mimeType) || { widthPx: 800, heightPx: 600 };
-    this.imageId = options.imageId;
-  }
-  getImageId() {
-    return this.imageId;
-  }
-  invalidate() {
-    this.cachedLines = undefined;
-    this.cachedWidth = undefined;
-  }
-  render(width) {
-    if (this.cachedLines && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-    const maxWidth = Math.max(1, Math.min(width - 2, this.options.maxWidthCells ?? 60));
-    const cellDimensions = getCellDimensions2();
-    const defaultMaxHeight = Math.max(1, Math.ceil(maxWidth * cellDimensions.widthPx / cellDimensions.heightPx));
-    const maxHeight = this.options.maxHeightCells ?? defaultMaxHeight;
-    const caps = getCapabilities2();
-    let lines;
-    if (caps.images) {
-      if (caps.images === "kitty" && this.imageId === undefined) {
-        this.imageId = allocateImageId2();
-      }
-      const result = renderImage2(this.base64Data, this.dimensions, {
-        maxWidthCells: maxWidth,
-        maxHeightCells: maxHeight,
-        imageId: this.imageId,
-        moveCursor: false
-      });
-      if (result) {
-        if (result.imageId) {
-          this.imageId = result.imageId;
-        }
-        if (caps.images === "kitty") {
-          lines = [result.sequence];
-          for (let i = 0;i < result.rows - 1; i++) {
-            lines.push("");
-          }
-        } else {
-          lines = [];
-          for (let i = 0;i < result.rows - 1; i++) {
-            lines.push("");
-          }
-          const rowOffset = result.rows - 1;
-          const moveUp = rowOffset > 0 ? `\x1B[${rowOffset}A` : "";
-          lines.push(moveUp + result.sequence);
-        }
-      } else {
-        const fallback = imageFallback2(this.mimeType, this.dimensions, this.options.filename);
-        lines = [this.theme.fallbackColor(fallback)];
-      }
-    } else {
-      const fallback = imageFallback2(this.mimeType, this.dimensions, this.options.filename);
-      lines = [this.theme.fallbackColor(fallback)];
-    }
-    this.cachedLines = lines;
-    this.cachedWidth = width;
-    return lines;
-  }
-}
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/input.js
-var segmenter4 = getSegmenter2();
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/markdown.js
-var STRICT_STRIKETHROUGH_REGEX2 = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
-
-class StrictStrikethroughTokenizer2 extends _Tokenizer {
-  del(src) {
-    const match = STRICT_STRIKETHROUGH_REGEX2.exec(src);
-    if (!match) {
-      return;
-    }
-    const text = match[2];
-    return {
-      type: "del",
-      raw: match[0],
-      text,
-      tokens: this.lexer.inlineTokens(text)
-    };
-  }
-}
-var markdownParser2 = new Marked;
-markdownParser2.setOptions({
-  tokenizer: new StrictStrikethroughTokenizer2
-});
-
-class Markdown2 {
-  text;
-  paddingX;
-  paddingY;
-  defaultTextStyle;
-  theme;
-  defaultStylePrefix;
-  cachedText;
-  cachedWidth;
-  cachedLines;
-  constructor(text, paddingX, paddingY, theme, defaultTextStyle) {
-    this.text = text;
-    this.paddingX = paddingX;
-    this.paddingY = paddingY;
-    this.theme = theme;
-    this.defaultTextStyle = defaultTextStyle;
-  }
-  setText(text) {
-    this.text = text;
-    this.invalidate();
-  }
-  invalidate() {
-    this.cachedText = undefined;
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-  render(width) {
-    if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-    const contentWidth = Math.max(1, width - this.paddingX * 2);
-    if (!this.text || this.text.trim() === "") {
-      const result = [];
-      this.cachedText = this.text;
-      this.cachedWidth = width;
-      this.cachedLines = result;
-      return result;
-    }
-    const normalizedText = this.text.replace(/\t/g, "   ");
-    const tokens = markdownParser2.lexer(normalizedText);
-    const renderedLines = [];
-    for (let i = 0;i < tokens.length; i++) {
-      const token = tokens[i];
-      const nextToken = tokens[i + 1];
-      const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
-      for (const tokenLine of tokenLines) {
-        renderedLines.push(tokenLine);
-      }
-    }
-    const wrappedLines = [];
-    for (const line of renderedLines) {
-      if (isImageLine2(line)) {
-        wrappedLines.push(line);
-      } else {
-        for (const wrappedLine of wrapTextWithAnsi2(line, contentWidth)) {
-          wrappedLines.push(wrappedLine);
-        }
-      }
-    }
-    const leftMargin = " ".repeat(this.paddingX);
-    const rightMargin = " ".repeat(this.paddingX);
-    const bgFn = this.defaultTextStyle?.bgColor;
-    const contentLines = [];
-    for (const line of wrappedLines) {
-      if (isImageLine2(line)) {
-        contentLines.push(line);
-        continue;
-      }
-      const lineWithMargins = leftMargin + line + rightMargin;
-      if (bgFn) {
-        contentLines.push(applyBackgroundToLine2(lineWithMargins, width, bgFn));
-      } else {
-        const visibleLen = visibleWidth2(lineWithMargins);
-        const paddingNeeded = Math.max(0, width - visibleLen);
-        contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
-      }
-    }
-    const emptyLine = " ".repeat(width);
-    const emptyLines = [];
-    for (let i = 0;i < this.paddingY; i++) {
-      const line = bgFn ? applyBackgroundToLine2(emptyLine, width, bgFn) : emptyLine;
-      emptyLines.push(line);
-    }
-    const result = emptyLines.concat(contentLines, emptyLines);
-    this.cachedText = this.text;
-    this.cachedWidth = width;
-    this.cachedLines = result;
-    return result.length > 0 ? result : [""];
-  }
-  applyDefaultStyle(text) {
-    if (!this.defaultTextStyle) {
-      return text;
-    }
-    let styled = text;
-    if (this.defaultTextStyle.color) {
-      styled = this.defaultTextStyle.color(styled);
-    }
-    if (this.defaultTextStyle.bold) {
-      styled = this.theme.bold(styled);
-    }
-    if (this.defaultTextStyle.italic) {
-      styled = this.theme.italic(styled);
-    }
-    if (this.defaultTextStyle.strikethrough) {
-      styled = this.theme.strikethrough(styled);
-    }
-    if (this.defaultTextStyle.underline) {
-      styled = this.theme.underline(styled);
-    }
-    return styled;
-  }
-  getDefaultStylePrefix() {
-    if (!this.defaultTextStyle) {
-      return "";
-    }
-    if (this.defaultStylePrefix !== undefined) {
-      return this.defaultStylePrefix;
-    }
-    const sentinel = "\x00";
-    let styled = sentinel;
-    if (this.defaultTextStyle.color) {
-      styled = this.defaultTextStyle.color(styled);
-    }
-    if (this.defaultTextStyle.bold) {
-      styled = this.theme.bold(styled);
-    }
-    if (this.defaultTextStyle.italic) {
-      styled = this.theme.italic(styled);
-    }
-    if (this.defaultTextStyle.strikethrough) {
-      styled = this.theme.strikethrough(styled);
-    }
-    if (this.defaultTextStyle.underline) {
-      styled = this.theme.underline(styled);
-    }
-    const sentinelIndex = styled.indexOf(sentinel);
-    this.defaultStylePrefix = sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
-    return this.defaultStylePrefix;
-  }
-  getStylePrefix(styleFn) {
-    const sentinel = "\x00";
-    const styled = styleFn(sentinel);
-    const sentinelIndex = styled.indexOf(sentinel);
-    return sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
-  }
-  getDefaultInlineStyleContext() {
-    return {
-      applyText: (text) => this.applyDefaultStyle(text),
-      stylePrefix: this.getDefaultStylePrefix()
-    };
-  }
-  renderToken(token, width, nextTokenType, styleContext) {
-    const lines = [];
-    switch (token.type) {
-      case "heading": {
-        const headingLevel = token.depth;
-        const headingPrefix = `${"#".repeat(headingLevel)} `;
-        let headingStyleFn;
-        if (headingLevel === 1) {
-          headingStyleFn = (text) => this.theme.heading(this.theme.bold(this.theme.underline(text)));
-        } else {
-          headingStyleFn = (text) => this.theme.heading(this.theme.bold(text));
-        }
-        const headingStyleContext = {
-          applyText: headingStyleFn,
-          stylePrefix: this.getStylePrefix(headingStyleFn)
-        };
-        const headingText = this.renderInlineTokens(token.tokens || [], headingStyleContext);
-        const styledHeading = headingLevel >= 3 ? headingStyleFn(headingPrefix) + headingText : headingText;
-        lines.push(styledHeading);
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "paragraph": {
-        const paragraphText = this.renderInlineTokens(token.tokens || [], styleContext);
-        lines.push(paragraphText);
-        if (nextTokenType && nextTokenType !== "list" && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "text":
-        lines.push(this.renderInlineTokens([token], styleContext));
-        break;
-      case "code": {
-        const indent = this.theme.codeBlockIndent ?? "  ";
-        lines.push(this.theme.codeBlockBorder(`\`\`\`${token.lang || ""}`));
-        if (this.theme.highlightCode) {
-          const highlightedLines = this.theme.highlightCode(token.text, token.lang);
-          for (const hlLine of highlightedLines) {
-            lines.push(`${indent}${hlLine}`);
-          }
-        } else {
-          const codeLines = token.text.split(`
-`);
-          for (const codeLine of codeLines) {
-            lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-          }
-        }
-        lines.push(this.theme.codeBlockBorder("```"));
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "list": {
-        const listLines = this.renderList(token, 0, width, styleContext);
-        lines.push(...listLines);
-        break;
-      }
-      case "table": {
-        const tableLines = this.renderTable(token, width, nextTokenType, styleContext);
-        lines.push(...tableLines);
-        break;
-      }
-      case "blockquote": {
-        const quoteStyle = (text) => this.theme.quote(this.theme.italic(text));
-        const quoteStylePrefix = this.getStylePrefix(quoteStyle);
-        const applyQuoteStyle = (line) => {
-          if (!quoteStylePrefix) {
-            return quoteStyle(line);
-          }
-          const lineWithReappliedStyle = line.replace(/\x1b\[0m/g, `\x1B[0m${quoteStylePrefix}`);
-          return quoteStyle(lineWithReappliedStyle);
-        };
-        const quoteContentWidth = Math.max(1, width - 2);
-        const quoteInlineStyleContext = {
-          applyText: (text) => text,
-          stylePrefix: quoteStylePrefix
-        };
-        const quoteTokens = token.tokens || [];
-        const renderedQuoteLines = [];
-        for (let i = 0;i < quoteTokens.length; i++) {
-          const quoteToken = quoteTokens[i];
-          const nextQuoteToken = quoteTokens[i + 1];
-          renderedQuoteLines.push(...this.renderToken(quoteToken, quoteContentWidth, nextQuoteToken?.type, quoteInlineStyleContext));
-        }
-        while (renderedQuoteLines.length > 0 && renderedQuoteLines[renderedQuoteLines.length - 1] === "") {
-          renderedQuoteLines.pop();
-        }
-        for (const quoteLine of renderedQuoteLines) {
-          const styledLine = applyQuoteStyle(quoteLine);
-          const wrappedLines = wrapTextWithAnsi2(styledLine, quoteContentWidth);
-          for (const wrappedLine of wrappedLines) {
-            lines.push(this.theme.quoteBorder("\u2502 ") + wrappedLine);
-          }
-        }
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      }
-      case "hr":
-        lines.push(this.theme.hr("\u2500".repeat(Math.min(width, 80))));
-        if (nextTokenType && nextTokenType !== "space") {
-          lines.push("");
-        }
-        break;
-      case "html":
-        if ("raw" in token && typeof token.raw === "string") {
-          lines.push(this.applyDefaultStyle(token.raw.trim()));
-        }
-        break;
-      case "space":
-        lines.push("");
-        break;
-      default:
-        if ("text" in token && typeof token.text === "string") {
-          lines.push(token.text);
-        }
-    }
-    return lines;
-  }
-  renderInlineTokens(tokens, styleContext) {
-    let result = "";
-    const resolvedStyleContext = styleContext ?? this.getDefaultInlineStyleContext();
-    const { applyText, stylePrefix } = resolvedStyleContext;
-    const applyTextWithNewlines = (text) => {
-      const segments = text.split(`
-`);
-      return segments.map((segment) => applyText(segment)).join(`
-`);
-    };
-    for (const token of tokens) {
-      switch (token.type) {
-        case "text":
-          if (token.tokens && token.tokens.length > 0) {
-            result += this.renderInlineTokens(token.tokens, resolvedStyleContext);
-          } else {
-            result += applyTextWithNewlines(token.text);
-          }
-          break;
-        case "paragraph":
-          result += this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          break;
-        case "strong": {
-          const boldContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.bold(boldContent) + stylePrefix;
-          break;
-        }
-        case "em": {
-          const italicContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.italic(italicContent) + stylePrefix;
-          break;
-        }
-        case "codespan":
-          result += this.theme.code(token.text) + stylePrefix;
-          break;
-        case "link": {
-          const linkText = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          const styledLink = this.theme.link(this.theme.underline(linkText));
-          if (getCapabilities2().hyperlinks) {
-            result += hyperlink2(styledLink, token.href) + stylePrefix;
-          } else {
-            const hrefForComparison = token.href.startsWith("mailto:") ? token.href.slice(7) : token.href;
-            if (token.text === token.href || token.text === hrefForComparison) {
-              result += styledLink + stylePrefix;
-            } else {
-              result += styledLink + this.theme.linkUrl(` (${token.href})`) + stylePrefix;
-            }
-          }
-          break;
-        }
-        case "br":
-          result += `
-`;
-          break;
-        case "del": {
-          const delContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
-          result += this.theme.strikethrough(delContent) + stylePrefix;
-          break;
-        }
-        case "html":
-          if ("raw" in token && typeof token.raw === "string") {
-            result += applyTextWithNewlines(token.raw);
-          }
-          break;
-        default:
-          if ("text" in token && typeof token.text === "string") {
-            result += applyTextWithNewlines(token.text);
-          }
-      }
-    }
-    while (stylePrefix && result.endsWith(stylePrefix)) {
-      result = result.slice(0, -stylePrefix.length);
-    }
-    return result;
-  }
-  renderList(token, depth, width, styleContext) {
-    const lines = [];
-    const indent = "    ".repeat(depth);
-    const startNumber = typeof token.start === "number" ? token.start : 1;
-    for (let i = 0;i < token.items.length; i++) {
-      const item = token.items[i];
-      const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
-      const taskMarker = item.task ? `[${item.checked ? "x" : " "}] ` : "";
-      const marker = bullet + taskMarker;
-      const firstPrefix = indent + this.theme.listBullet(marker);
-      const continuationPrefix = indent + " ".repeat(visibleWidth2(marker));
-      const itemWidth = Math.max(1, width - visibleWidth2(firstPrefix));
-      let renderedAnyLine = false;
-      for (const itemToken of item.tokens) {
-        if (itemToken.type === "list") {
-          lines.push(...this.renderList(itemToken, depth + 1, width, styleContext));
-          renderedAnyLine = true;
-          continue;
-        }
-        const itemLines = this.renderToken(itemToken, itemWidth, undefined, styleContext);
-        for (const line of itemLines) {
-          for (const wrappedLine of wrapTextWithAnsi2(line, itemWidth)) {
-            const linePrefix = renderedAnyLine ? continuationPrefix : firstPrefix;
-            lines.push(linePrefix + wrappedLine);
-            renderedAnyLine = true;
-          }
-        }
-      }
-      if (!renderedAnyLine) {
-        lines.push(firstPrefix);
-      }
-    }
-    return lines;
-  }
-  getLongestWordWidth(text, maxWidth) {
-    const words = text.split(/\s+/).filter((word) => word.length > 0);
-    let longest = 0;
-    for (const word of words) {
-      longest = Math.max(longest, visibleWidth2(word));
-    }
-    if (maxWidth === undefined) {
-      return longest;
-    }
-    return Math.min(longest, maxWidth);
-  }
-  wrapCellText(text, maxWidth) {
-    return wrapTextWithAnsi2(text, Math.max(1, maxWidth));
-  }
-  renderTable(token, availableWidth, nextTokenType, styleContext) {
-    const lines = [];
-    const numCols = token.header.length;
-    if (numCols === 0) {
-      return lines;
-    }
-    const borderOverhead = 3 * numCols + 1;
-    const availableForCells = availableWidth - borderOverhead;
-    if (availableForCells < numCols) {
-      const fallbackLines = token.raw ? wrapTextWithAnsi2(token.raw, availableWidth) : [];
-      if (nextTokenType && nextTokenType !== "space") {
-        fallbackLines.push("");
-      }
-      return fallbackLines;
-    }
-    const maxUnbrokenWordWidth = 30;
-    const naturalWidths = [];
-    const minWordWidths = [];
-    for (let i = 0;i < numCols; i++) {
-      const headerText = this.renderInlineTokens(token.header[i].tokens || [], styleContext);
-      naturalWidths[i] = visibleWidth2(headerText);
-      minWordWidths[i] = Math.max(1, this.getLongestWordWidth(headerText, maxUnbrokenWordWidth));
-    }
-    for (const row of token.rows) {
-      for (let i = 0;i < row.length; i++) {
-        const cellText = this.renderInlineTokens(row[i].tokens || [], styleContext);
-        naturalWidths[i] = Math.max(naturalWidths[i] || 0, visibleWidth2(cellText));
-        minWordWidths[i] = Math.max(minWordWidths[i] || 1, this.getLongestWordWidth(cellText, maxUnbrokenWordWidth));
-      }
-    }
-    let minColumnWidths = minWordWidths;
-    let minCellsWidth = minColumnWidths.reduce((a, b) => a + b, 0);
-    if (minCellsWidth > availableForCells) {
-      minColumnWidths = new Array(numCols).fill(1);
-      const remaining = availableForCells - numCols;
-      if (remaining > 0) {
-        const totalWeight = minWordWidths.reduce((total, width) => total + Math.max(0, width - 1), 0);
-        const growth = minWordWidths.map((width) => {
-          const weight = Math.max(0, width - 1);
-          return totalWeight > 0 ? Math.floor(weight / totalWeight * remaining) : 0;
-        });
-        for (let i = 0;i < numCols; i++) {
-          minColumnWidths[i] += growth[i] ?? 0;
-        }
-        const allocated = growth.reduce((total, width) => total + width, 0);
-        let leftover = remaining - allocated;
-        for (let i = 0;leftover > 0 && i < numCols; i++) {
-          minColumnWidths[i]++;
-          leftover--;
-        }
-      }
-      minCellsWidth = minColumnWidths.reduce((a, b) => a + b, 0);
-    }
-    const totalNaturalWidth = naturalWidths.reduce((a, b) => a + b, 0) + borderOverhead;
-    let columnWidths;
-    if (totalNaturalWidth <= availableWidth) {
-      columnWidths = naturalWidths.map((width, index) => Math.max(width, minColumnWidths[index]));
-    } else {
-      const totalGrowPotential = naturalWidths.reduce((total, width, index) => {
-        return total + Math.max(0, width - minColumnWidths[index]);
-      }, 0);
-      const extraWidth = Math.max(0, availableForCells - minCellsWidth);
-      columnWidths = minColumnWidths.map((minWidth, index) => {
-        const naturalWidth = naturalWidths[index];
-        const minWidthDelta = Math.max(0, naturalWidth - minWidth);
-        let grow = 0;
-        if (totalGrowPotential > 0) {
-          grow = Math.floor(minWidthDelta / totalGrowPotential * extraWidth);
-        }
-        return minWidth + grow;
-      });
-      const allocated = columnWidths.reduce((a, b) => a + b, 0);
-      let remaining = availableForCells - allocated;
-      while (remaining > 0) {
-        let grew = false;
-        for (let i = 0;i < numCols && remaining > 0; i++) {
-          if (columnWidths[i] < naturalWidths[i]) {
-            columnWidths[i]++;
-            remaining--;
-            grew = true;
-          }
-        }
-        if (!grew) {
-          break;
-        }
-      }
-    }
-    const topBorderCells = columnWidths.map((w) => "\u2500".repeat(w));
-    lines.push(`\u250C\u2500${topBorderCells.join("\u2500\u252C\u2500")}\u2500\u2510`);
-    const headerCellLines = token.header.map((cell, i) => {
-      const text = this.renderInlineTokens(cell.tokens || [], styleContext);
-      return this.wrapCellText(text, columnWidths[i]);
-    });
-    const headerLineCount = Math.max(...headerCellLines.map((c) => c.length));
-    for (let lineIdx = 0;lineIdx < headerLineCount; lineIdx++) {
-      const rowParts = headerCellLines.map((cellLines, colIdx) => {
-        const text = cellLines[lineIdx] || "";
-        const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth2(text)));
-        return this.theme.bold(padded);
-      });
-      lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
-    }
-    const separatorCells = columnWidths.map((w) => "\u2500".repeat(w));
-    const separatorLine = `\u251C\u2500${separatorCells.join("\u2500\u253C\u2500")}\u2500\u2524`;
-    lines.push(separatorLine);
-    for (let rowIndex = 0;rowIndex < token.rows.length; rowIndex++) {
-      const row = token.rows[rowIndex];
-      const rowCellLines = row.map((cell, i) => {
-        const text = this.renderInlineTokens(cell.tokens || [], styleContext);
-        return this.wrapCellText(text, columnWidths[i]);
-      });
-      const rowLineCount = Math.max(...rowCellLines.map((c) => c.length));
-      for (let lineIdx = 0;lineIdx < rowLineCount; lineIdx++) {
-        const rowParts = rowCellLines.map((cellLines, colIdx) => {
-          const text = cellLines[lineIdx] || "";
-          return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth2(text)));
-        });
-        lines.push(`\u2502 ${rowParts.join(" \u2502 ")} \u2502`);
-      }
-      if (rowIndex < token.rows.length - 1) {
-        lines.push(separatorLine);
-      }
-    }
-    const bottomBorderCells = columnWidths.map((w) => "\u2500".repeat(w));
-    lines.push(`\u2514\u2500${bottomBorderCells.join("\u2500\u2534\u2500")}\u2500\u2518`);
-    if (nextTokenType && nextTokenType !== "space") {
-      lines.push("");
-    }
-    return lines;
-  }
-}
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/components/spacer.js
-class Spacer2 {
-  lines;
-  constructor(lines = 1) {
-    this.lines = lines;
-  }
-  setLines(lines) {
-    this.lines = lines;
-  }
-  invalidate() {}
-  render(_width) {
-    const result = [];
-    for (let i = 0;i < this.lines; i++) {
-      result.push("");
-    }
-    return result;
-  }
-}
-// node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/terminal.js
-import { createRequire as createRequire2 } from "module";
-var cjsRequire2 = createRequire2(import.meta.url);
 // node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
@@ -200954,7 +199450,7 @@ var runtimeBuffer = globalThis.Buffer;
 var TEMPLATE_RENDERED_TOOLS = new Set(["bash", "read", "write", "edit", "ls"]);
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js
-import { createRequire as createRequire3 } from "module";
+import { createRequire as createRequire2 } from "module";
 
 // node_modules/@earendil-works/pi-ai/dist/utils/oauth/oauth-page.js
 var LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path fill="#fff" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>`;
@@ -202013,7 +200509,7 @@ var import_jiti = __toESM(require_jiti(), 1);
 var import_babel = __toESM(require_babel(), 1);
 
 // node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js
-var require2 = createRequire3(import.meta.url);
+var require2 = createRequire2(import.meta.url);
 // node_modules/@earendil-works/pi-coding-agent/dist/core/skills.js
 var import_ignore2 = __toESM(require_ignore(), 1);
 
@@ -202036,7 +200532,7 @@ function formatKeys(keys, options = {}) {
   return formatKeyText(keys.join("/"), options);
 }
 function keyText(keybinding) {
-  return formatKeys(getKeybindings2().getKeys(keybinding));
+  return formatKeys(getKeybindings().getKeys(keybinding));
 }
 function keyHint(keybinding, description) {
   return theme.fg("dim", keyText(keybinding)) + theme.fg("muted", ` ${description}`);
@@ -202047,7 +200543,7 @@ function truncateToVisualLines(text, maxVisualLines, width, paddingX = 0) {
   if (!text) {
     return { visualLines: [], skippedCount: 0 };
   }
-  const tempText = new Text2(text, paddingX, 0);
+  const tempText = new Text(text, paddingX, 0);
   const allVisualLines = tempText.render(width);
   if (allVisualLines.length <= maxVisualLines) {
     return { visualLines: allVisualLines, skippedCount: 0 };
@@ -202265,12 +200761,12 @@ function getTextOutput(result, showImages) {
   const imageBlocks = result.content.filter((c) => c.type === "image");
   let output = textBlocks.map((c) => sanitizeBinaryOutput(stripAnsi(c.text || "")).replace(/\r/g, "")).join(`
 `);
-  const caps = getCapabilities2();
+  const caps = getCapabilities();
   if (imageBlocks.length > 0 && (!caps.images || !showImages)) {
     const imageIndicators = imageBlocks.map((img) => {
       const mimeType = img.mimeType ?? "image/unknown";
-      const dims = img.data && img.mimeType ? getImageDimensions2(img.data, img.mimeType) ?? undefined : undefined;
-      return imageFallback2(mimeType, dims);
+      const dims = img.data && img.mimeType ? getImageDimensions(img.data, img.mimeType) ?? undefined : undefined;
+      return imageFallback(mimeType, dims);
     }).join(`
 `);
     output = output ? `${output}
@@ -202357,7 +200853,7 @@ function resolveSpawnContext(command, cwd, spawnHook) {
 var BASH_PREVIEW_LINES = 5;
 var BASH_UPDATE_THROTTLE_MS = 100;
 
-class BashResultRenderComponent extends Container2 {
+class BashResultRenderComponent extends Container {
   state = {
     cachedWidth: undefined,
     cachedLines: undefined,
@@ -202393,7 +200889,7 @@ function rebuildBashResultRenderComponent(component, result, options, showImages
 `).map((line) => theme.fg("toolOutput", line)).join(`
 `);
     if (options.expanded) {
-      component.addChild(new Text2(`
+      component.addChild(new Text(`
 ${styledOutput}`, 0, 0));
     } else {
       component.addChild({
@@ -202406,7 +200902,7 @@ ${styledOutput}`, 0, 0));
           }
           if (state.cachedSkipped && state.cachedSkipped > 0) {
             const hint = theme.fg("muted", `... (${state.cachedSkipped} earlier lines,`) + ` ${keyHint("app.tools.expand", "to expand")})`;
-            return ["", truncateToWidth2(hint, width, "..."), ...state.cachedLines ?? []];
+            return ["", truncateToWidth(hint, width, "..."), ...state.cachedLines ?? []];
           }
           return ["", ...state.cachedLines ?? []];
         },
@@ -202430,13 +200926,13 @@ ${styledOutput}`, 0, 0));
         warnings.push(`Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`);
       }
     }
-    component.addChild(new Text2(`
+    component.addChild(new Text(`
 ${theme.fg("warning", `[${warnings.join(". ")}]`)}`, 0, 0));
   }
   if (startedAt !== undefined) {
     const label = options.isPartial ? "Elapsed" : "Took";
     const endTime = endedAt ?? Date.now();
-    component.addChild(new Text2(`
+    component.addChild(new Text(`
 ${theme.fg("muted", `${label} ${formatDuration(endTime - startedAt)}`)}`, 0, 0));
   }
 }
@@ -202574,7 +201070,7 @@ ${command}` : command;
         state.startedAt = Date.now();
         state.endedAt = undefined;
       }
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatBashCall(args));
       return text;
     },
@@ -202601,7 +201097,7 @@ ${command}` : command;
 import { constants as constants5 } from "fs";
 import { access as fsAccess2, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/base.js
+// node_modules/diff/libesm/diff/base.js
 class Diff2 {
   diff(oldStr, newStr, options = {}) {
     let callback;
@@ -202801,12 +201297,12 @@ class Diff2 {
   }
 }
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/character.js
+// node_modules/diff/libesm/diff/character.js
 class CharacterDiff extends Diff2 {
 }
 var characterDiff = new CharacterDiff;
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/util/string.js
+// node_modules/diff/libesm/util/string.js
 function longestCommonPrefix(str1, str2) {
   let i;
   for (i = 0;i < str1.length && i < str2.length; i++) {
@@ -202934,7 +201430,7 @@ function leadingAndTrailingWs(string, segmenter) {
   return [head, tail];
 }
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/word.js
+// node_modules/diff/libesm/diff/word.js
 var extendedWordChars = "a-zA-Z0-9_\\u{AD}\\u{C0}-\\u{D6}\\u{D8}-\\u{F6}\\u{F8}-\\u{2C6}\\u{2C8}-\\u{2D7}\\u{2DE}-\\u{2FF}\\u{1E00}-\\u{1EFF}";
 var tokenizeIncludingWhitespace = new RegExp(`[${extendedWordChars}]+|\\s+|[^${extendedWordChars}]`, "ug");
 
@@ -203079,7 +201575,7 @@ function diffWordsWithSpace(oldStr, newStr, options) {
   return wordsWithSpaceDiff.diff(oldStr, newStr, options);
 }
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/line.js
+// node_modules/diff/libesm/diff/line.js
 class LineDiff extends Diff2 {
   constructor() {
     super(...arguments);
@@ -203132,7 +201628,7 @@ function tokenize2(value2, options) {
   return retLines;
 }
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/sentence.js
+// node_modules/diff/libesm/diff/sentence.js
 function isSentenceEndPunct(char) {
   return char == "." || char == "!" || char == "?";
 }
@@ -203162,7 +201658,7 @@ class SentenceDiff extends Diff2 {
 }
 var sentenceDiff = new SentenceDiff;
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/css.js
+// node_modules/diff/libesm/diff/css.js
 class CssDiff extends Diff2 {
   tokenize(value2) {
     return value2.split(/([{}:;,]|\s+)/);
@@ -203170,7 +201666,7 @@ class CssDiff extends Diff2 {
 }
 var cssDiff = new CssDiff;
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/json.js
+// node_modules/diff/libesm/diff/json.js
 class JsonDiff extends Diff2 {
   constructor() {
     super(...arguments);
@@ -203239,7 +201735,7 @@ function canonicalize(obj, stack, replacementStack, replacer, key) {
   return canonicalizedObj;
 }
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/diff/array.js
+// node_modules/diff/libesm/diff/array.js
 class ArrayDiff extends Diff2 {
   tokenize(value2) {
     return value2.slice();
@@ -203253,7 +201749,7 @@ class ArrayDiff extends Diff2 {
 }
 var arrayDiff = new ArrayDiff;
 
-// node_modules/@earendil-works/pi-coding-agent/node_modules/diff/libesm/patch/create.js
+// node_modules/diff/libesm/patch/create.js
 var INCLUDE_HEADERS = {
   includeIndex: true,
   includeUnderline: true,
@@ -204008,7 +202504,7 @@ function validateEditInput(input) {
   return { path: input.path, edits: input.edits };
 }
 function createEditCallRenderComponent() {
-  return Object.assign(new Box2(1, 1, (text) => text), {
+  return Object.assign(new Box(1, 1, (text) => text), {
     preview: undefined,
     previewArgsKey: undefined,
     previewPending: false,
@@ -204016,7 +202512,7 @@ function createEditCallRenderComponent() {
   });
 }
 function getEditCallRenderComponent(state, lastComponent) {
-  if (lastComponent instanceof Box2) {
+  if (lastComponent instanceof Box) {
     const component = lastComponent;
     state.callComponent = component;
     return component;
@@ -204084,13 +202580,13 @@ function getEditHeaderBg(preview, settledError, theme) {
 function buildEditCallComponent(component, args, theme) {
   component.setBgFn(getEditHeaderBg(component.preview, component.settledError, theme));
   component.clear();
-  component.addChild(new Text2(formatEditCall(args, theme), 0, 0));
+  component.addChild(new Text(formatEditCall(args, theme), 0, 0));
   if (!component.preview) {
     return component;
   }
   const body = "error" in component.preview ? theme.fg("error", component.preview.error) : renderDiff(component.preview.diff);
-  component.addChild(new Spacer2(1));
-  component.addChild(new Text2(body, 0, 0));
+  component.addChild(new Spacer(1));
+  component.addChild(new Text(body, 0, 0));
   return component;
 }
 function setEditPreview(component, preview, argsKey) {
@@ -204200,13 +202696,13 @@ function createEditToolDefinition(cwd, options) {
         }
       }
       const output = formatEditResult(context.args, callComponent?.preview, typedResult, theme, context.isError);
-      const component = context.lastComponent ?? new Container2;
+      const component = context.lastComponent ?? new Container;
       component.clear();
       if (!output) {
         return component;
       }
-      component.addChild(new Spacer2(1));
-      component.addChild(new Text2(output, 1, 0));
+      component.addChild(new Spacer(1));
+      component.addChild(new Text(output, 1, 0));
       return component;
     }
   };
@@ -204775,12 +203271,12 @@ function createFindToolDefinition(cwd, options) {
       });
     },
     renderCall(args, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatFindCall(args, theme));
       return text;
     },
     renderResult(result, options, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatFindResult(result, options, theme, context.showImages));
       return text;
     }
@@ -205064,12 +203560,12 @@ function createGrepToolDefinition(cwd, options) {
       });
     },
     renderCall(args, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatGrepCall(args, theme));
       return text;
     },
     renderResult(result, options, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatGrepResult(result, options, theme, context.showImages));
       return text;
     }
@@ -205220,12 +203716,12 @@ function createLsToolDefinition(cwd, options) {
       });
     },
     renderCall(args, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatLsCall(args, theme));
       return text;
     },
     renderResult(result, options, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatLsResult(result, options, theme, context.showImages));
       return text;
     }
@@ -205380,10 +203876,10 @@ function applyExifOrientation(photon, image, originalBytes) {
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/photon.js
-import { createRequire as createRequire4 } from "module";
+import { createRequire as createRequire3 } from "module";
 import * as path6 from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
-var require3 = createRequire4(import.meta.url);
+var require3 = createRequire3(import.meta.url);
 var fs2 = require3("fs");
 var WASM_FILENAME = "photon_rs_bg.wasm";
 var photonModule = null;
@@ -205974,13 +204470,13 @@ ${nonVisionImageNote}`;
       });
     },
     renderCall(args, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       const classification = !context.expanded ? getCompactReadClassification(args, context.cwd) : undefined;
       text.setText(classification ? formatCompactReadCall(classification, args, theme) : formatReadCall(args, theme));
       return text;
     },
     renderResult(result, options, theme, context) {
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(formatReadResult(context.args, result, options, theme, context.showImages, context.cwd, context.isError));
       return text;
     }
@@ -205998,7 +204494,7 @@ var defaultWriteOperations = {
   mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {})
 };
 
-class WriteCallRenderComponent extends Text2 {
+class WriteCallRenderComponent extends Text {
   cache;
   constructor() {
     super("", 0, 0);
@@ -206160,11 +204656,11 @@ function createWriteToolDefinition(cwd, options) {
     renderResult(result, _options, theme, context) {
       const output = formatWriteResult({ ...result, isError: context.isError }, theme);
       if (!output) {
-        const component = context.lastComponent ?? new Container2;
+        const component = context.lastComponent ?? new Container;
         component.clear();
         return component;
       }
-      const text = context.lastComponent ?? new Text2("", 0, 0);
+      const text = context.lastComponent ?? new Text("", 0, 0);
       text.setText(output);
       return text;
     }
@@ -211305,7 +209801,7 @@ var ENABLED = process.env.PI_TIMING === "1";
 var lastTime = Date.now();
 // node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js
 var KEYBINDINGS = {
-  ...TUI_KEYBINDINGS2,
+  ...TUI_KEYBINDINGS,
   "app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
   "app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
   "app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
@@ -211470,11 +209966,11 @@ var BUILTIN_SLASH_COMMANDS = [
   { name: "quit", description: `Quit ${APP_NAME}` }
 ];
 // node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard-native.js
-import { createRequire as createRequire5 } from "module";
+import { createRequire as createRequire4 } from "module";
 import { dirname as dirname5, join as join6 } from "path";
 import { pathToFileURL } from "url";
-var moduleRequire = createRequire5(import.meta.url);
-var executableDirRequire = createRequire5(pathToFileURL(join6(dirname5(process.execPath), "package.json")).href);
+var moduleRequire = createRequire4(import.meta.url);
+var executableDirRequire = createRequire4(pathToFileURL(join6(dirname5(process.execPath), "package.json")).href);
 var hasDisplay = process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 function loadClipboardNative(requires = [moduleRequire, executableDirRequire]) {
   for (const requireClipboard of requires) {
@@ -211500,7 +209996,7 @@ var OSC133_ZONE_START = "\x1B]133;A\x07";
 var OSC133_ZONE_END = "\x1B]133;B\x07";
 var OSC133_ZONE_FINAL = "\x1B]133;C\x07";
 
-class AssistantMessageComponent extends Container2 {
+class AssistantMessageComponent extends Container {
   contentContainer;
   hideThinkingBlock;
   markdownTheme;
@@ -211512,7 +210008,7 @@ class AssistantMessageComponent extends Container2 {
     this.hideThinkingBlock = hideThinkingBlock;
     this.markdownTheme = markdownTheme;
     this.hiddenThinkingLabel = hiddenThinkingLabel;
-    this.contentContainer = new Container2;
+    this.contentContainer = new Container;
     this.addChild(this.contentContainer);
     if (message) {
       this.updateContent(message);
@@ -211550,26 +210046,26 @@ class AssistantMessageComponent extends Container2 {
     this.contentContainer.clear();
     const hasVisibleContent = message.content.some((c) => c.type === "text" && c.text.trim() || c.type === "thinking" && c.thinking.trim());
     if (hasVisibleContent) {
-      this.contentContainer.addChild(new Spacer2(1));
+      this.contentContainer.addChild(new Spacer(1));
     }
     for (let i = 0;i < message.content.length; i++) {
       const content = message.content[i];
       if (content.type === "text" && content.text.trim()) {
-        this.contentContainer.addChild(new Markdown2(content.text.trim(), 1, 0, this.markdownTheme));
+        this.contentContainer.addChild(new Markdown(content.text.trim(), 1, 0, this.markdownTheme));
       } else if (content.type === "thinking" && content.thinking.trim()) {
         const hasVisibleContentAfter = message.content.slice(i + 1).some((c) => c.type === "text" && c.text.trim() || c.type === "thinking" && c.thinking.trim());
         if (this.hideThinkingBlock) {
-          this.contentContainer.addChild(new Text2(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), 1, 0));
+          this.contentContainer.addChild(new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), 1, 0));
           if (hasVisibleContentAfter) {
-            this.contentContainer.addChild(new Spacer2(1));
+            this.contentContainer.addChild(new Spacer(1));
           }
         } else {
-          this.contentContainer.addChild(new Markdown2(content.thinking.trim(), 1, 0, this.markdownTheme, {
+          this.contentContainer.addChild(new Markdown(content.thinking.trim(), 1, 0, this.markdownTheme, {
             color: (text) => theme.fg("thinkingText", text),
             italic: true
           }));
           if (hasVisibleContentAfter) {
-            this.contentContainer.addChild(new Spacer2(1));
+            this.contentContainer.addChild(new Spacer(1));
           }
         }
       }
@@ -211580,13 +210076,13 @@ class AssistantMessageComponent extends Container2 {
       if (message.stopReason === "aborted") {
         const abortMessage = message.errorMessage && message.errorMessage !== "Request was aborted" ? message.errorMessage : null;
         if (abortMessage) {
-          this.contentContainer.addChild(new Spacer2(1));
-          this.contentContainer.addChild(new Text2(theme.fg("error", abortMessage), 1, 0));
+          this.contentContainer.addChild(new Spacer(1));
+          this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), 1, 0));
         }
       } else if (message.stopReason === "error") {
         const errorMsg = message.errorMessage || "Unknown error";
-        this.contentContainer.addChild(new Spacer2(1));
-        this.contentContainer.addChild(new Text2(theme.fg("error", `Error: ${errorMsg}`), 1, 0));
+        this.contentContainer.addChild(new Spacer(1));
+        this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), 1, 0));
       }
     }
   }
@@ -211692,10 +210188,10 @@ class FooterComponent {
     statsParts.push(contextPercentStr);
     let statsLeft = statsParts.join(" ");
     const modelName = state.model?.id || "no-model";
-    let statsLeftWidth = visibleWidth2(statsLeft);
+    let statsLeftWidth = visibleWidth(statsLeft);
     if (statsLeftWidth > width) {
-      statsLeft = truncateToWidth2(statsLeft, width, "...");
-      statsLeftWidth = visibleWidth2(statsLeft);
+      statsLeft = truncateToWidth(statsLeft, width, "...");
+      statsLeftWidth = visibleWidth(statsLeft);
     }
     const minPadding = 2;
     let rightSideWithoutProvider = modelName;
@@ -211706,11 +210202,11 @@ class FooterComponent {
     let rightSide = rightSideWithoutProvider;
     if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
       rightSide = `(${state.model.provider}) ${rightSideWithoutProvider}`;
-      if (statsLeftWidth + minPadding + visibleWidth2(rightSide) > width) {
+      if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
         rightSide = rightSideWithoutProvider;
       }
     }
-    const rightSideWidth = visibleWidth2(rightSide);
+    const rightSideWidth = visibleWidth(rightSide);
     const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
     let statsLine;
     if (totalNeeded <= width) {
@@ -211719,8 +210215,8 @@ class FooterComponent {
     } else {
       const availableForRight = width - statsLeftWidth - minPadding;
       if (availableForRight > 0) {
-        const truncatedRight = truncateToWidth2(rightSide, availableForRight, "");
-        const truncatedRightWidth = visibleWidth2(truncatedRight);
+        const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
+        const truncatedRightWidth = visibleWidth(truncatedRight);
         const padding = " ".repeat(Math.max(0, width - statsLeftWidth - truncatedRightWidth));
         statsLine = statsLeft + padding + truncatedRight;
       } else {
@@ -211730,13 +210226,13 @@ class FooterComponent {
     const dimStatsLeft = theme.fg("dim", statsLeft);
     const remainder = statsLine.slice(statsLeft.length);
     const dimRemainder = theme.fg("dim", remainder);
-    const pwdLine = truncateToWidth2(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
+    const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
     const lines = [pwdLine, dimStatsLeft + dimRemainder];
     const extensionStatuses = this.footerData.getExtensionStatuses();
     if (extensionStatuses.size > 0) {
       const sortedStatuses = Array.from(extensionStatuses.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, text]) => sanitizeStatusText(text));
       const statusLine = sortedStatuses.join(" ");
-      lines.push(truncateToWidth2(statusLine, width, theme.fg("dim", "...")));
+      lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
     }
     return lines;
   }
@@ -211772,7 +210268,7 @@ async function convertToPng(base64Data, mimeType) {
 }
 
 // node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js
-class ToolExecutionComponent extends Container2 {
+class ToolExecutionComponent extends Container {
   contentBox;
   contentText;
   selfRenderContainer;
@@ -211808,10 +210304,10 @@ class ToolExecutionComponent extends Container2 {
     this.imageWidthCells = options.imageWidthCells ?? 60;
     this.ui = ui;
     this.cwd = cwd;
-    this.addChild(new Spacer2(1));
-    this.contentBox = new Box2(1, 1, (text) => theme.bg("toolPendingBg", text));
-    this.contentText = new Text2("", 1, 1, (text) => theme.bg("toolPendingBg", text));
-    this.selfRenderContainer = new Container2;
+    this.addChild(new Spacer(1));
+    this.contentBox = new Box(1, 1, (text) => theme.bg("toolPendingBg", text));
+    this.contentText = new Text("", 1, 1, (text) => theme.bg("toolPendingBg", text));
+    this.selfRenderContainer = new Container;
     if (this.hasRendererDefinition()) {
       this.addChild(this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox);
     } else {
@@ -211832,6 +210328,9 @@ class ToolExecutionComponent extends Container2 {
     return this.toolDefinition.renderCall ?? this.builtInToolDefinition.renderCall;
   }
   getResultRenderer() {
+    const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);
+    if (override?.renderResult)
+      return override.renderResult;
     if (!this.builtInToolDefinition) {
       return this.toolDefinition?.renderResult;
     }
@@ -211841,6 +210340,8 @@ class ToolExecutionComponent extends Container2 {
     return this.toolDefinition.renderResult ?? this.builtInToolDefinition.renderResult;
   }
   hasRendererDefinition() {
+    if (globalThis.__littleCoderToolOverrides?.has(this.toolName))
+      return true;
     return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;
   }
   getRenderShell() {
@@ -211872,14 +210373,14 @@ class ToolExecutionComponent extends Container2 {
     };
   }
   createCallFallback() {
-    return new Text2(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
+    return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
   }
   createResultFallback() {
     const output = this.getTextOutput();
     if (!output) {
       return;
     }
-    return new Text2(theme.fg("toolOutput", output), 0, 0);
+    return new Text(theme.fg("toolOutput", output), 0, 0);
   }
   updateArgs(args) {
     this.args = args;
@@ -211902,7 +210403,7 @@ class ToolExecutionComponent extends Container2 {
     this.maybeConvertImagesForKitty();
   }
   maybeConvertImagesForKitty() {
-    const caps = getCapabilities2();
+    const caps = getCapabilities();
     if (caps.images !== "kitty")
       return;
     if (!this.result)
@@ -211960,7 +210461,7 @@ class ToolExecutionComponent extends Container2 {
     this.hideComponent = false;
     if (this.hasRendererDefinition()) {
       const renderContainer = this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox;
-      if (renderContainer instanceof Box2) {
+      if (renderContainer instanceof Box) {
         renderContainer.setBgFn(bgFn);
       }
       renderContainer.clear();
@@ -212019,7 +210520,7 @@ class ToolExecutionComponent extends Container2 {
     this.imageSpacers = [];
     if (this.result) {
       const imageBlocks = this.result.content.filter((c) => c.type === "image");
-      const caps = getCapabilities2();
+      const caps = getCapabilities();
       for (let i = 0;i < imageBlocks.length; i++) {
         const img = imageBlocks[i];
         if (caps.images && this.showImages && img.data && img.mimeType) {
@@ -212028,10 +210529,10 @@ class ToolExecutionComponent extends Container2 {
           const imageMimeType = converted?.mimeType ?? img.mimeType;
           if (caps.images === "kitty" && imageMimeType !== "image/png")
             continue;
-          const spacer = new Spacer2(1);
+          const spacer = new Spacer(1);
           this.addChild(spacer);
           this.imageSpacers.push(spacer);
-          const imageComponent = new Image2(imageData, imageMimeType, { fallbackColor: (s) => theme.fg("toolOutput", s) }, { maxWidthCells: this.imageWidthCells });
+          const imageComponent = new Image(imageData, imageMimeType, { fallbackColor: (s) => theme.fg("toolOutput", s) }, { maxWidthCells: this.imageWidthCells });
           this.imageComponents.push(imageComponent);
           this.addChild(imageComponent);
         }
@@ -212356,36 +210857,38 @@ function patchToolExecutionComponent() {
   proto.render = function(width) {
     if (this.hideComponent)
       return [];
-    let lines = origRender.call(this, width);
-    if (this.suppressLeadingSpacer || this.isGrouped) {
-      if (lines.length > 0 && lines[0] === "") {
-        lines.shift();
-      }
-    }
-    if (!this.expanded && lines.length >= 2 && lines.length <= 4) {
-      const nonBlank = lines.filter((l) => l.trim().length > 0);
-      if (nonBlank.length === 2) {
-        const line1 = nonBlank[0];
-        const line2 = nonBlank[1].trim();
-        const plain1 = line1.replace(/\x1b\[[0-9;]*m/g, "");
-        const plain2 = line2.replace(/\x1b\[[0-9;]*m/g, "");
-        if (plain1.length + plain2.length + 3 <= width) {
-          lines = [`${line1}  \x1B[2m(${line2})\x1B[0m`];
+    const rawLines = origRender.call(this, width);
+    const trimmed = rawLines.map((l) => l.trimEnd());
+    const nonBlank = trimmed.filter((l) => l.trim().length > 0);
+    if (nonBlank.length === 0)
+      return [];
+    const header = nonBlank[0];
+    const rest = nonBlank.slice(1);
+    const hasLeadingSpacer = !this.suppressLeadingSpacer && !this.isGrouped;
+    if (!this.expanded) {
+      let consolidated = header;
+      if (rest.length > 0) {
+        const summary = rest[0].trim().slice(0, 50);
+        const plainHeader = header.replace(/\x1b\[[0-9;]*m/g, "");
+        const plainSummary = summary.replace(/\x1b\[[0-9;]*m/g, "");
+        if (plainHeader.length + plainSummary.length + 4 <= width) {
+          consolidated = `${header}  \x1B[2m(${summary})\x1B[0m`;
         }
       }
+      return hasLeadingSpacer ? ["", consolidated] : [consolidated];
     }
-    if ((this.isGrouped || this.suppressLeadingSpacer) && lines.length > 1) {
-      const isLast = Boolean(this.isLast);
-      const connectorPrefix = isLast ? "  " : "\x1B[1m\x1B[97m\u2503\x1B[0m ";
-      lines = lines.map((l, idx) => {
-        if (idx === 0)
+    const isLast = Boolean(this.isLast);
+    const connectorPrefix = isLast ? "  " : "\x1B[1m\x1B[97m\u2503\x1B[0m ";
+    const expandedLines = [
+      header,
+      ...rest.map((l) => {
+        if (l.startsWith("\u2503 ") || l.startsWith("\u2502 ") || l.startsWith("\u2523 ") || l.startsWith("\u2517 ") || l.startsWith("\u250F ")) {
           return l;
-        if (l.startsWith("\u2503 ") || l.startsWith("\u2502 ") || l.startsWith("\u2523 ") || l.startsWith("\u2517 ") || l.startsWith("\u250F "))
-          return l;
-        return `${connectorPrefix}${l}`;
-      });
-    }
-    return lines;
+        }
+        return `${connectorPrefix}${l.trim()}`;
+      })
+    ];
+    return hasLeadingSpacer ? ["", ...expandedLines] : expandedLines;
   };
   const origHasRendererDefinition = proto.hasRendererDefinition;
   proto.hasRendererDefinition = function() {
@@ -212718,17 +211221,18 @@ function isStructuralTool(toolName) {
 function getToolRoleIcon(toolName) {
   return STRUCTURAL_TOOL_ICONS[toolName] ?? "\u2022";
 }
-function getStatusBullet(status = "success") {
+function getStatusBullet(status = "success", hollow = false) {
+  const sym = hollow ? "\u25CB" : "\u25CF";
   switch (status) {
     case "running":
-      return "\x1B[36m\u25CF\x1B[0m";
+      return `\x1B[36m${sym}\x1B[0m`;
     case "error":
-      return "\x1B[31m\u25CF\x1B[0m";
+      return `\x1B[31m${sym}\x1B[0m`;
     case "warning":
-      return "\x1B[33m\u25CF\x1B[0m";
+      return `\x1B[33m${sym}\x1B[0m`;
     case "success":
     default:
-      return "\x1B[32m\u25CF\x1B[0m";
+      return `\x1B[32m${sym}\x1B[0m`;
   }
 }
 
@@ -212889,7 +211393,8 @@ function registerBasicToolGrouping(pi, tracker = defaultTracker) {
         const isError = Boolean(context?.isError);
         const isFinished = context?.isPartial === false || context?.result !== undefined;
         const bulletStatus = !isFinished ? "running" : isError ? "error" : "success";
-        const bullet = getStatusBullet(bulletStatus);
+        const isHollow = toolName === "recap";
+        const bullet = getStatusBullet(bulletStatus, isHollow);
         let styled;
         if (toolName === "sh" || toolName === "shell") {
           const cmd = args?.command ?? (Array.isArray(args?.commands) ? args.commands[0] : "");
@@ -213001,16 +211506,16 @@ function patchAssistantMessageComponent() {
         const steps = parseThinkingSteps(content.thinking);
         if (this.hideThinkingBlock) {
           const label = formatThinkingStepsLabel(steps.length, this.hiddenThinkingLabel || "Thinking");
-          this.contentContainer.addChild(new Text(`\x1B[32m\u25CF\x1B[0m ${formatThinkingText(label)}`, 1, 0));
+          this.contentContainer.addChild(new Text(`\x1B[32m\u25CB\x1B[0m ${formatThinkingText(label)}`, 1, 0));
           if (hasVisibleContentAfter) {
             this.contentContainer.addChild(new Spacer(1));
           }
         } else {
-          const thoughtBullet = "\x1B[32m\u25CF\x1B[0m \x1B[1m\x1B[97mThought:\x1B[0m ";
+          const thoughtBullet = "\x1B[32m\u25CB\x1B[0m \x1B[1m\x1B[97mThought:\x1B[0m ";
           for (let sIdx = 0;sIdx < steps.length; sIdx++) {
             const stepText = steps[sIdx];
             const cleanStep = stepText.replace(/^(?:Step\s+\d+:|Thought\s+\d+:|Thought:)\s*/i, "");
-            const prefix = steps.length > 1 ? `\x1B[32m\u25CF\x1B[0m \x1B[1m\x1B[97mThought [${sIdx + 1}/${steps.length}]:\x1B[0m ` : thoughtBullet;
+            const prefix = steps.length > 1 ? `\x1B[32m\u25CB\x1B[0m \x1B[1m\x1B[97mThought [${sIdx + 1}/${steps.length}]:\x1B[0m ` : thoughtBullet;
             this.contentContainer.addChild(new Markdown(prefix + cleanStep, 1, 0, this.markdownTheme, {
               color: (text) => formatThinkingText(text),
               italic: true

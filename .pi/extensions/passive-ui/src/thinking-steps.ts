@@ -87,18 +87,18 @@ export function patchAssistantMessageComponent(): number {
 
         if (this.hideThinkingBlock) {
           const label = formatThinkingStepsLabel(steps.length, this.hiddenThinkingLabel || 'Thinking');
-          this.contentContainer.addChild(new Text(`\x1b[32m●\x1b[0m ${formatThinkingText(label)}`, 1, 0));
+          this.contentContainer.addChild(new Text(`\x1b[32m○\x1b[0m ${formatThinkingText(label)}`, 1, 0));
           if (hasVisibleContentAfter) {
             this.contentContainer.addChild(new Spacer(1));
           }
         } else {
-          // Render thinking steps with Codex/AGY status bullet ● Thought prefix
-          const thoughtBullet = '\x1b[32m●\x1b[0m \x1b[1m\x1b[97mThought:\x1b[0m ';
+          // Render thinking steps with Codex/AGY hollow status circle ○ Thought prefix
+          const thoughtBullet = '\x1b[32m○\x1b[0m \x1b[1m\x1b[97mThought:\x1b[0m ';
           for (let sIdx = 0; sIdx < steps.length; sIdx++) {
             const stepText = steps[sIdx];
             const cleanStep = stepText.replace(/^(?:Step\s+\d+:|Thought\s+\d+:|Thought:)\s*/i, '');
             const prefix = steps.length > 1
-              ? `\x1b[32m●\x1b[0m \x1b[1m\x1b[97mThought [${sIdx + 1}/${steps.length}]:\x1b[0m `
+              ? `\x1b[32m○\x1b[0m \x1b[1m\x1b[97mThought [${sIdx + 1}/${steps.length}]:\x1b[0m `
               : thoughtBullet;
             this.contentContainer.addChild(
               new Markdown(prefix + cleanStep, 1, 0, this.markdownTheme, {
