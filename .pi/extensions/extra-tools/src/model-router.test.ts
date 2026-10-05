@@ -80,4 +80,48 @@ describe("model-router (tri-tier model split)", () => {
     expect(resHands.content[0].text).toContain("role=hands");
     expect(resHands.details.config.handsModel).toBe("qwen-2.5-coder-7b");
   });
+
+  it("locks model switching in Warren/container environment while updating active role", async () => {
+    let registeredTool: any = null;
+    const mockPi = {
+      registerTool: (tool: any) => {
+        registeredTool = tool;
+      },
+    };
+    registerModelRouteTool(mockPi as any);
+
+    const originalWarren = process.env.WARREN_RUNTIME;
+    process.env.WARREN_RUNTIME = "docker";
+
+    let setModelCalled = false;
+    const mockCtx = {
+      session: {
+        setModel: async () => {
+          setModelCalled = true;
+        },
+      },
+    };
+
+    try {
+      const res = await registeredTool.execute(
+        "call-container",
+        { role: "voice" },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      expect(res.isError).toBe(false);
+      expect(res.content[0].text).toContain("role=voice");
+      expect(res.content[0].text).toContain("model switching locked in container/host mode");
+      expect(res.details.modelSwitchLocked).toBe(true);
+      expect(setModelCalled).toBe(false);
+      expect(getTriModelConfig().activeRole).toBe("voice");
+    } finally {
+      if (originalWarren !== undefined) {
+        process.env.WARREN_RUNTIME = originalWarren;
+      } else {
+        delete process.env.WARREN_RUNTIME;
+      }
+    }
+  });
 });

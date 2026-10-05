@@ -18,7 +18,25 @@
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import { existsSync, readFileSync } from "fs";
+
 export type ModelTierRole = "voice" | "mind" | "hands" | "plan" | "action";
+
+export function isModelSwitchLocked(): boolean {
+  if (process.env.LITTLE_CODER_FIXED_MODEL === "1") return true;
+  if (process.env.WARREN_RUNTIME === "docker" || process.env.WARREN_RUNTIME === "container") return true;
+  if (existsSync("/.dockerenv") || existsSync("/run/.containerenv")) return true;
+  if (process.env.container === "docker" || process.env.container === "podman" || process.env.container === "oci") return true;
+  try {
+    if (existsSync("/proc/1/cgroup")) {
+      const cgroup = readFileSync("/proc/1/cgroup", "utf-8");
+      if (cgroup.includes("docker") || cgroup.includes("containerd") || cgroup.includes("kubepods")) {
+        return true;
+      }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
 
 export interface TriTierModelConfig {
   voiceModel?: string;
@@ -130,26 +148,31 @@ export async function executeModelRouterOp(
   if (params.mind_model || params.plan_model) triConfig.mindModel = params.mind_model || params.plan_model;
   if (params.hands_model || params.action_model) triConfig.handsModel = params.hands_model || params.action_model;
 
+  let lockedNotice = "";
   if (params.role) {
     const targetRole = normalizeRole(params.role);
     triConfig.activeRole = targetRole;
 
-    const targetModel =
-      targetRole === "voice"
-        ? triConfig.voiceModel
-        : targetRole === "mind"
-          ? triConfig.mindModel
-          : triConfig.handsModel;
+    if (isModelSwitchLocked()) {
+      lockedNotice = " [model switching locked in container/host mode; reasoning effort steered dynamically]";
+    } else {
+      const targetModel =
+        targetRole === "voice"
+          ? triConfig.voiceModel
+          : targetRole === "mind"
+            ? triConfig.mindModel
+            : triConfig.handsModel;
 
-    if (targetModel && ctx?.session?.setModel) {
-      try {
-        await ctx.session.setModel(targetModel);
-      } catch (e: any) {
-        return {
-          content: [{ type: "text" as const, text: `Active role updated to ${targetRole}, but setModel failed: ${e.message}` }],
-          details: { config: triConfig, error: e.message },
-          isError: true,
-        };
+      if (targetModel && ctx?.session?.setModel) {
+        try {
+          await ctx.session.setModel(targetModel);
+        } catch (e: any) {
+          return {
+            content: [{ type: "text" as const, text: `Active role updated to ${targetRole}, but setModel failed: ${e.message}` }],
+            details: { config: triConfig, error: e.message },
+            isError: true,
+          };
+        }
       }
     }
   }
@@ -158,10 +181,10 @@ export async function executeModelRouterOp(
     content: [
       {
         type: "text" as const,
-        text: `Model route: role=${triConfig.activeRole} | voice=${triConfig.voiceModel || "default"} | mind=${triConfig.mindModel || "default"} | hands=${triConfig.handsModel || "default"}`,
+        text: `Model route: role=${triConfig.activeRole} | voice=${triConfig.voiceModel || "default"} | mind=${triConfig.mindModel || "default"} | hands=${triConfig.handsModel || "default"}${lockedNotice}`,
       },
     ],
-    details: { config: triConfig },
+    details: { config: triConfig, modelSwitchLocked: isModelSwitchLocked() },
     isError: false,
   };
 }
