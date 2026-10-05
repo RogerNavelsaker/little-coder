@@ -145,4 +145,23 @@ describe("injectThinkingEffort", () => {
       expect(getEffortOverride()).toBeNull();
     });
   });
+
+  describe("computeTrajectoryBudget (Singularity pattern)", () => {
+    it("allocates full budget on initial turn, decays across middle turns, restores verification budget", () => {
+      const { computeTrajectoryBudget } = require("./effort");
+      const baseTokens = 8192;
+
+      // Turn 1: 100%
+      expect(computeTrajectoryBudget(baseTokens, 1, 20)).toBe(8192);
+
+      // Turn 10: decayed
+      const mid = computeTrajectoryBudget(baseTokens, 10, 20);
+      expect(mid).toBeLessThan(8192);
+      expect(mid).toBeGreaterThanOrEqual(1024);
+
+      // Turn 18 (near max 20): verification budget (~50%)
+      const late = computeTrajectoryBudget(baseTokens, 18, 20);
+      expect(late).toBe(4096);
+    });
+  });
 });

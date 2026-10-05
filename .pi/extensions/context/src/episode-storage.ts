@@ -176,16 +176,52 @@ export function queryEpisodes(
 }
 
 /**
- * Format recent episodes into a compact prompt injection block.
+ * Check which past episodes have been superseded based on modified files (Lineage & Invalidation pattern).
  */
-export function formatPastEpisodesBlock(episodes: EpisodeRecord[]): string {
+export function annotateEpisodeLineage(
+  episodes: EpisodeRecord[],
+  modifiedFiles: string[] = [],
+): Array<EpisodeRecord & { supersededBy?: string[] }> {
+  if (!episodes || episodes.length === 0) return [];
+  const normalizedModified = new Set(modifiedFiles.map((f) => f.replace(/^(\.\/|\/)/, "")));
+
+  return episodes.map((ep) => {
+    const overlapping = ep.relevantFiles.filter((rf) => {
+      const norm = rf.replace(/^(\.\/|\/)/, "");
+      return normalizedModified.has(norm);
+    });
+
+    if (overlapping.length > 0) {
+      return {
+        ...ep,
+        supersededBy: overlapping,
+      };
+    }
+    return ep;
+  });
+}
+
+/**
+ * Format recent episodes into a compact prompt injection block.
+ * Includes lineage indicators and [SUPERSEDED] flags for invalidated knowledge.
+ */
+export function formatPastEpisodesBlock(
+  episodes: EpisodeRecord[],
+  modifiedFiles: string[] = [],
+): string {
   if (!episodes || episodes.length === 0) return "";
 
+  const annotated = annotateEpisodeLineage(episodes, modifiedFiles);
   const lines: string[] = ["[PAST EPISODES]"];
-  for (const ep of episodes) {
+
+  for (const ep of annotated) {
     const timeStr = new Date(ep.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const gitRef = ep.gitCommit ? ` (${ep.gitBranch || "HEAD"} @ ${ep.gitCommit})` : "";
-    lines.push(`• [${timeStr}${gitRef}] Goal: ${ep.goal}`);
+    const supersededTag = ep.supersededBy && ep.supersededBy.length > 0
+      ? ` [SUPERSEDED: ${ep.supersededBy.slice(0, 2).join(", ")} modified]`
+      : "";
+
+    lines.push(`• [${timeStr}${gitRef}] Goal: ${ep.goal}${supersededTag}`);
 
     if (ep.accomplished.length > 0) {
       lines.push(`  Accomplished: ${ep.accomplished.slice(0, 3).join("; ")}`);
@@ -203,3 +239,4 @@ export function formatPastEpisodesBlock(episodes: EpisodeRecord[]): string {
 
   return lines.join("\n");
 }
+

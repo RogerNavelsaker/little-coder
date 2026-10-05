@@ -18,12 +18,14 @@ import { QualityMonitor } from "./src/quality-monitor.ts";
 import { TurnCapGuard } from "./src/turn-cap.ts";
 import { Governor } from "./src/governor.ts";
 import { ReadGuardEditTracker } from "./src/read-guard-edit.ts";
+import { FocusManager } from "./src/focus.ts";
 
 export default function qualityStackExtension(pi: ExtensionAPI): void {
   const monitor = new QualityMonitor();
   const turnCap = new TurnCapGuard();
   const governor = new Governor();
   const readGuardEdit = new ReadGuardEditTracker();
+  const focusManager = new FocusManager();
 
   // 1. Turn Start Hook: turn-cap + finalize-warn + velocity governor
   pi.on("turn_start", async (event: any, ctx: any) => {
@@ -63,11 +65,22 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
     }
   });
 
-  // 2. Tool Call Hook: write-guard
+  // 2. Tool Call Hook: write-guard + focus burst check
   pi.on("tool_call", async (event: any, ctx: any) => {
     try {
       const toolName = event?.toolName;
       const input = event?.input;
+
+      // Focus burst throttle check (Mini-Volition pattern)
+      const throttled = focusManager.checkThrottle(toolName, input);
+      if (throttled) {
+        ctx?.ui?.notify?.(`[Focus Throttle] ${throttled.reason}`, "warning");
+        return {
+          block: true,
+          reason: throttled.reason,
+        };
+      }
+      focusManager.recordExecution(toolName, input);
 
       if (toolName === "write" && input?.path) {
         const check = checkWritePath(

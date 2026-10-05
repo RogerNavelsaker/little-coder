@@ -95,6 +95,31 @@ export function classifyTurnIntent(lastMessageText?: string): TaskType | undefin
 }
 
 /**
+ * Singularity Pattern: Dynamic CoT budget decay across goal trajectory.
+ * Early turns get full thinking budget; middle execution turns decay to focused budget;
+ * final validation turns receive verification budget.
+ */
+export function computeTrajectoryBudget(
+  baseTokens: number,
+  turnIndex: number,
+  maxTurns: number = 25,
+): number {
+  if (baseTokens <= 0) return 0;
+  if (turnIndex <= 1) {
+    // Initial turn: 100% full reasoning budget
+    return baseTokens;
+  }
+  if (turnIndex >= maxTurns - 3) {
+    // Final verification turns: 50% budget to verify correctness
+    return Math.max(1024, Math.round(baseTokens * 0.5));
+  }
+  // Middle execution turns: decay linearly towards 25% minimum or 1024 tokens
+  const progress = (turnIndex - 1) / (maxTurns - 4);
+  const decayFactor = Math.max(0.25, 1 - progress * 0.75);
+  return Math.max(1024, Math.round(baseTokens * decayFactor));
+}
+
+/**
  * Injects or adjusts reasoning effort parameters in a raw provider request payload.
  */
 export function injectThinkingEffort(

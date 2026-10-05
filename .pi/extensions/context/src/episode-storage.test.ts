@@ -73,5 +73,9 @@ describe("episode-storage (Volition / Mini-Volition pattern)", () => {
     expect(block).toContain("Accomplished: Created v2 migrations; Applied test runs");
     expect(block).toContain("Learned: Index lock issue resolved");
     expect(block).toContain("Pending: Deploy to staging");
+
+    // Invalidation test
+    const invalidatedBlock = formatPastEpisodesBlock(episodes as any, ["db/migrations.sql"]);
+    expect(invalidatedBlock).toContain("[SUPERSEDED: db/migrations.sql modified]");
   });
 });

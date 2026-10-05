@@ -10,6 +10,14 @@ import {
 import { runContinuousGC, scrubMessagesForCompaction } from "./src/continuous-gc.js";
 import { computeOrientation, formatOrientationBlock } from "./src/orientation.js";
 import { recordEpisode, queryEpisodes, formatPastEpisodesBlock } from "./src/episode-storage.js";
+import {
+  recordInFlightTurn,
+  recordInFlightAction,
+  clearInFlightAction,
+  clearInFlightTurn,
+  consumeGhostTurn,
+  formatGhostRecoveryAlert,
+} from "./src/ghost-turn.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function contextExtension(pi: ExtensionAPI): void {
@@ -99,8 +107,16 @@ export default function contextExtension(pi: ExtensionAPI): void {
       const isColdOrWake = lastActiveTimestamp === undefined || orientation.elapsedIdleMs > 60_000 || (orientation.gitDirtyCount && orientation.gitDirtyCount > 0);
       lastActiveTimestamp = now;
 
-      if (isColdOrWake) {
+      // Mini-Volition pattern: Check for interrupted ghost turn from previous crashed/aborted session
+      const ghostTurn = consumeGhostTurn(cwd);
+
+      if (isColdOrWake || ghostTurn) {
         const blocks: string[] = [];
+
+        // 0. Recovery Alert if previous turn crashed / terminated abruptly
+        if (ghostTurn) {
+          blocks.push(formatGhostRecoveryAlert(ghostTurn));
+        }
 
         // 1. Orientation block (idle gap, git status, uncommitted changes)
         if (orientation.elapsedIdleMs > 60_000 || (orientation.gitDirtyCount && orientation.gitDirtyCount > 0)) {
@@ -110,7 +126,7 @@ export default function contextExtension(pi: ExtensionAPI): void {
         // 2. Episodic memory retrieval: query recent 2 episodes from SQLite
         const recentEpisodes = queryEpisodes(cwd, 2);
         if (recentEpisodes.length > 0) {
-          const epBlock = formatPastEpisodesBlock(recentEpisodes);
+          const epBlock = formatPastEpisodesBlock(recentEpisodes, orientation.gitDirtyFiles || []);
           if (epBlock) blocks.push(epBlock);
         }
 
@@ -125,15 +141,40 @@ export default function contextExtension(pi: ExtensionAPI): void {
     }
   });
 
-  // Update activity timestamp on user input or turn start
-  pi.on("turn_start", () => {
+  // Track in-flight turns and actions for crash/kill resilience
+  pi.on("turn_start", (event: any) => {
     lastActiveTimestamp = Date.now();
+    try {
+      const turnId = `turn_${Date.now().toString(36)}`;
+      const promptSummary = typeof event?.prompt === "string" ? event.prompt : undefined;
+      recordInFlightTurn(turnId, promptSummary);
+    } catch {}
+  });
+
+  pi.on("tool_call", (event: any) => {
+    try {
+      const toolName = event?.name || event?.tool || "unknown";
+      recordInFlightAction(toolName, event?.input || event?.args);
+    } catch {}
+  });
+
+  pi.on("tool_result", () => {
+    try {
+      clearInFlightAction();
+    } catch {}
+  });
+
+  pi.on("turn_end", () => {
+    try {
+      clearInFlightTurn();
+    } catch {}
   });
 
   // 5. Automated Engram session close bridge
   pi.on("session_shutdown", async (_event: any, _ctx: any) => {
     try {
-      // Clean up any ephemeral scratchpad if needed or notify
+      clearInFlightTurn();
     } catch {}
   });
 }
+

@@ -24,6 +24,8 @@ const HELPER_FILES = new Set([
   'episode-storage.ts',
   'file-checkpoint.ts',
   'file-reference.ts',
+  'focus.ts',
+  'ghost-turn.ts',
   'governor.ts',
   'invoke.ts',
   'knowledge-inject.ts',

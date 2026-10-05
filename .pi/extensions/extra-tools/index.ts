@@ -70,16 +70,24 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
         lastText = lastMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ");
       }
 
-      const { classifyTurnIntent } = await import("./src/effort.ts");
+      const { classifyTurnIntent, computeTrajectoryBudget } = await import("./src/effort.ts");
       const { getTriModelConfig } = await import("./src/model-router.ts");
       const triCfg = getTriModelConfig();
       const detectedTask = classifyTurnIntent(lastText);
       const activeRole = triCfg.activeRole || ((process.env.LITTLE_CODER_ROLE as ThinkingRole) || "hands");
 
       // If active role is "voice", force thinking off (0 tokens) regardless of prompt
-      // Otherwise apply task-specific intent or fallback to role budget
+      // Otherwise apply task-specific intent or fallback to role budget with trajectory decay
       const steeringTarget = activeRole === "voice" ? "voice" : (detectedTask || activeRole);
-      const modifiedPayload = injectThinkingEffort(payload, steeringTarget, undefined, getEffortConfig());
+      const effortCfg = getEffortConfig();
+      const baseTokens = steeringTarget in effortCfg.roleBudgets
+        ? effortCfg.roleBudgets[steeringTarget as ThinkingRole].tokens
+        : (steeringTarget in effortCfg.taskBudgets ? effortCfg.taskBudgets[steeringTarget as any].tokens : 2048);
+
+      const turnIndex = Math.max(1, messages.filter((m: any) => m.role === "user").length);
+      const dynamicTokens = computeTrajectoryBudget(baseTokens, turnIndex);
+
+      const modifiedPayload = injectThinkingEffort(payload, steeringTarget, dynamicTokens, effortCfg);
       return modifiedPayload;
     } catch {
       // Non-blocking fallback
