@@ -179,6 +179,16 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
             text: `\n[Quality Guidance: ${incident.suggestion}]`,
           });
         }
+
+        // Singularity pattern: auto-switch role to 'mind' to stop mechanical thrashing
+        if (incident.recommendRoleSwitch === "mind") {
+          try {
+            const { setTriModelConfig } = await import("../extra-tools/src/model-router.ts");
+            setTriModelConfig({ activeRole: "mind" });
+          } catch {
+            // best-effort
+          }
+        }
       }
     } catch {}
   });

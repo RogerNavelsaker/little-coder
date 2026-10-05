@@ -67,5 +67,23 @@ describe("quality-monitor", () => {
     expect(incident).not.toBeNull();
     expect(incident?.type).toBe("patch_spiral");
     expect(incident?.suggestion).toContain("Repeated failed edits");
+    expect(incident?.recommendRoleSwitch).toBe("mind");
+  });
+
+  it("detects thrashing loops on consecutive tool failures", () => {
+    const qm = new QualityMonitor();
+    const available = new Set(["read", "edit", "write", "sh"]);
+
+    expect(qm.recordToolExecution("sh", { command: "test1" }, true, available)).toBeNull();
+    expect(qm.recordToolExecution("sh", { command: "test2" }, true, available)).toBeNull();
+
+    const incident = qm.recordToolExecution("sh", { command: "test3" }, true, available);
+    expect(incident).not.toBeNull();
+    expect(incident?.type).toBe("thrashing_loop");
+    expect(incident?.suggestion).toContain("Thrashing detected");
+    expect(incident?.recommendRoleSwitch).toBe("mind");
+
+    // Success resets consecutive failure count
+    expect(qm.recordToolExecution("sh", { command: "test4" }, false, available)).toBeNull();
   });
 });

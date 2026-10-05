@@ -11,16 +11,19 @@ import { statSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface QualityIncident {
-  type: "read_loop" | "patch_spiral" | "hallucinated_tool";
+  type: "read_loop" | "patch_spiral" | "hallucinated_tool" | "thrashing_loop";
   target: string;
   count: number;
   suggestion: string;
+  recommendRoleSwitch?: "mind";
 }
 
 export class QualityMonitor {
   private fileReadCounts = new Map<string, number>();
   private fileMtimes = new Map<string, number>();
   private failedEditCounts = new Map<string, number>();
+  private consecutiveFailureCount = 0;
+  private recentFailedTools: string[] = [];
 
   recordToolExecution(
     toolName: string,
@@ -103,11 +106,32 @@ export class QualityMonitor {
           target: p,
           count: current,
           suggestion: `Repeated failed edits on '${p}' (${current} failures). Use fresh 'read' with line anchors or review the file outline.`,
+          recommendRoleSwitch: "mind",
         };
       }
     } else if (toolName === "edit" && !isError) {
       const p = String(params?.path || params?.edits?.[0]?.path || "unknown");
       this.failedEditCounts.delete(p);
+    }
+
+    // 4. Check consecutive failures / non-converging thrashing loop (Singularity pattern)
+    if (isError) {
+      this.consecutiveFailureCount++;
+      this.recentFailedTools.push(toolName);
+      if (this.recentFailedTools.length > 5) this.recentFailedTools.shift();
+
+      if (this.consecutiveFailureCount >= 3) {
+        return {
+          type: "thrashing_loop",
+          target: toolName,
+          count: this.consecutiveFailureCount,
+          suggestion: `Thrashing detected: ${this.consecutiveFailureCount} consecutive tool failures without progress. Stop guessing and switch to 'mind' role (/debug, systematic-debugging protocol) to formulate explicit hypotheses.`,
+          recommendRoleSwitch: "mind",
+        };
+      }
+    } else {
+      this.consecutiveFailureCount = 0;
+      this.recentFailedTools = [];
     }
 
     return null;
@@ -117,5 +141,7 @@ export class QualityMonitor {
     this.fileReadCounts.clear();
     this.fileMtimes.clear();
     this.failedEditCounts.clear();
+    this.consecutiveFailureCount = 0;
+    this.recentFailedTools = [];
   }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { recordEpisode, queryEpisodes } from "./episode-storage.ts";
+import { recordEpisode, queryEpisodes, formatPastEpisodesBlock } from "./episode-storage.ts";
 import type { SessionSummaryPayload } from "./bridge.ts";
 
 describe("episode-storage (Volition / Mini-Volition pattern)", () => {
@@ -48,5 +48,30 @@ describe("episode-storage (Volition / Mini-Volition pattern)", () => {
     expect(queried[0].relevantFiles).toContain("src/auth.ts");
 
     rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("formats past episodes into a compact prompt block", () => {
+    const episodes = [
+      {
+        id: "ep_1",
+        timestamp: Date.now() - 3600000,
+        cwd: "/fake/repo",
+        gitBranch: "main",
+        gitCommit: "abc1234",
+        goal: "Refactor database migrations",
+        accomplished: ["Created v2 migrations", "Applied test runs"],
+        discoveries: ["Index lock issue resolved"],
+        nextSteps: ["Deploy to staging"],
+        relevantFiles: ["db/migrations.sql"],
+        tokensScrubbed: 100,
+      },
+    ];
+
+    const block = formatPastEpisodesBlock(episodes as any);
+    expect(block).toContain("[PAST EPISODES]");
+    expect(block).toContain("Goal: Refactor database migrations");
+    expect(block).toContain("Accomplished: Created v2 migrations; Applied test runs");
+    expect(block).toContain("Learned: Index lock issue resolved");
+    expect(block).toContain("Pending: Deploy to staging");
   });
 });

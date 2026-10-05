@@ -9,7 +9,7 @@ import {
 } from "./src/bridge.js";
 import { runContinuousGC, scrubMessagesForCompaction } from "./src/continuous-gc.js";
 import { computeOrientation, formatOrientationBlock } from "./src/orientation.js";
-import { recordEpisode } from "./src/episode-storage.js";
+import { recordEpisode, queryEpisodes, formatPastEpisodesBlock } from "./src/episode-storage.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function contextExtension(pi: ExtensionAPI): void {
@@ -96,14 +96,27 @@ export default function contextExtension(pi: ExtensionAPI): void {
       const now = Date.now();
       const cwd = process.cwd();
       const orientation = computeOrientation(lastActiveTimestamp, cwd, now);
+      const isColdOrWake = lastActiveTimestamp === undefined || orientation.elapsedIdleMs > 60_000 || (orientation.gitDirtyCount && orientation.gitDirtyCount > 0);
       lastActiveTimestamp = now;
 
-      // Only inject orientation if there was an idle gap (>60s) or external git changes exist
-      if (orientation.elapsedIdleMs > 60_000 || (orientation.gitDirtyCount && orientation.gitDirtyCount > 0)) {
-        const block = formatOrientationBlock(orientation);
-        if (event?.systemPrompt) {
+      if (isColdOrWake) {
+        const blocks: string[] = [];
+
+        // 1. Orientation block (idle gap, git status, uncommitted changes)
+        if (orientation.elapsedIdleMs > 60_000 || (orientation.gitDirtyCount && orientation.gitDirtyCount > 0)) {
+          blocks.push(formatOrientationBlock(orientation));
+        }
+
+        // 2. Episodic memory retrieval: query recent 2 episodes from SQLite
+        const recentEpisodes = queryEpisodes(cwd, 2);
+        if (recentEpisodes.length > 0) {
+          const epBlock = formatPastEpisodesBlock(recentEpisodes);
+          if (epBlock) blocks.push(epBlock);
+        }
+
+        if (blocks.length > 0 && event?.systemPrompt) {
           return {
-            systemPrompt: `${event.systemPrompt}\n\n${block}`,
+            systemPrompt: `${event.systemPrompt}\n\n${blocks.join("\n\n")}`,
           };
         }
       }

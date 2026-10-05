@@ -174,3 +174,32 @@ export function queryEpisodes(
     return [];
   }
 }
+
+/**
+ * Format recent episodes into a compact prompt injection block.
+ */
+export function formatPastEpisodesBlock(episodes: EpisodeRecord[]): string {
+  if (!episodes || episodes.length === 0) return "";
+
+  const lines: string[] = ["[PAST EPISODES]"];
+  for (const ep of episodes) {
+    const timeStr = new Date(ep.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const gitRef = ep.gitCommit ? ` (${ep.gitBranch || "HEAD"} @ ${ep.gitCommit})` : "";
+    lines.push(`• [${timeStr}${gitRef}] Goal: ${ep.goal}`);
+
+    if (ep.accomplished.length > 0) {
+      lines.push(`  Accomplished: ${ep.accomplished.slice(0, 3).join("; ")}`);
+    }
+    if (ep.discoveries.length > 0) {
+      lines.push(`  Learned: ${ep.discoveries.slice(0, 2).join("; ")}`);
+    }
+    if (ep.relevantFiles.length > 0) {
+      lines.push(`  Touched files: ${ep.relevantFiles.slice(0, 4).join(", ")}`);
+    }
+    if (ep.nextSteps.length > 0) {
+      lines.push(`  Pending: ${ep.nextSteps.slice(0, 2).join("; ")}`);
+    }
+  }
+
+  return lines.join("\n");
+}
