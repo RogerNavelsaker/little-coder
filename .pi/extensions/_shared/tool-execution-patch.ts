@@ -172,14 +172,14 @@ export function patchToolExecutionComponent(): void {
     }
 
     // Codex/Tree connector glyph: If tool is grouped and has multiple lines (e.g. output diff or results),
-    // connect line 2..N with '│ ' so the tree visual remains unbroken from ┌ / ├ down to └.
+    // connect line 2..N with '┃ ' so the tree visual remains unbroken from ┏ / ┣ down to ┗.
     if ((this.isGrouped || this.suppressLeadingSpacer) && lines.length > 1) {
       const isLast = Boolean(this.isLast);
-      const connectorPrefix = isLast ? '  ' : '\x1b[1m\x1b[37m│\x1b[0m ';
+      const connectorPrefix = isLast ? '  ' : '\x1b[1m\x1b[97m┃\x1b[0m ';
       lines = lines.map((l: string, idx: number) => {
         if (idx === 0) return l;
         // Don't double-prefix if already prefixed
-        if (l.startsWith('│ ') || l.startsWith('├ ') || l.startsWith('└ ') || l.startsWith('┌ ')) return l;
+        if (l.startsWith('┃ ') || l.startsWith('│ ') || l.startsWith('┣ ') || l.startsWith('┗ ') || l.startsWith('┏ ')) return l;
         return `${connectorPrefix}${l}`;
       });
     }
