@@ -325,7 +325,7 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
 
         // Tree glyphs in bold white: '\x1b[1m\x1b[37m'
         const rawGlyph = isGrouped ? (isFirst ? '┌ ' : (isLast ? '└ ' : '├ ')) : '';
-        const glyph = rawGlyph ? theme.bold(theme.fg('white', rawGlyph)) : '';
+        const glyph = rawGlyph ? `\x1b[1m\x1b[37m${rawGlyph}\x1b[0m` : '';
         let styled: string;
 
         if (toolName === 'sh' || toolName === 'shell') {

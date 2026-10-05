@@ -103,12 +103,19 @@ const TOOL_OVERRIDE_PATCH = {
   rel: "dist/modes/interactive/components/tool-execution.js",
   applied: "little-coder patch: toolDefinitionOverrides for third-party rendering",
   find:
+    "    hasRendererDefinition() {\n" +
+    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
+    "    }\n" +
     "    getCallRenderer() {\n" +
     "        if (!this.builtInToolDefinition) {\n" +
     "            return this.toolDefinition?.renderCall;\n" +
     "        }",
   replace:
     "    // little-coder patch: toolDefinitionOverrides for third-party rendering\n" +
+    "    hasRendererDefinition() {\n" +
+    "        if (globalThis.__littleCoderToolOverrides?.has(this.toolName)) return true;\n" +
+    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
+    "    }\n" +
     "    getCallRenderer() {\n" +
     "        const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);\n" +
     "        if (override?.renderCall) return override.renderCall;\n" +
