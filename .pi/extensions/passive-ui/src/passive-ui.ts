@@ -23,6 +23,9 @@ import {
 import {
   toggleDetailedStatusline,
   isDetailedStatusline,
+  getStatuslineMode,
+  setStatuslineMode,
+  type StatuslineMode,
 } from '../../_shared/tool-execution-patch.js';
 
 export const passiveUiItemSchema = Type.Object({
@@ -123,50 +126,124 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
     },
   });
 
-  // Register /quickinfo command: displays full session metrics breakdown and toggles detailed footer
+  // Register /statusline command: configure statusline preset or inspect modes
   if (typeof pi.registerCommand === 'function') {
-    pi.registerCommand('quickinfo', {
-      description: 'Toggle or display full session metrics (tokens, context %, spend, duration)',
-      handler: async (_args: string, ctx: any) => {
-      const isDetailed = toggleDetailedStatusline();
-      const state = ctx?.session?.state;
-      let totalInput = 0;
-      let totalOutput = 0;
-      let totalCacheRead = 0;
-      let totalCacheWrite = 0;
-      let totalCost = 0;
-
-      const entries = ctx?.session?.sessionManager?.getEntries?.() || [];
-      for (const entry of entries) {
-        if (entry.type === 'message' && entry.message.role === 'assistant') {
-          totalInput += entry.message.usage?.input || 0;
-          totalOutput += entry.message.usage?.output || 0;
-          totalCacheRead += entry.message.usage?.cacheRead || 0;
-          totalCacheWrite += entry.message.usage?.cacheWrite || 0;
-          totalCost += entry.message.usage?.cost?.total || 0;
+    pi.registerCommand('statusline', {
+      description: 'Configure statusline preset: /statusline [minimal|standard|full|off|status]',
+      handler: async (args: string, ctx: any) => {
+        const target = (args || '').trim().toLowerCase();
+        if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'off') {
+          setStatuslineMode(target as StatuslineMode);
+          if (ctx?.ui?.notify) {
+            ctx.ui.notify(`Statusline mode set to: ${target}`, 'info');
+          }
+          return;
         }
-      }
 
-      const contextUsage = ctx?.session?.getContextUsage?.();
-      const contextWindow = contextUsage?.contextWindow ?? state?.model?.contextWindow ?? 0;
-      const pct = contextUsage?.percent !== null && contextUsage?.percent !== undefined
-        ? `${contextUsage.percent.toFixed(1)}%`
-        : '?';
+        const current = getStatuslineMode();
+        const msg = [
+          `Current statusline mode: ${current}`,
+          `Options:`,
+          `  /statusline minimal   - Clean: repo · model · context% (default)`,
+          `  /statusline standard  - repo · model · context% · token metrics`,
+          `  /statusline full      - repo · model · context% · token metrics · cost`,
+          `  /statusline off       - Disable statusline entirely`,
+        ].join('\n');
 
-      const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify(msg, 'info');
+        }
+      },
+    });
 
-      const summary = [
-        `[Quick Info] Detailed footer: ${isDetailed ? 'ON' : 'OFF'}`,
-        `• Model: ${state?.model?.id ?? 'default'} (${state?.model?.provider ?? 'unknown'}) • Thinking: ${state?.thinkingLevel ?? 'off'}`,
-        `• Context: ${pct} (${fmtK(contextWindow)} window)`,
-        `• Tokens: ↑${fmtK(totalInput)} in · ↓${fmtK(totalOutput)} out · R${fmtK(totalCacheRead)} read · W${fmtK(totalCacheWrite)} write`,
-        `• Cost: $${totalCost.toFixed(4)}`,
-      ].join('\n');
+    // Register /quickinfo command: opens an interactive modal or notification with full metrics
+    pi.registerCommand('quickinfo', {
+      description: 'Display quickinfo modal with session metrics (tokens, context, cost, duration)',
+      handler: async (_args: string, ctx: any) => {
+        const state = ctx?.session?.state;
+        let totalInput = 0;
+        let totalOutput = 0;
+        let totalCacheRead = 0;
+        let totalCacheWrite = 0;
+        let totalCost = 0;
 
-      if (ctx?.ui?.notify) {
-        ctx.ui.notify(summary, 'info');
-      }
-    },
+        const entries = ctx?.session?.sessionManager?.getEntries?.() || [];
+        for (const entry of entries) {
+          if (entry.type === 'message' && entry.message.role === 'assistant') {
+            totalInput += entry.message.usage?.input || 0;
+            totalOutput += entry.message.usage?.output || 0;
+            totalCacheRead += entry.message.usage?.cacheRead || 0;
+            totalCacheWrite += entry.message.usage?.cacheWrite || 0;
+            totalCost += entry.message.usage?.cost?.total || 0;
+          }
+        }
+
+        const contextUsage = ctx?.session?.getContextUsage?.();
+        const contextWindow = contextUsage?.contextWindow ?? state?.model?.contextWindow ?? 0;
+        const pct = contextUsage?.percent !== null && contextUsage?.percent !== undefined
+          ? `${contextUsage.percent.toFixed(1)}%`
+          : '?';
+
+        const fmtK = (n: number) => {
+          if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`;
+          if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+          return String(n);
+        };
+
+        const modalLines = [
+          `╭────────────────── Session Quick Info ──────────────────╮`,
+          `│ Model:    ${(state?.model?.id ?? 'default').padEnd(44)} │`,
+          `│ Provider: ${(state?.model?.provider ?? 'unknown').padEnd(44)} │`,
+          `│ Thinking: ${(state?.thinkingLevel ?? 'off').padEnd(44)} │`,
+          `├────────────────────────────────────────────────────────┤`,
+          `│ Context:  ${`${pct} / ${fmtK(contextWindow)} tokens`.padEnd(44)} │`,
+          `│ Input:    ${`${fmtK(totalInput)} tokens`.padEnd(44)} │`,
+          `│ Output:   ${`${fmtK(totalOutput)} tokens`.padEnd(44)} │`,
+          `│ Cache R:  ${`${fmtK(totalCacheRead)} tokens`.padEnd(44)} │`,
+          `│ Cache W:  ${`${fmtK(totalCacheWrite)} tokens`.padEnd(44)} │`,
+          `├────────────────────────────────────────────────────────┤`,
+          `│ Total Cost: ${`$${totalCost.toFixed(4)}`.padEnd(42)} │`,
+          `│ Statusline: ${getStatuslineMode().padEnd(42)} │`,
+          `╰────────────────────────────────────────────────────────╯`,
+          `  (Press Esc or Enter to dismiss)`,
+        ];
+
+        // 1. If ctx.ui.custom is available, present as an interactive popup modal overlay
+        if (typeof ctx?.ui?.custom === 'function') {
+          try {
+            await ctx.ui.custom((_tui: any, theme: any, _keybindings: any, done: (val: boolean) => void) => {
+              const formatted = modalLines.map((line, idx) => {
+                if (idx === 0 || idx === 4 || idx === 10 || idx === 13) {
+                  return theme.fg('accent', line);
+                }
+                if (idx === 14) {
+                  return theme.fg('dim', line);
+                }
+                return theme.fg('white', line);
+              }).join('\n');
+
+              const comp = new Text(formatted, 0, 0);
+              // Handle dismiss keys
+              (comp as any).handleInput = (key: string) => {
+                if (key === 'escape' || key === 'return' || key === 'enter' || key === 'q') {
+                  done(true);
+                  return true;
+                }
+                return false;
+              };
+              return comp;
+            }, { overlay: true });
+            return;
+          } catch {
+            // fallback to notification
+          }
+        }
+
+        // 2. Fallback to notification
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify(modalLines.join('\n'), 'info');
+        }
+      },
     });
   }
 }

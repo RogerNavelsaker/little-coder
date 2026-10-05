@@ -14,23 +14,41 @@ declare global {
   // eslint-disable-next-line no-var
   var __littleCoderToolOverrides: Map<string, any> | undefined;
   // eslint-disable-next-line no-var
-  var __littleCoderDetailedStatusline: boolean | undefined;
+  var __littleCoderStatuslineMode: StatuslineMode | undefined;
+}
+
+export type StatuslineMode = 'minimal' | 'standard' | 'full' | 'off';
+
+/**
+ * Get the current statusline mode.
+ * Default: 'minimal' (repo · model · context%)
+ */
+export function getStatuslineMode(): StatuslineMode {
+  return globalThis.__littleCoderStatuslineMode ?? 'minimal';
 }
 
 /**
- * Toggle or set detailed statusline mode (e.g. for /quickinfo).
+ * Set the statusline mode ('minimal' | 'standard' | 'full' | 'off').
+ */
+export function setStatuslineMode(mode: StatuslineMode): void {
+  globalThis.__littleCoderStatuslineMode = mode;
+}
+
+/**
+ * Toggle detailed statusline mode (cycles minimal -> full -> minimal).
  */
 export function toggleDetailedStatusline(detailed?: boolean): boolean {
   if (detailed !== undefined) {
-    globalThis.__littleCoderDetailedStatusline = detailed;
+    globalThis.__littleCoderStatuslineMode = detailed ? 'full' : 'minimal';
   } else {
-    globalThis.__littleCoderDetailedStatusline = !globalThis.__littleCoderDetailedStatusline;
+    const cur = getStatuslineMode();
+    globalThis.__littleCoderStatuslineMode = cur === 'full' ? 'minimal' : 'full';
   }
-  return Boolean(globalThis.__littleCoderDetailedStatusline);
+  return globalThis.__littleCoderStatuslineMode === 'full';
 }
 
 export function isDetailedStatusline(): boolean {
-  return Boolean(globalThis.__littleCoderDetailedStatusline);
+  return getStatuslineMode() === 'full';
 }
 
 /**
@@ -252,18 +270,26 @@ export function patchFooterComponent(): void {
       costSegment = `\x1b[38;2;181;189;104m$${totalCost.toFixed(3)}${usingSubscription ? ' (sub)' : ''}\x1b[0m`;
     }
 
+    const mode = getStatuslineMode();
+    if (mode === 'off') {
+      return [];
+    }
+
     const dot = ' \x1b[38;2;102;102;102m·\x1b[0m ';
 
-    // Default statusline is ultra clean & non-cluttered: [pwd, model, context%]
-    // Tokens & Cost are shown only if detailed mode is enabled or terminal is very wide (>= 150)
-    const showDetails = isDetailedStatusline() || width >= 150;
-    let activeSegments = [
-      pwdSegment,
-      modelSegment,
-      ctxSegment,
-      showDetails ? tokenSegment : '',
-      showDetails ? costSegment : '',
-    ].filter(Boolean);
+    // Segments according to StatuslineMode:
+    // minimal:  [pwd, model, context%]
+    // standard: [pwd, model, context%, tokens]
+    // full:     [pwd, model, context%, tokens, cost]
+    let activeSegments: string[];
+    if (mode === 'full' || width >= 160) {
+      activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment, costSegment].filter(Boolean);
+    } else if (mode === 'standard') {
+      activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment].filter(Boolean);
+    } else {
+      // minimal (default)
+      activeSegments = [pwdSegment, modelSegment, ctxSegment].filter(Boolean);
+    }
     let leftText = activeSegments.join(dot);
 
     // Right side: extension statuses if any
