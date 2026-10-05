@@ -108,7 +108,14 @@ export const sessionSchema = Type.Object({
 });
 
 // Process table for in-process fallbacks
-const activeProcesses = new Map<string, { proc: ChildProcess; logFile: string; cwd: string; exitCode: number | null; timedOut: boolean }>();
+export const activeProcesses = new Map<string, { proc: ChildProcess; logFile: string; cwd: string; exitCode: number | null; timedOut: boolean }>();
+
+export function registerSessionProcess(
+  id: string,
+  entry: { proc: ChildProcess; logFile: string; cwd: string; exitCode: number | null; timedOut: boolean },
+): void {
+  activeProcesses.set(id, entry);
+}
 
 export function getSessionsDir(customBase?: string): string {
   const base = customBase || join(homedir(), ".pi", "sessions");

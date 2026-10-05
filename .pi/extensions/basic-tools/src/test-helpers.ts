@@ -31,17 +31,18 @@ export const FIXTURE = resolve(__dirname, "../../../../README.md");
 export async function invokeTool<P>(
   register: (pi: { registerTool(t: unknown): void }) => void,
   params: P,
-  cwd: string = CWD,
+  contextOrCwd: string | Partial<ExtensionAPI["context"]> = CWD,
 ): Promise<{ result: any; tool: any }> {
   let capturedTool: any = null;
   register({ registerTool: (t) => { capturedTool = t; } });
   if (!capturedTool) throw new Error("registerTool not called");
+  const ctx = typeof contextOrCwd === "string" ? { cwd: contextOrCwd } : { cwd: CWD, ...contextOrCwd };
   const result = await capturedTool.execute(
     "test-id",
     params,
     new AbortController().signal,
     () => {},
-    { cwd },
+    ctx,
   );
   return { result, tool: capturedTool };
 }

@@ -39,6 +39,10 @@ export interface LittleCoderSettings {
     max_turns: number;
     warn_remaining: number;
   };
+  shell: {
+    async_grace_ms: number;
+    semi_async: boolean;
+  };
   statusline: "minimal" | "standard" | "full" | "off";
   fixed_model: boolean;
 }
@@ -69,6 +73,10 @@ export const DEFAULT_LITTLE_CODER_SETTINGS: LittleCoderSettings = {
   turn_cap: {
     max_turns: 40,
     warn_remaining: 5,
+  },
+  shell: {
+    async_grace_ms: 15000,
+    semi_async: true,
   },
   statusline: "minimal",
   fixed_model: false,
@@ -159,6 +167,11 @@ function applyJsonConfig(target: LittleCoderSettings, src: any): void {
     if (typeof src.turn_cap.warn_remaining === "number") target.turn_cap.warn_remaining = src.turn_cap.warn_remaining;
   }
 
+  if (src.shell) {
+    if (typeof src.shell.async_grace_ms === "number") target.shell.async_grace_ms = src.shell.async_grace_ms;
+    if (typeof src.shell.semi_async === "boolean") target.shell.semi_async = src.shell.semi_async;
+  }
+
   if (typeof src.statusline === "string" && ["minimal", "standard", "full", "off"].includes(src.statusline)) {
     target.statusline = src.statusline;
   }
@@ -219,6 +232,14 @@ function applyEnvOverrides(target: LittleCoderSettings): void {
   }
   if (env.LITTLE_CODER_WARN_REMAINING) {
     target.turn_cap.warn_remaining = parseInt(env.LITTLE_CODER_WARN_REMAINING, 10);
+  }
+
+  // Shell semi-async & grace window
+  if (env.LITTLE_CODER_SHELL_ASYNC_GRACE_MS) {
+    target.shell.async_grace_ms = parseInt(env.LITTLE_CODER_SHELL_ASYNC_GRACE_MS, 10);
+  }
+  if (env.LITTLE_CODER_SEMI_ASYNC) {
+    target.shell.semi_async = env.LITTLE_CODER_SEMI_ASYNC !== "0" && env.LITTLE_CODER_SEMI_ASYNC !== "false";
   }
 
   // Statusline

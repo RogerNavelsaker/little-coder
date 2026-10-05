@@ -139,6 +139,7 @@ function runBwrapSandbox(
   }
 }
 import { loadSettings } from './settings.js';
+import { loadLittleCoderSettings } from '../../_shared/little-coder-config.js';
 import {
   type DisplayMode,
   formatShellCompact,
@@ -146,6 +147,13 @@ import {
   formatStarshipPrompt,
   SHELL_GUIDANCE,
 } from './display.js';
+import {
+  getSessionsDir,
+  saveSessionRecord,
+  loadSessionRecord,
+  registerSessionProcess,
+  type SessionRecord,
+} from '../../extra-tools/src/session.js';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 
@@ -377,6 +385,12 @@ export type ShellEnvMode = 'auto' | 'current' | 'none' | 'direnv' | 'clean';
 
 export type ShellBackend = 'nu' | 'nu+direnv' | 'nu-clean';
 
+export interface ShellWakeOn {
+  exit?: boolean;
+  match?: string | string[];
+  silence?: number;
+}
+
 export interface ShellToolParams {
   commands: string[];
   cwd?: string;
@@ -387,6 +401,14 @@ export interface ShellToolParams {
   readonly_shell?: boolean;
   /** Agent-facing camelCase alias for readonly_shell. */
   readonlyShell?: boolean;
+  /** Semi-async execution: detach into background session if command duration exceeds async_grace_ms. */
+  semi_async?: boolean;
+  semiAsync?: boolean;
+  /** Grace duration in ms before detaching to background (defaults to settings.shell.async_grace_ms). */
+  async_grace_ms?: number;
+  asyncGraceMs?: number;
+  /** Event-driven wakeup triggers when running in background. */
+  wake_on?: ShellWakeOn;
 }
 
 // ---- Helpers ----
@@ -440,19 +462,76 @@ function isBinaryAvailable(bin: string): boolean {
   }
 }
 
+export interface NuRunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  durationMs: number;
+  timedOut: boolean;
+  detached?: boolean;
+  sessionId?: string;
+  logFile?: string;
+  pid?: number;
+}
+
+export interface NuStreamOptions {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  onUpdate: (update: unknown) => void;
+  signal?: AbortSignal;
+  semiAsync?: boolean;
+  asyncGraceMs?: number;
+  rawCommand?: string;
+  ctx?: any;
+  wakeOn?: ShellWakeOn;
+}
+
 /**
- * Stream nu execution with throttled onUpdate.
- * Returns { stdout, stderr, exitCode, durationMs, timedOut }.
+ * Stream nu execution with throttled onUpdate and optional semi-async detachment.
+ * Returns { stdout, stderr, exitCode, durationMs, timedOut, detached?, sessionId?, logFile?, pid? }.
  */
 function runNuStreaming(
-  command: string,
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-  onUpdate: (update: unknown) => void,
-  signal?: AbortSignal,
-): Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number; timedOut: boolean }> {
+  optionsOrCommand: NuStreamOptions | string,
+  maybeArgs?: string[],
+  maybeCwd?: string,
+  maybeEnv?: NodeJS.ProcessEnv,
+  maybeTimeoutMs?: number,
+  maybeOnUpdate?: (update: unknown) => void,
+  maybeSignal?: AbortSignal,
+): Promise<NuRunResult> {
+  let opts: NuStreamOptions;
+  if (typeof optionsOrCommand === 'object') {
+    opts = optionsOrCommand;
+  } else {
+    opts = {
+      command: optionsOrCommand,
+      args: maybeArgs || [],
+      cwd: maybeCwd || process.cwd(),
+      env: maybeEnv || { ...process.env },
+      timeoutMs: maybeTimeoutMs || 30000,
+      onUpdate: maybeOnUpdate || (() => {}),
+      signal: maybeSignal,
+    };
+  }
+
+  const {
+    command,
+    args,
+    cwd,
+    env,
+    timeoutMs,
+    onUpdate,
+    signal,
+    semiAsync = false,
+    asyncGraceMs = 15000,
+    rawCommand = '',
+    ctx,
+    wakeOn = { exit: true },
+  } = opts;
+
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const proc: ChildProcess = spawn(command, args, { cwd, env });
@@ -460,13 +539,114 @@ function runNuStreaming(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let detached = false;
+    let resolved = false;
+
+    // Session background tracking file if detached
+    let sessionId: string | undefined;
+    let logFile: string | undefined;
+    let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const triggerWake = (reason: string, snippet?: string) => {
+      const notifyText = `[Shell Wakeup] Background job '${sessionId}' (pid=${proc.pid}) ${reason}${snippet ? `:\n${snippet}` : '.'}`;
+      ctx?.ui?.notify?.(notifyText, 'info');
+      if (typeof ctx?.sendUserMessage === 'function') {
+        ctx.sendUserMessage(notifyText, { deliverAs: 'followUp' });
+      }
+    };
+
+    const resetSilenceTimer = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      if (detached && wakeOn?.silence && wakeOn.silence > 0) {
+        silenceTimer = setTimeout(() => {
+          if (proc.exitCode === null) {
+            triggerWake(`silence after ${wakeOn.silence}ms`);
+          }
+        }, wakeOn.silence);
+      }
+    };
+
+    const matchPatterns: RegExp[] = [];
+    if (wakeOn?.match) {
+      const patterns = Array.isArray(wakeOn.match) ? wakeOn.match : [wakeOn.match];
+      for (const p of patterns) {
+        try {
+          matchPatterns.push(new RegExp(p));
+        } catch {
+          matchPatterns.push(new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+        }
+      }
+    }
+
+    // Grace timer for semi-async execution
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    if (semiAsync && asyncGraceMs > 0 && asyncGraceMs < timeoutMs) {
+      graceTimer = setTimeout(() => {
+        if (!resolved && proc.exitCode === null) {
+          detached = true;
+          sessionId = `sh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+          const sessionsDir = getSessionsDir(ctx?.sessionsDir);
+          logFile = join(sessionsDir, `${sessionId}.log`);
+
+          try {
+            writeFileSync(logFile, stdout + (stderr ? `\n=== stderr ===\n${stderr}` : ''), 'utf-8');
+          } catch { /* ignore */ }
+
+          const sessionRecord: SessionRecord = {
+            id: sessionId,
+            command: rawCommand || `${command} ${args.join(' ')}`,
+            cwd,
+            createdAt: Date.now(),
+            pid: proc.pid,
+            status: 'running',
+            exitCode: null,
+            timedOut: false,
+            outputLogFile: logFile,
+            backend: 'process',
+          };
+          saveSessionRecord(sessionRecord, sessionsDir);
+          registerSessionProcess(sessionId, {
+            proc,
+            logFile,
+            cwd,
+            exitCode: null,
+            timedOut: false,
+          });
+
+          resetSilenceTimer();
+
+          resolved = true;
+          const durationMs = Date.now() - start;
+          resolve({
+            stdout,
+            stderr,
+            exitCode: 0,
+            durationMs,
+            timedOut: false,
+            detached: true,
+            sessionId,
+            logFile,
+            pid: proc.pid,
+          });
+        }
+      }, asyncGraceMs);
+    }
 
     const timer = setTimeout(() => {
       timedOut = true;
+      if (detached && sessionId) {
+        const sessionsDir = getSessionsDir(ctx?.sessionsDir);
+        const rec = loadSessionRecord(sessionId, sessionsDir);
+        if (rec) {
+          rec.timedOut = true;
+          saveSessionRecord(rec, sessionsDir);
+        }
+      }
       try { proc.kill(); } catch { /* already dead */ }
     }, timeoutMs);
 
     const onAbort = () => {
+      if (graceTimer) clearTimeout(graceTimer);
       try { proc.kill(); } catch { /* already dead */ }
     };
 
@@ -485,10 +665,26 @@ function runNuStreaming(
 
     const throttle = makeThrottle(500);
     proc.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-      if (!signal?.aborted) {
+      const str = chunk.toString();
+      stdout += str;
+
+      if (detached && logFile) {
+        try {
+          writeFileSync(logFile, str, { flag: 'a' });
+        } catch { /* ignore */ }
+        resetSilenceTimer();
+
+        if (matchPatterns.length > 0) {
+          for (const re of matchPatterns) {
+            if (re.test(str)) {
+              triggerWake(`matched pattern '${re.source}'`, str.trim().slice(0, 200));
+              break;
+            }
+          }
+        }
+      } else if (!signal?.aborted) {
         throttle(() => {
-          if (!signal?.aborted) {
+          if (!signal?.aborted && !detached) {
             onUpdate({ content: [], details: { stdout } } as any);
           }
         });
@@ -496,24 +692,65 @@ function runNuStreaming(
     });
 
     proc.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const str = chunk.toString();
+      stderr += str;
+
+      if (detached && logFile) {
+        try {
+          writeFileSync(logFile, str, { flag: 'a' });
+        } catch { /* ignore */ }
+        resetSilenceTimer();
+
+        if (matchPatterns.length > 0) {
+          for (const re of matchPatterns) {
+            if (re.test(str)) {
+              triggerWake(`matched pattern '${re.source}' in stderr`, str.trim().slice(0, 200));
+              break;
+            }
+          }
+        }
+      }
     });
 
     proc.on('close', (exitCode) => {
+      if (graceTimer) clearTimeout(graceTimer);
       clearTimeout(timer);
+      if (silenceTimer) clearTimeout(silenceTimer);
       if (signal) {
         signal.removeEventListener('abort', onAbort);
       }
-      const durationMs = Date.now() - start;
-      resolve({ stdout, stderr, exitCode: exitCode ?? 1, durationMs, timedOut });
+
+      if (detached && sessionId) {
+        const sessionsDir = getSessionsDir(ctx?.sessionsDir);
+        const rec = loadSessionRecord(sessionId, sessionsDir);
+        if (rec) {
+          rec.status = 'exited';
+          rec.exitCode = exitCode;
+          saveSessionRecord(rec, sessionsDir);
+        }
+        if (wakeOn?.exit !== false && wakeOn !== undefined) {
+          triggerWake(`exited with code ${exitCode}`);
+        }
+      }
+
+      if (!resolved) {
+        resolved = true;
+        const durationMs = Date.now() - start;
+        resolve({ stdout, stderr, exitCode: exitCode ?? 1, durationMs, timedOut });
+      }
     });
 
     proc.on('error', (err) => {
+      if (graceTimer) clearTimeout(graceTimer);
       clearTimeout(timer);
+      if (silenceTimer) clearTimeout(silenceTimer);
       if (signal) {
         signal.removeEventListener('abort', onAbort);
       }
-      reject(err);
+      if (!resolved) {
+        resolved = true;
+        reject(err);
+      }
     });
   });
 }
@@ -616,6 +853,14 @@ export async function executeShellOp(
   const envMode: ShellEnvMode = (params.env ?? 'auto') as ShellEnvMode;
   const mode = (params.mode ?? 'text') as 'text' | 'json' | 'nuon' | 'toon';
   const timeoutMs = typeof params.timeout_ms === 'string' ? parseInt(params.timeout_ms, 10) : (params.timeout_ms ?? 30000);
+
+  const littleCoderSettings = loadLittleCoderSettings(ctx.cwd);
+  const isSemiAsync = params.semiAsync === true || params.semi_async === true
+    ? true
+    : (params.semiAsync === false || params.semi_async === false ? false : (littleCoderSettings.shell?.semi_async ?? true));
+  const rawGrace = params.asyncGraceMs ?? params.async_grace_ms ?? littleCoderSettings.shell?.async_grace_ms ?? 15000;
+  const asyncGraceMs = typeof rawGrace === 'string' ? parseInt(rawGrace, 10) : rawGrace;
+  const wakeOn: ShellWakeOn = params.wake_on ?? { exit: true };
 
   if (!existsSync(targetCwd)) {
     return {
@@ -783,6 +1028,10 @@ export async function executeShellOp(
   let exitCode = 1;
   let durationMs = 0;
   let timedOut = false;
+  let detached = false;
+  let sessionId: string | undefined;
+  let logFile: string | undefined;
+  let pid: number | undefined;
 
   const nuArgsBase = buildNuPrefix(nuConfig.configPath);
   const nuCommand = mode === 'json' ? `${command} | to json`
@@ -797,51 +1046,78 @@ export async function executeShellOp(
         PATH: process.env.PATH ?? '/usr/bin:/bin',
         TERM: process.env.TERM ?? 'xterm-256color',
       };
-      const result = await runNuStreaming(
-        NU_BIN,
-        [...nuArgsBase, '-c', nuCommand],
-        targetCwd,
-        cleanEnv,
+      const result = await runNuStreaming({
+        command: NU_BIN,
+        args: [...nuArgsBase, '-c', nuCommand],
+        cwd: targetCwd,
+        env: cleanEnv,
         timeoutMs,
-        _onUpdate as any,
-        _signal,
-      );
+        onUpdate: _onUpdate as any,
+        signal: _signal,
+        semiAsync: isSemiAsync,
+        asyncGraceMs,
+        rawCommand: command,
+        ctx,
+        wakeOn,
+      });
       stdout = result.stdout;
       stderr = result.stderr;
       exitCode = result.exitCode;
       durationMs = result.durationMs;
       timedOut = result.timedOut;
+      detached = Boolean(result.detached);
+      sessionId = result.sessionId;
+      logFile = result.logFile;
+      pid = result.pid;
     } else if (backend === 'nu+direnv') {
       const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
-      const result = await runNuStreaming(
-        bin,
-        ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand],
-        targetCwd,
-        { ...process.env },
+      const result = await runNuStreaming({
+        command: bin,
+        args: ['exec', targetCwd, NU_BIN, ...nuArgsBase, '-c', nuCommand],
+        cwd: targetCwd,
+        env: { ...process.env },
         timeoutMs,
-        _onUpdate as any,
-        _signal,
-      );
+        onUpdate: _onUpdate as any,
+        signal: _signal,
+        semiAsync: isSemiAsync,
+        asyncGraceMs,
+        rawCommand: command,
+        ctx,
+        wakeOn,
+      });
       stdout = result.stdout;
       stderr = result.stderr;
       exitCode = result.exitCode;
       durationMs = result.durationMs;
       timedOut = result.timedOut;
+      detached = Boolean(result.detached);
+      sessionId = result.sessionId;
+      logFile = result.logFile;
+      pid = result.pid;
     } else {
-      const result = await runNuStreaming(
-        NU_BIN,
-        [...nuArgsBase, '-c', nuCommand],
-        targetCwd,
-        { ...process.env },
+      const result = await runNuStreaming({
+        command: NU_BIN,
+        args: [...nuArgsBase, '-c', nuCommand],
+        cwd: targetCwd,
+        env: { ...process.env },
         timeoutMs,
-        _onUpdate as any,
-        _signal,
-      );
+        onUpdate: _onUpdate as any,
+        signal: _signal,
+        semiAsync: isSemiAsync,
+        asyncGraceMs,
+        rawCommand: command,
+        ctx,
+        wakeOn,
+      });
       stdout = result.stdout;
       stderr = result.stderr;
       exitCode = result.exitCode;
       durationMs = result.durationMs;
       timedOut = result.timedOut;
+      detached = Boolean(result.detached);
+      sessionId = result.sessionId;
+      logFile = result.logFile;
+      pid = result.pid;
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -908,11 +1184,14 @@ export async function executeShellOp(
   }
 
   let userText = encodeToon({ shell: [{ exitCode, durationMs, stdout: (stdoutTruncated ? stdoutPreview : scrubbedStdout), stderr: (stderrTruncated ? stderrPreview : scrubbedStderr) }] }).text;
+  if (detached) {
+    userText += `\n[detached to background session '${sessionId}' (pid=${pid}). Running... Logs at ${logFile}]`;
+  }
   if (failureSummary) userText += '\n' + failureSummary;
 
   return {
     content: [{ type: 'text', text: userText }],
-    isError: exitCode !== 0 || timedOut,
+    isError: detached ? false : (exitCode !== 0 || timedOut),
     details: {
       cwd: targetCwd,
       command,
@@ -925,6 +1204,7 @@ export async function executeShellOp(
       durationMs,
       truncated: stdoutTruncated || stderrTruncated,
       timedOut,
+      ...(detached ? { detached: true, sessionId, logFile, pid } : {}),
       ...(isReadonly && isContainerEnvironment() ? { readonlyShell: true, sandbox: 'container' } : {}),
       ...(fullOutputPath ? { fullOutputPath } : {}),
       ...(settingsWarning ? { settingsWarning } : {}),
@@ -943,6 +1223,17 @@ export function registerShellTool(pi: ExtensionAPI) {
     env: Type.Optional(Type.String()),
     timeout_ms: Type.Optional(Type.Union([Type.Number(), Type.String()])),
     readonlyShell: Type.Optional(Type.Boolean()),
+    semi_async: Type.Optional(Type.Boolean({ description: 'Detach to background session if duration exceeds async_grace_ms' })),
+    semiAsync: Type.Optional(Type.Boolean({ description: 'Detach to background session if duration exceeds async_grace_ms' })),
+    async_grace_ms: Type.Optional(Type.Number({ description: 'Grace duration before detaching to background (default: 15000)' })),
+    asyncGraceMs: Type.Optional(Type.Number({ description: 'Grace duration before detaching to background (default: 15000)' })),
+    wake_on: Type.Optional(
+      Type.Object({
+        exit: Type.Optional(Type.Boolean({ description: 'Wake agent when background process exits' })),
+        match: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: 'Wake on regex pattern' })),
+        silence: Type.Optional(Type.Number({ description: 'Wake on silence duration in ms' })),
+      })
+    ),
   });
 
   const shellSchema = Type.Object({
@@ -980,6 +1271,25 @@ export function registerShellTool(pi: ExtensionAPI) {
     ),
     readonlyShell: Type.Optional(
       Type.Boolean({ description: 'Run command inside a bubblewrap read-only sandbox (agent-facing alias)' })
+    ),
+    semi_async: Type.Optional(
+      Type.Boolean({ description: 'Detach to background session if duration exceeds async_grace_ms' })
+    ),
+    semiAsync: Type.Optional(
+      Type.Boolean({ description: 'Detach to background session if duration exceeds async_grace_ms' })
+    ),
+    async_grace_ms: Type.Optional(
+      Type.Number({ description: 'Grace duration in ms before detaching to background (default: 15000)' })
+    ),
+    asyncGraceMs: Type.Optional(
+      Type.Number({ description: 'Grace duration in ms before detaching to background (default: 15000)' })
+    ),
+    wake_on: Type.Optional(
+      Type.Object({
+        exit: Type.Optional(Type.Boolean({ description: 'Wake agent when background process exits' })),
+        match: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], { description: 'Wake on regex pattern' })),
+        silence: Type.Optional(Type.Number({ description: 'Wake on silence duration in ms' })),
+      }, { description: 'Event-driven wakeup triggers for background detached execution' })
     ),
   });
 
@@ -1029,6 +1339,10 @@ export function registerShellTool(pi: ExtensionAPI) {
             fullOutputPath?: string;
             display?: DisplayMode;
             runs?: any[];
+            detached?: boolean;
+            sessionId?: string;
+            logFile?: string;
+            pid?: number;
           };
         }).details;
 
@@ -1037,6 +1351,10 @@ export function registerShellTool(pi: ExtensionAPI) {
         const isPlain = displayParam === 'plain';
 
         if (!expanded || isCompact) {
+          if (details?.detached) {
+            const sid = details.sessionId ? ` [${details.sessionId}]` : '';
+            return new Text(theme.fg('accent', `background${sid}`) + theme.fg('dim', ` pid=${details.pid ?? '?'}`), 0, 0);
+          }
           const exitCode = details?.exitCode;
           const output = oneLine(details?.stderr || details?.stdout, 140);
           const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
@@ -1060,7 +1378,9 @@ export function registerShellTool(pi: ExtensionAPI) {
         if (isPlain) {
           const exitCode = details?.exitCode;
           const output = oneLine(details?.stderr || details?.stdout, 140);
-          const status = exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`);
+          const status = details?.detached
+            ? theme.fg('accent', `detached (session=${details.sessionId ?? '?'}, pid=${details.pid ?? '?'})`)
+            : (exitCode === 0 ? theme.fg('success', 'exit 0') : theme.fg('error', `exit ${exitCode ?? '?'}`));
           const duration = typeof details?.durationMs === 'number' ? theme.fg('dim', ` ${details.durationMs}ms`) : '';
           let text = `${status}${duration}`;
           if (output) {
@@ -1069,6 +1389,7 @@ export function registerShellTool(pi: ExtensionAPI) {
           if (details) {
             if (details.backend) text += `\n${theme.fg('dim', `backend: ${details.backend}`)}`;
             if (details.envResolved) text += `\n${theme.fg('dim', `env: ${details.envResolved}`)}`;
+            if (details.logFile) text += `\n${theme.fg('dim', `log: ${details.logFile}`)}`;
             if (details.stdout) text += `\n${details.stdout}`;
             if (details.stderr) text += `\n${theme.fg('warning', details.stderr)}`;
             if (details.truncated) {
@@ -1126,6 +1447,10 @@ export function registerShellTool(pi: ExtensionAPI) {
 
         let text = `${header}\n${prompt}`;
 
+        if (details?.detached) {
+          text += `\n${theme.fg('accent', `[Detached to background session '${details.sessionId}' (pid=${details.pid}). Output logging to ${details.logFile}]`)}`;
+        }
+
         if (details?.stdout) {
           const stdout = details.stdout.replace(/\n+$/, '');
           if (stdout) {
@@ -1164,7 +1489,10 @@ export function registerShellTool(pi: ExtensionAPI) {
 export function registerShellResultHook(pi: ExtensionAPI) {
   pi.on('tool_result', async (event) => {
     if (event.toolName !== 'shell' && event.toolName !== 'sh') return undefined;
-    const details = event.details as { exitCode?: number; timedOut?: boolean } | undefined;
+    const details = event.details as { exitCode?: number; timedOut?: boolean; detached?: boolean } | undefined;
+    if (details?.detached === true) {
+      return { isError: false };
+    }
     const exitCode = details?.exitCode;
     const timedOut = details?.timedOut;
     if (exitCode !== undefined && exitCode !== 0) {

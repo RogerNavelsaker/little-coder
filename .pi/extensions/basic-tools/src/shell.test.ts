@@ -284,6 +284,79 @@ describe("shell tool", () => {
     });
   });
 
+  // ---- Semi-async shell execution (little-coder-c5e1) ----
+  describe("semi-async execution", () => {
+    test("quick command finishes within grace window without detaching", async () => {
+      const { result } = await invokeTool(registerShellTool, {
+        command: "echo quick",
+        semi_async: true,
+        async_grace_ms: 500,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.details.detached).toBeUndefined();
+      expect(result.details.stdout).toContain("quick");
+    });
+
+    test("long command detaches to background session after grace window expires", async () => {
+      const messages: string[] = [];
+      const mockCtx = {
+        cwd: process.cwd(),
+        sendUserMessage: (msg: string) => messages.push(msg),
+      };
+
+      const { result } = await invokeTool(
+        registerShellTool,
+        {
+          command: "sleep 300ms; echo done_bg",
+          semi_async: true,
+          async_grace_ms: 100,
+          timeout_ms: 2000,
+          wake_on: { exit: true },
+        },
+        mockCtx
+      );
+
+      // Should return immediately after grace window with detached=true
+      expect(result.isError).toBe(false);
+      expect(result.details.detached).toBe(true);
+      expect(result.details.sessionId).toBeDefined();
+      expect(result.details.logFile).toBeDefined();
+      expect(result.details.pid).toBeDefined();
+
+      // Wait for process to exit and wake_on callback to fire
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      expect(messages.some((m) => m.includes("Background job") && m.includes("exited with code 0"))).toBe(true);
+    });
+
+    test("wake_on regex match triggers notification when pattern appears in background log", async () => {
+      const messages: string[] = [];
+      const mockCtx = {
+        cwd: process.cwd(),
+        sendUserMessage: (msg: string) => messages.push(msg),
+      };
+
+      const { result } = await invokeTool(
+        registerShellTool,
+        {
+          command: "sleep 150ms; print READY_PATTERN; sleep 200ms",
+          semi_async: true,
+          async_grace_ms: 50,
+          timeout_ms: 2000,
+          wake_on: { match: "READY_PATTERN", exit: false },
+        },
+        mockCtx
+      );
+
+      expect(result.details.detached).toBe(true);
+
+      // Wait for pattern to be emitted
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(messages.some((m) => m.includes("matched pattern 'READY_PATTERN'"))).toBe(true);
+    });
+  });
+
 
   // ---- Schema exposure ----
   describe("schema", () => {
