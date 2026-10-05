@@ -9,6 +9,7 @@ import {
 } from "./src/bridge.js";
 import { runContinuousGC, scrubMessagesForCompaction } from "./src/continuous-gc.js";
 import { computeOrientation, formatOrientationBlock } from "./src/orientation.js";
+import { recordEpisode } from "./src/episode-storage.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function contextExtension(pi: ExtensionAPI): void {
@@ -63,6 +64,17 @@ export default function contextExtension(pi: ExtensionAPI): void {
       const summaryPayload = extractCompactionContext(messages);
       const formatted = formatSessionSummary(summaryPayload);
       const cwd = ctx?.cwd || process.cwd();
+
+      // Persist Tier-2 episode into JSONL + SQLite (Volition / Mini-Volition pattern)
+      try {
+        const orientation = computeOrientation(undefined, cwd);
+        recordEpisode(summaryPayload, cwd, {
+          gitBranch: orientation.gitBranch,
+          gitCommit: orientation.gitCommit,
+        });
+      } catch {
+        // Non-blocking best-effort
+      }
 
       // Save session summary into Engram if available
       if (isEngramAvailable()) {

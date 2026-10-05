@@ -43,6 +43,7 @@ export interface LittleCoderSettings {
   shell: {
     async_grace_ms: number;
     semi_async: boolean;
+    default_silence_ms?: number;
   };
   statusline: "minimal" | "standard" | "full" | "custom" | "off";
   statusline_items?: {
@@ -87,6 +88,7 @@ export const DEFAULT_LITTLE_CODER_SETTINGS: LittleCoderSettings = {
   shell: {
     async_grace_ms: 15000,
     semi_async: true,
+    default_silence_ms: 30000,
   },
   statusline: "minimal",
   statusline_items: {
@@ -203,6 +205,7 @@ function applyJsonConfig(target: LittleCoderSettings, src: any): void {
   if (src.shell) {
     if (typeof src.shell.async_grace_ms === "number") target.shell.async_grace_ms = src.shell.async_grace_ms;
     if (typeof src.shell.semi_async === "boolean") target.shell.semi_async = src.shell.semi_async;
+    if (typeof src.shell.default_silence_ms === "number") target.shell.default_silence_ms = src.shell.default_silence_ms;
   }
 
   if (typeof src.statusline === "string" && ["minimal", "standard", "full", "custom", "off"].includes(src.statusline)) {
@@ -287,6 +290,9 @@ function applyEnvOverrides(target: LittleCoderSettings): void {
   }
   if (env.LITTLE_CODER_SEMI_ASYNC) {
     target.shell.semi_async = env.LITTLE_CODER_SEMI_ASYNC !== "0" && env.LITTLE_CODER_SEMI_ASYNC !== "false";
+  }
+  if (env.LITTLE_CODER_SHELL_SILENCE_MS) {
+    target.shell.default_silence_ms = parseInt(env.LITTLE_CODER_SHELL_SILENCE_MS, 10);
   }
 
   // Statusline

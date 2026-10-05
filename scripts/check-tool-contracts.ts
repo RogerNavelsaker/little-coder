@@ -21,6 +21,7 @@ const HELPER_FILES = new Set([
   'discover.ts',
   'display.ts',
   'effort.ts',
+  'episode-storage.ts',
   'file-checkpoint.ts',
   'file-reference.ts',
   'governor.ts',

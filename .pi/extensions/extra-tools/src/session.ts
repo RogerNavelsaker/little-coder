@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlink
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { loadLittleCoderSettings } from "../../_shared/little-coder-config.ts";
 
 export interface SessionRecord {
   id: string;
@@ -292,7 +293,13 @@ export async function executeSessionOp(
     activeProcesses.set(sessionId, sessionState);
 
     // Setup event-driven wake_on triggers
-    const wakeOn = params.wake_on;
+    const settings = loadLittleCoderSettings(targetCwd);
+    const defaultSilence = settings.shell?.default_silence_ms ?? 30000;
+    const wakeOn = {
+      exit: true,
+      silence: defaultSilence > 0 ? defaultSilence : undefined,
+      ...(params.wake_on ?? {}),
+    };
     let silenceTimer: ReturnType<typeof setTimeout> | undefined;
     const matchPatterns: RegExp[] = [];
     if (wakeOn?.match) {

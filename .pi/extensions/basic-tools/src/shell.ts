@@ -860,7 +860,12 @@ export async function executeShellOp(
     : (params.semiAsync === false || params.semi_async === false ? false : (littleCoderSettings.shell?.semi_async ?? true));
   const rawGrace = params.asyncGraceMs ?? params.async_grace_ms ?? littleCoderSettings.shell?.async_grace_ms ?? 15000;
   const asyncGraceMs = typeof rawGrace === 'string' ? parseInt(rawGrace, 10) : rawGrace;
-  const wakeOn: ShellWakeOn = params.wake_on ?? { exit: true };
+  const defaultSilence = littleCoderSettings.shell?.default_silence_ms ?? 30000;
+  const wakeOn: ShellWakeOn = {
+    exit: true,
+    silence: defaultSilence > 0 ? defaultSilence : undefined,
+    ...(params.wake_on ?? {}),
+  };
 
   if (!existsSync(targetCwd)) {
     return {

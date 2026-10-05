@@ -178,6 +178,34 @@ describe("executeSessionOp", () => {
     expect(messages.some((m) => m.includes("matched pattern 'BUILD_SUCCESS'"))).toBe(true);
     expect(messages.some((m) => m.includes("process exited with code 0"))).toBe(true);
 
+    // Test silence trigger sentinel
+    const silenceMessages: string[] = [];
+    const silenceCtx = {
+      cwd: process.cwd(),
+      sessionsDir: testSessionsDir,
+      sendUserMessage: (msg: string) => silenceMessages.push(msg),
+    };
+
+    await executeSessionOp(
+      "t13",
+      {
+        action: "create",
+        id: "test-silence",
+        command: "sleep 0.3; exit 0",
+        wake_on: {
+          exit: true,
+          silence: 50,
+        },
+      },
+      undefined,
+      undefined,
+      silenceCtx,
+    );
+
+    // Wait for silence trigger to fire (> 50ms)
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(silenceMessages.some((m) => m.includes("silence after 50ms"))).toBe(true);
+
     await executeSessionOp(
       "t12",
       { action: "reset" },
