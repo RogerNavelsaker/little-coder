@@ -103,25 +103,55 @@ const TOOL_OVERRIDE_PATCH = {
   rel: "dist/modes/interactive/components/tool-execution.js",
   applied: "little-coder patch: toolDefinitionOverrides for third-party rendering",
   find:
-    "    hasRendererDefinition() {\n" +
-    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
-    "    }\n" +
     "    getCallRenderer() {\n" +
     "        if (!this.builtInToolDefinition) {\n" +
     "            return this.toolDefinition?.renderCall;\n" +
-    "        }",
+    "        }\n" +
+    "        if (!this.toolDefinition) {\n" +
+    "            return this.builtInToolDefinition.renderCall;\n" +
+    "        }\n" +
+    "        return this.toolDefinition.renderCall ?? this.builtInToolDefinition.renderCall;\n" +
+    "    }\n" +
+    "    getResultRenderer() {\n" +
+    "        if (!this.builtInToolDefinition) {\n" +
+    "            return this.toolDefinition?.renderResult;\n" +
+    "        }\n" +
+    "        if (!this.toolDefinition) {\n" +
+    "            return this.builtInToolDefinition.renderResult;\n" +
+    "        }\n" +
+    "        return this.toolDefinition.renderResult ?? this.builtInToolDefinition.renderResult;\n" +
+    "    }\n" +
+    "    hasRendererDefinition() {\n" +
+    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
+    "    }",
   replace:
     "    // little-coder patch: toolDefinitionOverrides for third-party rendering\n" +
-    "    hasRendererDefinition() {\n" +
-    "        if (globalThis.__littleCoderToolOverrides?.has(this.toolName)) return true;\n" +
-    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
-    "    }\n" +
     "    getCallRenderer() {\n" +
     "        const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);\n" +
     "        if (override?.renderCall) return override.renderCall;\n" +
     "        if (!this.builtInToolDefinition) {\n" +
     "            return this.toolDefinition?.renderCall;\n" +
-    "        }",
+    "        }\n" +
+    "        if (!this.toolDefinition) {\n" +
+    "            return this.builtInToolDefinition.renderCall;\n" +
+    "        }\n" +
+    "        return this.toolDefinition.renderCall ?? this.builtInToolDefinition.renderCall;\n" +
+    "    }\n" +
+    "    getResultRenderer() {\n" +
+    "        const override = globalThis.__littleCoderToolOverrides?.get(this.toolName);\n" +
+    "        if (override?.renderResult) return override.renderResult;\n" +
+    "        if (!this.builtInToolDefinition) {\n" +
+    "            return this.toolDefinition?.renderResult;\n" +
+    "        }\n" +
+    "        if (!this.toolDefinition) {\n" +
+    "            return this.builtInToolDefinition.renderResult;\n" +
+    "        }\n" +
+    "        return this.toolDefinition.renderResult ?? this.builtInToolDefinition.renderResult;\n" +
+    "    }\n" +
+    "    hasRendererDefinition() {\n" +
+    "        if (globalThis.__littleCoderToolOverrides?.has(this.toolName)) return true;\n" +
+    "        return this.builtInToolDefinition !== undefined || this.toolDefinition !== undefined;\n" +
+    "    }",
 };
 
 const NEUTRAL_TOOL_BG_PATCH = {
