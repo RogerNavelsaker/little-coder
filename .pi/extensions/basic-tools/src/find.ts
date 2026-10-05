@@ -487,10 +487,12 @@ export async function executeFindOp(
     }
 
     throttle(() => {
-      _onUpdate?.({
-        content: [],
-        details: { totalEntries: entries.length, truncated: false },
-      });
+      if (!_signal?.aborted) {
+        _onUpdate?.({
+          content: [],
+          details: { totalEntries: entries.length, truncated: false },
+        });
+      }
     });
   });
 

@@ -306,10 +306,12 @@ export async function executeGrepOp(
         }
 
         throttle(() => {
-          _onUpdate?.({
-            content: [],
-            details: { totalMatches: matches.length, truncated: false },
-          });
+          if (!_signal?.aborted) {
+            _onUpdate?.({
+              content: [],
+              details: { totalMatches: matches.length, truncated: false },
+            });
+          }
         });
       }
     } else if (parsed.type === 'context') {

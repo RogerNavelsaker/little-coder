@@ -285,6 +285,22 @@ const MODEL_RESOLVER_DEFAULT_AUTH_CHECK_PATCH = {
     "    }",
 };
 
+const AGENT_LISTENER_ABORT_PATCH = {
+  rel: "node_modules/@earendil-works/pi-agent-core/dist/agent.js",
+  applied: "little-coder patch: guard processEvents listener invocation on late events after run finish",
+  find:
+    "        const signal = this.activeRun?.abortController.signal;\n" +
+    "        if (!signal) {\n" +
+    '            throw new Error("Agent listener invoked outside active run");\n' +
+    "        }",
+  replace:
+    "        const signal = this.activeRun?.abortController.signal;\n" +
+    "        if (!signal) {\n" +
+    "            // little-coder patch: guard processEvents listener invocation on late events after run finish\n" +
+    "            return;\n" +
+    "        }",
+};
+
 export const PATCHES = [
   ABORT_MARKER_PATCH,
   BOX_RENDER_PATCH,
@@ -295,6 +311,7 @@ export const PATCHES = [
   AUTH_STORAGE_OAUTH_CHECK_PATCH,
   MODEL_RESOLVER_EMPTY_PATTERN_PATCH,
   MODEL_RESOLVER_DEFAULT_AUTH_CHECK_PATCH,
+  AGENT_LISTENER_ABORT_PATCH,
 ];
 
 export function resolvePiRoot(piRootOverride) {
@@ -329,7 +346,14 @@ export function applyPiPatches(piRootOverride?: string) {
   if (!piRoot) return;
   for (const p of PATCHES) {
     try {
-      const file = join(piRoot, p.rel);
+      let file = join(piRoot, p.rel);
+      if (!existsSync(file)) {
+        // Check sibling hoisted directory (e.g. node_modules/@earendil-works/pi-agent-core)
+        const sibling = join(piRoot, "..", p.rel.replace(/^node_modules\/@earendil-works\//, ""));
+        if (existsSync(sibling)) {
+          file = sibling;
+        }
+      }
       if (!existsSync(file)) continue;
       const src = readFileSync(file, "utf8");
       if (src.includes(p.applied)) continue; // already patched

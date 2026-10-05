@@ -451,6 +451,7 @@ function runNuStreaming(
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
   onUpdate: (update: unknown) => void,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -465,15 +466,33 @@ function runNuStreaming(
       try { proc.kill(); } catch { /* already dead */ }
     }, timeoutMs);
 
+    const onAbort = () => {
+      try { proc.kill(); } catch { /* already dead */ }
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
     // Initial "started" signal
-    onUpdate({ content: [], details: undefined } as any);
+    if (!signal?.aborted) {
+      onUpdate({ content: [], details: undefined } as any);
+    }
 
     const throttle = makeThrottle(500);
     proc.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
-      throttle(() => {
-        onUpdate({ content: [], details: { stdout } } as any);
-      });
+      if (!signal?.aborted) {
+        throttle(() => {
+          if (!signal?.aborted) {
+            onUpdate({ content: [], details: { stdout } } as any);
+          }
+        });
+      }
     });
 
     proc.stderr?.on('data', (chunk: Buffer) => {
@@ -482,12 +501,18 @@ function runNuStreaming(
 
     proc.on('close', (exitCode) => {
       clearTimeout(timer);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       const durationMs = Date.now() - start;
       resolve({ stdout, stderr, exitCode: exitCode ?? 1, durationMs, timedOut });
     });
 
     proc.on('error', (err) => {
       clearTimeout(timer);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       reject(err);
     });
   });
@@ -638,14 +663,14 @@ export async function executeShellOp(
             PATH: process.env.PATH ?? '/usr/bin:/bin',
             TERM: process.env.TERM ?? 'xterm-256color',
           };
-          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, cleanEnv, timeoutMs, _onUpdate as any);
+          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, cleanEnv, timeoutMs, _onUpdate as any, _signal);
           cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
         } else if (mResolved.backend === 'nu+direnv') {
           const bin = isBinaryAvailable(DIRENV_BIN) ? DIRENV_BIN : 'direnv';
-          const res = await runNuStreaming(bin, ['exec', targetCwd, NU_BIN, ...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any);
+          const res = await runNuStreaming(bin, ['exec', targetCwd, NU_BIN, ...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any, _signal);
           cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
         } else {
-          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any);
+          const res = await runNuStreaming(NU_BIN, [...mPrefix, '-c', nuCmd], targetCwd, { ...process.env }, timeoutMs, _onUpdate as any, _signal);
           cOut = res.stdout; cErr = res.stderr; cExit = res.exitCode; cDur = res.durationMs; cTimedOut = res.timedOut;
         }
       } catch (err) {
@@ -779,6 +804,7 @@ export async function executeShellOp(
         cleanEnv,
         timeoutMs,
         _onUpdate as any,
+        _signal,
       );
       stdout = result.stdout;
       stderr = result.stderr;
@@ -794,6 +820,7 @@ export async function executeShellOp(
         { ...process.env },
         timeoutMs,
         _onUpdate as any,
+        _signal,
       );
       stdout = result.stdout;
       stderr = result.stderr;
@@ -808,6 +835,7 @@ export async function executeShellOp(
         { ...process.env },
         timeoutMs,
         _onUpdate as any,
+        _signal,
       );
       stdout = result.stdout;
       stderr = result.stderr;
