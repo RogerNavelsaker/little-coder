@@ -47,6 +47,18 @@ export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   session: '⚡',
   command_history: '◷',
   project_context: '⌸',
+  model_router: '⌸',
+
+  // Autonomous & Workflow tools
+  goal: '⚡',
+  schedule: '◷',
+  recap: '🖹',
+
+  // Context & Checkpoint tools
+  ctx_record: '🖹',
+  ctx_packet: '■',
+  ctx_inject: '⚡',
+  file_checkpoint: '■',
 
   // Grove expertise & issue tracking tools
   grove_read: '■',
