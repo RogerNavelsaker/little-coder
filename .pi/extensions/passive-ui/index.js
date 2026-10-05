@@ -212718,6 +212718,19 @@ function isStructuralTool(toolName) {
 function getToolRoleIcon(toolName) {
   return STRUCTURAL_TOOL_ICONS[toolName] ?? "\u2022";
 }
+function getStatusBullet(status = "success") {
+  switch (status) {
+    case "running":
+      return "\x1B[36m\u25CF\x1B[0m";
+    case "error":
+      return "\x1B[31m\u25CF\x1B[0m";
+    case "warning":
+      return "\x1B[33m\u25CF\x1B[0m";
+    case "success":
+    default:
+      return "\x1B[32m\u25CF\x1B[0m";
+  }
+}
 
 class ToolGroupingTracker {
   currentTurnTools = [];
@@ -212873,17 +212886,18 @@ function registerBasicToolGrouping(pi, tracker = defaultTracker) {
         }
         const rawGlyph = isGrouped ? isFirst ? "\u250F " : isLast ? "\u2517 " : "\u2523 " : "";
         const glyph = rawGlyph ? `\x1B[1m\x1B[97m${rawGlyph}\x1B[0m` : "";
-        const boldWhiteIcon = `\x1B[1m\x1B[97m${icon}\x1B[0m`;
+        const isError = Boolean(context?.isError);
+        const isFinished = context?.isPartial === false || context?.result !== undefined;
+        const bulletStatus = !isFinished ? "running" : isError ? "error" : "success";
+        const bullet = getStatusBullet(bulletStatus);
         let styled;
         if (toolName === "sh" || toolName === "shell") {
           const cmd = args?.command ?? (Array.isArray(args?.commands) ? args.commands[0] : "");
           const firstLineCmd = (cmd || "(empty)").split(`
 `)[0].trim();
           const highlightedCmd = highlightShellCommand(firstLineCmd);
-          const isError = context?.isError;
-          const isFinished = context?.isPartial === false || context?.result !== undefined;
           const chevronColor = isFinished ? isError ? "error" : "success" : "accent";
-          styled = `${glyph}${boldWhiteIcon} \x1B[1m\x1B[97mShell\x1B[0m ${theme.fg(chevronColor, "\u276F")} ${highlightedCmd}`;
+          styled = `${glyph}${bullet} \x1B[1m\x1B[97mShell\x1B[0m ${theme.fg(chevronColor, "\u276F")} ${highlightedCmd}`;
         } else if (toolName === "read") {
           const files = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path, offset: args.offset, limit: args.limit }] : []);
           const first = files[0];
@@ -212891,37 +212905,37 @@ function registerBasicToolGrouping(pi, tracker = defaultTracker) {
           const from = first?.offset ?? 1;
           const to = first?.limit ? `${from}-${Number(from) + Number(first.limit) - 1}` : `${from}..`;
           const range = files.length === 1 ? ` [${to}]` : ` [${files.length} files]`;
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "Read")} (${theme.fg("accent", p)})${theme.fg("dim", range)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "Read")} (${theme.fg("accent", p)})${theme.fg("dim", range)}`;
         } else if (toolName === "edit") {
           const edits = Array.isArray(args?.edits) ? args.edits : Array.isArray(args?.ops) ? args.ops : [];
           const p = (typeof args?.path === "string" ? args.path : typeof args?.file_path === "string" ? args.file_path : edits[0]?.path) ?? "";
           const shortPath = p.replace(/^\/home\/[^\/]+\//, "~/");
           const count = edits.length > 1 ? ` [${edits.length} edits]` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "Edit")} (${theme.fg("accent", shortPath || "unknown")})${theme.fg("dim", count)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "Edit")} (${theme.fg("accent", shortPath || "unknown")})${theme.fg("dim", count)}`;
         } else if (toolName === "write") {
           const writes = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
           const first = writes[0];
           const p = first?.path ?? "";
           const count = writes.length > 1 ? ` [${writes.length} files]` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "Write")} (${theme.fg("accent", p)})${theme.fg("dim", count)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "Write")} (${theme.fg("accent", p)})${theme.fg("dim", count)}`;
         } else if (toolName === "web_search") {
           const q = args?.query ?? (Array.isArray(args?.ops) ? args.ops[0]?.query : "");
           const queryText = q ? ` ("${q.split(`
 `)[0].slice(0, 50)}")` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "web_search")}${theme.fg("accent", queryText)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "web_search")}${theme.fg("accent", queryText)}`;
         } else if (toolName === "web_fetch") {
           const u = args?.url ?? (Array.isArray(args?.urls) ? args.urls[0] : Array.isArray(args?.ops) ? args.ops[0]?.url : "");
           const urlText = u ? ` (${u.split(`
 `)[0].slice(0, 60)})` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "web_fetch")}${theme.fg("accent", urlText)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "web_fetch")}${theme.fg("accent", urlText)}`;
         } else if (toolName === "outline") {
           const p = args?.path ?? (Array.isArray(args?.ops) ? args.ops[0]?.path : "");
           const pathText = p ? ` (${p.split("/").pop() ?? p})` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "outline")}${theme.fg("accent", pathText)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "outline")}${theme.fg("accent", pathText)}`;
         } else if (toolName === "session") {
           const act = args?.action ?? (args?.command ? "exec" : "list");
           const id = args?.id ? ` [${args.id}]` : "";
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", "session")} ${theme.fg("accent", `${act}${id}`)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", "session")} ${theme.fg("accent", `${act}${id}`)}`;
         } else {
           let label = toolName;
           if ((toolName === "basic-tools" || toolName === "basic_tools") && Array.isArray(args?.ops) && args.ops.length > 0) {
@@ -212936,7 +212950,7 @@ function registerBasicToolGrouping(pi, tracker = defaultTracker) {
             }
           }
           const titleText = `${label}`;
-          styled = `${glyph}${boldWhiteIcon} ${theme.fg("toolTitle", titleText)}`;
+          styled = `${glyph}${bullet} ${theme.fg("toolTitle", titleText)}`;
         }
         return new Text(styled, 0, 0);
       }
@@ -212987,16 +213001,16 @@ function patchAssistantMessageComponent() {
         const steps = parseThinkingSteps(content.thinking);
         if (this.hideThinkingBlock) {
           const label = formatThinkingStepsLabel(steps.length, this.hiddenThinkingLabel || "Thinking");
-          this.contentContainer.addChild(new Text(`\x1B[1m\x1B[97m\uD83D\uDDED\x1B[0m ${formatThinkingText(label)}`, 1, 0));
+          this.contentContainer.addChild(new Text(`\x1B[32m\u25CF\x1B[0m ${formatThinkingText(label)}`, 1, 0));
           if (hasVisibleContentAfter) {
             this.contentContainer.addChild(new Spacer(1));
           }
         } else {
-          const brightWhiteThought = "\x1B[1m\x1B[97m\uD83D\uDDED Thought:\x1B[0m ";
+          const thoughtBullet = "\x1B[32m\u25CF\x1B[0m \x1B[1m\x1B[97mThought:\x1B[0m ";
           for (let sIdx = 0;sIdx < steps.length; sIdx++) {
             const stepText = steps[sIdx];
             const cleanStep = stepText.replace(/^(?:Step\s+\d+:|Thought\s+\d+:|Thought:)\s*/i, "");
-            const prefix = steps.length > 1 ? `\x1B[1m\x1B[97m\uD83D\uDDED Thought [${sIdx + 1}/${steps.length}]:\x1B[0m ` : brightWhiteThought;
+            const prefix = steps.length > 1 ? `\x1B[32m\u25CF\x1B[0m \x1B[1m\x1B[97mThought [${sIdx + 1}/${steps.length}]:\x1B[0m ` : thoughtBullet;
             this.contentContainer.addChild(new Markdown(prefix + cleanStep, 1, 0, this.markdownTheme, {
               color: (text) => formatThinkingText(text),
               italic: true
