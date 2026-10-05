@@ -127,10 +127,10 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
     },
   });
 
-  // Register /statusline command: configure statusline preset or inspect modes
+  // Register /statusline command: interactive selector menu or quick argument switch
   if (typeof pi.registerCommand === 'function') {
     pi.registerCommand('statusline', {
-      description: 'Configure statusline preset: /statusline [minimal|standard|full|off|status]',
+      description: 'Configure statusline preset or toggle elements: /statusline [minimal|standard|full|off]',
       handler: async (args: string, ctx: any) => {
         const target = (args || '').trim().toLowerCase();
         if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'off') {
@@ -140,6 +140,93 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
             ctx.ui.notify(`Statusline mode set and saved to: ${target}`, 'info');
           }
           return;
+        }
+
+        // If called without arguments (or with menu/select), open an interactive selector modal
+        const options: Array<{ id: StatuslineMode; title: string; desc: string }> = [
+          { id: 'minimal', title: 'Minimal (Default)', desc: '…/repo (branch) · model · Context X%' },
+          { id: 'standard', title: 'Standard', desc: '…/repo (branch) · model · Context X% · ↑↓ tokens' },
+          { id: 'full', title: 'Full (Detailed)', desc: '…/repo (branch) · model · Context X% · ↑↓ tokens · $cost' },
+          { id: 'off', title: 'Off', desc: 'Disable statusline completely' },
+        ];
+
+        let selectedIndex = Math.max(0, options.findIndex(o => o.id === getStatuslineMode()));
+
+        if (typeof ctx?.ui?.custom === 'function') {
+          try {
+            await ctx.ui.custom((_tui: any, theme: any, _keybindings: any, done: (val: boolean) => void) => {
+              const comp: any = new Text('', 0, 0);
+
+              const updateText = () => {
+                const currentMode = getStatuslineMode();
+                const lines = [
+                  '╭─────────────────── Statusline Configuration ───────────────────╮',
+                  '│ Select preset: (Use ↑/↓ or j/k to navigate, Enter to choose)    │',
+                  '├─────────────────────────────────────────────────────────────────┤',
+                ];
+
+                for (let i = 0; i < options.length; i++) {
+                  const opt = options[i];
+                  const isCursor = i === selectedIndex;
+                  const isActive = opt.id === currentMode;
+                  const cursorGlyph = isCursor ? '❯' : ' ';
+                  const activeTag = isActive ? ' [Active]' : '';
+                  const lineTitle = `${cursorGlyph} ${opt.title}${activeTag}`;
+                  const paddedTitle = lineTitle.padEnd(63);
+                  const paddedDesc = `    ${opt.desc}`.padEnd(63);
+
+                  if (isCursor) {
+                    lines.push(`│ ${theme.fg('accent', paddedTitle)} │`);
+                    lines.push(`│ ${theme.fg('muted', paddedDesc)} │`);
+                  } else {
+                    lines.push(`│ ${theme.fg(isActive ? 'success' : 'white', paddedTitle)} │`);
+                    lines.push(`│ ${theme.fg('dim', paddedDesc)} │`);
+                  }
+                }
+
+                lines.push('├─────────────────────────────────────────────────────────────────┤');
+                lines.push('│ Press Esc or q to cancel. Changes are saved automatically.       │');
+                lines.push('╰─────────────────────────────────────────────────────────────────╯');
+
+                comp.text = lines.join('\n');
+              };
+
+              updateText();
+
+              comp.handleInput = (key: string) => {
+                if (key === 'up' || key === 'k') {
+                  selectedIndex = (selectedIndex - 1 + options.length) % options.length;
+                  updateText();
+                  return true;
+                }
+                if (key === 'down' || key === 'j') {
+                  selectedIndex = (selectedIndex + 1) % options.length;
+                  updateText();
+                  return true;
+                }
+                if (key === 'return' || key === 'enter') {
+                  const chosen = options[selectedIndex];
+                  setStatuslineMode(chosen.id);
+                  saveStatuslineSetting(chosen.id, ctx?.cwd || process.cwd());
+                  if (ctx?.ui?.notify) {
+                    ctx.ui.notify(`Statusline mode set and saved to: ${chosen.id}`, 'info');
+                  }
+                  done(true);
+                  return true;
+                }
+                if (key === 'escape' || key === 'q') {
+                  done(false);
+                  return true;
+                }
+                return false;
+              };
+
+              return comp;
+            }, { overlay: true });
+            return;
+          } catch {
+            // fallback to notification
+          }
         }
 
         const current = getStatuslineMode();
