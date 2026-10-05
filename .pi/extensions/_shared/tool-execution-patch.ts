@@ -159,18 +159,58 @@ export function patchToolExecutionComponent(): void {
     const hasLeadingSpacer = !this.suppressLeadingSpacer && !this.isGrouped;
 
     // 1-Line Compact consolidation when collapsed (!expanded):
-    // Combines header and brief summary on a single line: `┣ ● Shell ❯ git status (clean)`
+    // Strict 1-line display with ellipsis truncation: `┣ ● Shell ❯ <cmd...> ... (ctrl+o to expand)`
     if (!this.expanded) {
-      let consolidated = header;
-      if (rest.length > 0) {
-        const summary = rest[0].trim().slice(0, 50);
-        const plainHeader = header.replace(/\x1b\[[0-9;]*m/g, '');
-        const plainSummary = summary.replace(/\x1b\[[0-9;]*m/g, '');
-        if (plainHeader.length + plainSummary.length + 4 <= width) {
-          consolidated = `${header}  \x1b[2m(${summary})\x1b[0m`;
+      // Extract original un-wrapped lines directly from child components
+      // so long command strings don't get broken across multiple lines before truncation.
+      let unWrappedHeader = header;
+      let unWrappedSummary = '';
+
+      const container = this.getRenderShell() === 'self' ? this.selfRenderContainer : this.contentBox;
+      if (container && Array.isArray(container.children) && container.children.length > 0) {
+        const unWrappedLines: string[] = [];
+        for (const child of container.children) {
+          const rendered = child.render(10000);
+          for (const l of rendered) {
+            const trimmed = l.trimEnd();
+            if (trimmed.trim().length > 0) unWrappedLines.push(trimmed);
+          }
+        }
+        if (unWrappedLines.length > 0) {
+          unWrappedHeader = unWrappedLines[0];
+          if (unWrappedLines.length > 1) {
+            unWrappedSummary = unWrappedLines.slice(1).map(l => l.trim()).join(' ').replace(/\s+/g, ' ');
+          }
+        }
+      } else if (rest.length > 0) {
+        unWrappedSummary = rest.map((l: string) => l.trim()).join(' ').replace(/\s+/g, ' ');
+      }
+
+      const expandHint = '\x1b[2m... (ctrl+o to expand)\x1b[0m';
+      let line = unWrappedHeader;
+
+      if (!unWrappedSummary) {
+        if (visibleWidth(unWrappedHeader) > width) {
+          line = truncateToWidth(unWrappedHeader, width, expandHint);
+        }
+      } else {
+        const summaryPart = `  \x1b[2m(${unWrappedSummary})\x1b[0m`;
+        const summaryWidth = visibleWidth(summaryPart);
+
+        if (visibleWidth(unWrappedHeader) + summaryWidth <= width) {
+          line = `${unWrappedHeader}${summaryPart}`;
+        } else {
+          const availableForSummary = width - visibleWidth(unWrappedHeader) - 6;
+          if (availableForSummary >= 15) {
+            const shortSummary = `${unWrappedSummary.slice(0, availableForSummary - 3)}...`;
+            line = `${unWrappedHeader}  \x1b[2m(${shortSummary})\x1b[0m`;
+          } else {
+            line = truncateToWidth(unWrappedHeader, width, expandHint);
+          }
         }
       }
-      return hasLeadingSpacer ? ['', consolidated] : [consolidated];
+
+      return hasLeadingSpacer ? ['', line] : [line];
     }
 
     // Expanded (Ctrl+O): keep header and connect subsequent output lines with unbroken ┃ tree bar

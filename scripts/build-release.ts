@@ -124,6 +124,8 @@ for (const name of readdirSync(extSrc).sort()) {
     "--outfile", join(outDir, "index.js"),
     "--format=esm",
     "--target=bun",
+    "--external", "@earendil-works/pi-coding-agent",
+    "--external", "@earendil-works/pi-tui",
     "--minify",
   ], { cwd: root, stdio: "inherit" });
   if (rExt.status !== 0) {
