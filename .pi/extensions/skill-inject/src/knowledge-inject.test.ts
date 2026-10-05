@@ -93,5 +93,18 @@ describe("knowledge-inject", () => {
     const entries = loadKnowledgeEntries();
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.some((e) => e.name === "task-decomposition")).toBe(true);
+    expect(entries.some((e) => e.name === "grilling")).toBe(true);
+    expect(entries.some((e) => e.name === "grill-with-docs")).toBe(true);
+    expect(entries.some((e) => e.name === "systematic-debugging")).toBe(true);
+  });
+
+  it("scores grilling and debugging protocols on matching prompts", () => {
+    const entries = loadKnowledgeEntries();
+
+    const grillResults = selectKnowledge(entries, "/grill-me let's stress-test the design tree", { threshold: 2.0 });
+    expect(grillResults.selected.some((e) => e.name === "grilling")).toBe(true);
+
+    const debugResults = selectKnowledge(entries, "diagnose bug and test failure hypothesis", { threshold: 2.0 });
+    expect(debugResults.selected.some((e) => e.name === "systematic-debugging")).toBe(true);
   });
 });

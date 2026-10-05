@@ -158,5 +158,17 @@ describe("model-router (tri-tier model split)", () => {
     // Test /model-route mind test-model
     await registeredCommands["model-route"].handler("mind custom/o3", mockCtx);
     expect(getTriModelConfig().mindModel).toBe("custom/o3");
+
+    // Test /grill-me command
+    expect(registeredCommands["grill-me"]).toBeDefined();
+    await registeredCommands["grill-me"].handler("new auth architecture", mockCtx);
+    expect(getTriModelConfig().activeRole).toBe("mind");
+    expect(notification).toContain("Grilling session");
+
+    // Test /grill-with-docs command
+    expect(registeredCommands["grill-with-docs"]).toBeDefined();
+    await registeredCommands["grill-with-docs"].handler("payment provider", mockCtx);
+    expect(getTriModelConfig().activeRole).toBe("mind");
+    expect(notification).toContain("Grill-With-Docs session");
   });
 });

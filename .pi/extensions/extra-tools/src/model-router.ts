@@ -250,5 +250,33 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
       ctx.ui?.notify?.(res.content[0].text, res.isError ? "error" : "info");
     },
   });
+
+  // Slash command: /grill-me [topic]
+  pi.registerCommand?.("grill-me", {
+    description: "Start relentless design-tree interview: /grill-me [topic]",
+    handler: async (args: string, ctx: any) => {
+      // Switch active role to mind (deep thinking)
+      await executeModelRouterOp("slash-grill-me", { role: "mind" }, undefined, undefined, ctx);
+      const topic = args.trim() ? ` on: "${args.trim()}"` : "";
+      ctx.ui?.notify?.(
+        `Switched to 'mind' role for Grilling session${topic}.\nPrompting with relentless design-tree questions across the frontier.`,
+        "info",
+      );
+    },
+  });
+
+  // Slash command: /grill-with-docs [topic]
+  pi.registerCommand?.("grill-with-docs", {
+    description: "Start design-tree interview with Mulch architectural recording & domain modeling: /grill-with-docs [topic]",
+    handler: async (args: string, ctx: any) => {
+      // Switch active role to mind (deep thinking)
+      await executeModelRouterOp("slash-grill-with-docs", { role: "mind" }, undefined, undefined, ctx);
+      const topic = args.trim() ? ` on: "${args.trim()}"` : "";
+      ctx.ui?.notify?.(
+        `Switched to 'mind' role for Grill-With-Docs session${topic}.\nActive domain modeling and Mulch architecture records (ml record architecture) enabled.`,
+        "info",
+      );
+    },
+  });
 }
 

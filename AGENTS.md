@@ -149,7 +149,7 @@ The launcher detects its mode from `process.argv[1]`:
 
 Skills provide high-level workflows and specialized capability guides:
 
-- **Protocols** (`skills/protocols/`): `task_decomposition.md`.
+- **Protocols** (`skills/protocols/`): `task_decomposition.md`, `grilling.md` (`/grill-me`), `grill-with-docs.md` (`/grill-with-docs`), `systematic-debugging.md` (`/debug`).
 - **Tools Reference** (`skills/tools/`): `nu.md`, `edit.md`, `read.md`, `write.md`, `grep.md`, `glob.md`, `shell_session.md`.
 - **Web Skills & CLI Suite** (`skills/web/`):
   - **`web-search` (`ddgr`)**: Fast, low-token search via DuckDuckGo CLI (`ddgr`).
