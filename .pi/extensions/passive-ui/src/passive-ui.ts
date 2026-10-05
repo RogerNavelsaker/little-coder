@@ -27,6 +27,7 @@ import {
   setStatuslineMode,
   type StatuslineMode,
 } from '../../_shared/tool-execution-patch.js';
+import { saveStatuslineSetting } from '../../_shared/little-coder-config.js';
 
 export const passiveUiItemSchema = Type.Object({
   action: Type.Optional(Type.Union([
@@ -134,8 +135,9 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
         const target = (args || '').trim().toLowerCase();
         if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'off') {
           setStatuslineMode(target as StatuslineMode);
+          saveStatuslineSetting(target as StatuslineMode, ctx?.cwd || process.cwd());
           if (ctx?.ui?.notify) {
-            ctx.ui.notify(`Statusline mode set to: ${target}`, 'info');
+            ctx.ui.notify(`Statusline mode set and saved to: ${target}`, 'info');
           }
           return;
         }

@@ -8,7 +8,7 @@
  * 4. Built-in defaults
  */
 
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -39,6 +39,7 @@ export interface LittleCoderSettings {
     max_turns: number;
     warn_remaining: number;
   };
+  statusline: "minimal" | "standard" | "full" | "off";
   fixed_model: boolean;
 }
 
@@ -69,6 +70,7 @@ export const DEFAULT_LITTLE_CODER_SETTINGS: LittleCoderSettings = {
     max_turns: 40,
     warn_remaining: 5,
   },
+  statusline: "minimal",
   fixed_model: false,
 };
 
@@ -105,6 +107,24 @@ export function loadLittleCoderSettings(workspaceDir: string = process.cwd()): L
   return result;
 }
 
+export function saveStatuslineSetting(mode: "minimal" | "standard" | "full" | "off", workspaceDir: string = process.cwd()): boolean {
+  try {
+    const wsSettingsPath = join(workspaceDir, ".pi", "settings.json");
+    let wsSettings: any = {};
+    if (existsSync(wsSettingsPath)) {
+      wsSettings = readJsonFile(wsSettingsPath) || {};
+    }
+    if (!wsSettings.little_coder || typeof wsSettings.little_coder !== "object") {
+      wsSettings.little_coder = {};
+    }
+    wsSettings.little_coder.statusline = mode;
+    writeFileSync(wsSettingsPath, JSON.stringify(wsSettings, null, 2) + "\n", "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function applyJsonConfig(target: LittleCoderSettings, src: any): void {
   if (typeof src !== "object" || src === null) return;
 
@@ -137,6 +157,10 @@ function applyJsonConfig(target: LittleCoderSettings, src: any): void {
   if (src.turn_cap) {
     if (typeof src.turn_cap.max_turns === "number") target.turn_cap.max_turns = src.turn_cap.max_turns;
     if (typeof src.turn_cap.warn_remaining === "number") target.turn_cap.warn_remaining = src.turn_cap.warn_remaining;
+  }
+
+  if (typeof src.statusline === "string" && ["minimal", "standard", "full", "off"].includes(src.statusline)) {
+    target.statusline = src.statusline;
   }
 
   if (typeof src.fixed_model === "boolean") {
@@ -195,6 +219,11 @@ function applyEnvOverrides(target: LittleCoderSettings): void {
   }
   if (env.LITTLE_CODER_WARN_REMAINING) {
     target.turn_cap.warn_remaining = parseInt(env.LITTLE_CODER_WARN_REMAINING, 10);
+  }
+
+  // Statusline
+  if (env.LITTLE_CODER_STATUSLINE && ["minimal", "standard", "full", "off"].includes(env.LITTLE_CODER_STATUSLINE)) {
+    target.statusline = env.LITTLE_CODER_STATUSLINE as any;
   }
 
   // Fixed model

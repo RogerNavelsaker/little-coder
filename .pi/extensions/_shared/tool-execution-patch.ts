@@ -9,6 +9,7 @@
 
 import { FooterComponent, ToolExecutionComponent } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { loadLittleCoderSettings } from './little-coder-config.ts';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -21,10 +22,19 @@ export type StatuslineMode = 'minimal' | 'standard' | 'full' | 'off';
 
 /**
  * Get the current statusline mode.
- * Default: 'minimal' (repo · model · context%)
+ * Default: loaded from LittleCoderSettings (default 'minimal')
  */
 export function getStatuslineMode(): StatuslineMode {
-  return globalThis.__littleCoderStatuslineMode ?? 'minimal';
+  if (globalThis.__littleCoderStatuslineMode) {
+    return globalThis.__littleCoderStatuslineMode;
+  }
+  try {
+    const cfg = loadLittleCoderSettings();
+    globalThis.__littleCoderStatuslineMode = cfg.statusline;
+  } catch {
+    globalThis.__littleCoderStatuslineMode = 'minimal';
+  }
+  return globalThis.__littleCoderStatuslineMode;
 }
 
 /**
