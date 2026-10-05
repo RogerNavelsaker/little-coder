@@ -43,6 +43,7 @@ export interface TriTierModelConfig {
   mindModel?: string;
   handsModel?: string;
   activeRole: "voice" | "mind" | "hands";
+  autoTurnTransition: boolean;
 }
 
 export function normalizeRole(role?: string): "voice" | "mind" | "hands" {
@@ -62,6 +63,7 @@ let triConfig: TriTierModelConfig = (() => {
     mindModel: settings.roles.mind_model,
     handsModel: settings.roles.hands_model,
     activeRole: settings.roles.default_role,
+    autoTurnTransition: settings.roles.auto_turn_transition,
   };
 })();
 
@@ -204,25 +206,36 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
       executeModelRouterOp(_toolCallId, params, _signal, _onUpdate, ctx) as any,
   });
 
-  // Slash command: /role [voice|mind|hands]
+  // Slash command: /role [voice|mind|hands|auto|manual]
   pi.registerCommand?.("role", {
-    description: "Inspect or switch active tri-tier role: /role [voice|mind|hands]",
+    description: "Inspect or switch active tri-tier role: /role [voice|mind|hands|auto|manual]",
     handler: async (args: string, ctx: any) => {
       const target = args.trim().toLowerCase();
       if (!target || target === "status") {
         const locked = isModelSwitchLocked() ? " (locked in container)" : "";
         const m = target === "voice" ? triConfig.voiceModel : target === "mind" ? triConfig.mindModel : triConfig.handsModel;
+        const auto = triConfig.autoTurnTransition ? "enabled (mind -> hands -> voice)" : "manual";
         ctx.ui?.notify?.(
-          `Active role: ${triConfig.activeRole} | Model: ${m || "default"}${locked}\nRoles: voice (fast/0 thinking), mind (deep/8k thinking), hands (executor/1k thinking)`,
+          `Active role: ${triConfig.activeRole} | Model: ${m || "default"}${locked}\nAuto transitions: ${auto}\nRoles: voice (fast/0 thinking), mind (deep/8k thinking), hands (executor/1k thinking)`,
           "info",
         );
+        return;
+      }
+      if (target === "auto") {
+        triConfig.autoTurnTransition = true;
+        ctx.ui?.notify?.("Automated turn-transition flow enabled: user input -> mind, execution -> hands, prose -> voice", "info");
+        return;
+      }
+      if (target === "manual") {
+        triConfig.autoTurnTransition = false;
+        ctx.ui?.notify?.("Automated turn-transition flow disabled; role pinned manually.", "info");
         return;
       }
       if (["voice", "mind", "hands", "plan", "action"].includes(target)) {
         const res = await executeModelRouterOp("slash-role", { role: target }, undefined, undefined, ctx);
         ctx.ui?.notify?.(res.content[0].text, res.isError ? "error" : "info");
       } else {
-        ctx.ui?.notify?.("Usage: /role [voice|mind|hands]", "warning");
+        ctx.ui?.notify?.("Usage: /role [voice|mind|hands|auto|manual]", "warning");
       }
     },
   });

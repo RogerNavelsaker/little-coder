@@ -20,6 +20,7 @@ import { registerOutlineTool } from "./src/outline.ts";
 import { registerSessionTool } from "./src/session.ts";
 import { registerModelRouteTool } from "./src/model-router.ts";
 import { registerEffortCommands, injectThinkingEffort, getEffortOverride, getEffortConfig, type ThinkingRole } from "./src/effort.ts";
+import { registerTurnTransitionHooks } from "./src/turn-transition.ts";
 
 export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerScratchpadTool(pi);
@@ -28,6 +29,7 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerSessionTool(pi);
   registerModelRouteTool(pi);
   registerEffortCommands(pi);
+  registerTurnTransitionHooks(pi);
 
   const dedupe = makeDedupe();
 

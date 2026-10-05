@@ -18,6 +18,7 @@ export interface LittleCoderSettings {
     mind_model?: string;
     hands_model?: string;
     default_role: "voice" | "mind" | "hands";
+    auto_turn_transition: boolean;
   };
   effort: {
     voice_budget: number;
@@ -61,6 +62,7 @@ export const DEFAULT_LITTLE_CODER_SETTINGS: LittleCoderSettings = {
     mind_model: undefined,
     hands_model: undefined,
     default_role: "hands",
+    auto_turn_transition: true,
   },
   effort: {
     voice_budget: 0,
@@ -171,6 +173,7 @@ function applyJsonConfig(target: LittleCoderSettings, src: any): void {
     if (typeof src.roles.mind_model === "string") target.roles.mind_model = src.roles.mind_model;
     if (typeof src.roles.hands_model === "string") target.roles.hands_model = src.roles.hands_model;
     if (["voice", "mind", "hands"].includes(src.roles.default_role)) target.roles.default_role = src.roles.default_role;
+    if (typeof src.roles.auto_turn_transition === "boolean") target.roles.auto_turn_transition = src.roles.auto_turn_transition;
   }
 
   if (src.effort) {
@@ -235,6 +238,9 @@ function applyEnvOverrides(target: LittleCoderSettings): void {
   }
   if (env.LITTLE_CODER_ROLE && ["voice", "mind", "hands"].includes(env.LITTLE_CODER_ROLE)) {
     target.roles.default_role = env.LITTLE_CODER_ROLE as any;
+  }
+  if (env.LITTLE_CODER_AUTO_TURN_TRANSITION) {
+    target.roles.auto_turn_transition = env.LITTLE_CODER_AUTO_TURN_TRANSITION !== "0" && env.LITTLE_CODER_AUTO_TURN_TRANSITION !== "false";
   }
 
   // Effort
