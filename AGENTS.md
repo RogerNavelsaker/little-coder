@@ -30,6 +30,21 @@ little-coder is a Nix-native pi distribution designed for local developers and W
 |---|---|
 | `packages.default` | Compiled Bun launcher wrapped with nixpkgs dependencies (`pi`, `ripgrep`, `git`, `nushell`, `linehash`, `fd`, `eza`, `bat`, `delta`, `ast-grep`) via `makeBinaryWrapper`. Consumed by developers and by `nixpkg-warren` (`#agentImage`). |
 
+### Architectural Decoupling: little-coder (`core`, `tui`, `rpc`)
+
+Aligned with Pi 1.0.3 decoupling, `little-coder` structures its runtime across three complementary layers sharing one core:
+
+1. **`core` (`@earendil-works/pi-agent-core` / `@earendil-works/pi-durable`)**:
+   - Headless agent runtime with SQLite checkpointing and persistence.
+   - Zero TUI dependencies, zero ANSI overhead, pure deterministic state machine.
+   - Shared substrate across both local developer sessions and Warren containers.
+2. **`tui` (`@earendil-works/pi-coding-agent` + `passive-ui`)**:
+   - Developer interactive interface on local workstations.
+   - Rich terminal experience: monochrome glyphs, Starship shell headers, tree connectors, `/statusline` presets (`minimal` default), interactive `/quickinfo` modal, and thinking step indicators.
+3. **`rpc` (Transparent JSON-RPC Mode)**:
+   - Headless Warren container runner (`--mode rpc`).
+   - Strict stdout purity: logs/diagnostics routed exclusively to stderr, passing raw JSON-RPC messages directly to Warren coordinator.
+
 ### Extensions & Assets
 
 - Extensions (`.pi/extensions/*`) are pre-compiled to ESM bundles during the Nix build phase and loaded directly from `/nix/store`.

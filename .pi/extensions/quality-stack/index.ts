@@ -36,6 +36,7 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
         if (typeof (pi as any).sendUserMessage === "function") {
           (pi as any).sendUserMessage(
             `[SYSTEM WARNING] ${evalResult.message}\nPlease conclude current edits, run verifications, and provide your final answer now.`,
+            { deliverAs: "steer" },
           );
         }
       } else if (evalResult.action === "abort") {
@@ -53,6 +54,7 @@ export default function qualityStackExtension(pi: ExtensionAPI): void {
         if (typeof (pi as any).sendUserMessage === "function") {
           (pi as any).sendUserMessage(
             `[GOVERNOR CIRCUIT BREAKER] ${govResult.message}\nTake a deliberate pause before the next action.`,
+            { deliverAs: "steer" },
           );
         }
       }
