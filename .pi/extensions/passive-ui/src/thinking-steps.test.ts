@@ -103,14 +103,14 @@ Finally I will apply the patch.`;
       const message = {
         role: "assistant" as const,
         content: [{ type: "text" as const, text: "Completed implementation." }],
-        turnDurationBadge: "  \x1b[2mWorked for 37s • 9:42 AM\x1b[0m",
+        turnDurationBadge: "  \x1b[2m9:42 AM • just now • Worked for 37s\x1b[0m",
       };
 
       component.updateContent(message as any);
       const rendered = component.render(80);
       const fullText = rendered.join("\n");
       expect(fullText).toContain("Completed implementation.");
-      expect(fullText).toContain("Worked for 37s • 9:42 AM");
+      expect(fullText).toContain("9:42 AM • just now • Worked for 37s");
     } finally {
       unpatchAssistantMessageComponent();
     }

@@ -121,8 +121,15 @@ describe("tool-execution-patch", () => {
     expect(line).toContain("nix-repos (main)");
     expect(line).toContain("gpt-6-luna (openai-codex) • low");
     expect(line).toContain("Context 25.5%/200k (auto)");
-    expect(line).toContain("↑12k ↓800 R50k");
-    expect(line).toContain("$0.005 (sub)");
-    expect(line).toContain("idle");
+    // Default minimal statusline does not clutter with tokens/cost on normal terminal widths
+    expect(line).not.toContain("↑12k");
+
+    // With detailed statusline enabled (e.g. via /quickinfo):
+    const { toggleDetailedStatusline } = require("./tool-execution-patch.js");
+    toggleDetailedStatusline(true);
+    const detailedLines = footer.render(160);
+    toggleDetailedStatusline(false);
+    expect(detailedLines[0]).toContain("↑12k ↓800 R50k");
+    expect(detailedLines[0]).toContain("$0.005 (sub)");
   });
 });

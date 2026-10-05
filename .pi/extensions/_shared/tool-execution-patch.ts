@@ -13,6 +13,24 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 declare global {
   // eslint-disable-next-line no-var
   var __littleCoderToolOverrides: Map<string, any> | undefined;
+  // eslint-disable-next-line no-var
+  var __littleCoderDetailedStatusline: boolean | undefined;
+}
+
+/**
+ * Toggle or set detailed statusline mode (e.g. for /quickinfo).
+ */
+export function toggleDetailedStatusline(detailed?: boolean): boolean {
+  if (detailed !== undefined) {
+    globalThis.__littleCoderDetailedStatusline = detailed;
+  } else {
+    globalThis.__littleCoderDetailedStatusline = !globalThis.__littleCoderDetailedStatusline;
+  }
+  return Boolean(globalThis.__littleCoderDetailedStatusline);
+}
+
+export function isDetailedStatusline(): boolean {
+  return Boolean(globalThis.__littleCoderDetailedStatusline);
 }
 
 /**
@@ -236,9 +254,16 @@ export function patchFooterComponent(): void {
 
     const dot = ' \x1b[38;2;102;102;102m·\x1b[0m ';
 
-    // Progressively fit segments to width: [pwd, model, ctx, tokens, cost]
-    // If width is constrained, drop/abbreviate least critical segments first
-    let activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment, costSegment].filter(Boolean);
+    // Default statusline is ultra clean & non-cluttered: [pwd, model, context%]
+    // Tokens & Cost are shown only if detailed mode is enabled or terminal is very wide (>= 150)
+    const showDetails = isDetailedStatusline() || width >= 150;
+    let activeSegments = [
+      pwdSegment,
+      modelSegment,
+      ctxSegment,
+      showDetails ? tokenSegment : '',
+      showDetails ? costSegment : '',
+    ].filter(Boolean);
     let leftText = activeSegments.join(dot);
 
     // Right side: extension statuses if any

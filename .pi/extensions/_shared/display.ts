@@ -670,12 +670,28 @@ export function formatTime(d: Date = new Date()): string {
 }
 
 /**
- * Format Codex-style turn completion status line:
- * `  Worked for 37s • 9:42 AM`
+ * Format relative time ago (e.g. "just now", "1m ago", "12m ago").
+ */
+export function formatRelativeAgo(msAgo: number): string {
+  const secs = Math.max(0, Math.round(msAgo / 1000));
+  if (secs < 30) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours}h ago`;
+}
+
+/**
+ * Format turn completion status line:
+ * `$timestamp • $relative_time ago • Worked for $time`
+ * (e.g. `9:42 AM • just now • Worked for 37s`)
  */
 export function formatTurnStatus(durationMs: number, timestamp: Date = new Date()): string {
-  const durStr = formatTurnDuration(durationMs);
   const timeStr = formatTime(timestamp);
-  return `  \x1b[2mWorked for ${durStr} • ${timeStr}\x1b[0m`;
+  const durStr = formatTurnDuration(durationMs);
+  const agoStr = formatRelativeAgo(0); // Completed at this exact moment
+  return `  \x1b[2m${timeStr} • ${agoStr} • Worked for ${durStr}\x1b[0m`;
 }
+
 

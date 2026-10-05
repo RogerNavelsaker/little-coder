@@ -20,6 +20,10 @@ import {
   unpatchAssistantMessageComponent,
   getThinkingStepsPatchRefCount,
 } from './thinking-steps.js';
+import {
+  toggleDetailedStatusline,
+  isDetailedStatusline,
+} from '../../_shared/tool-execution-patch.js';
 
 export const passiveUiItemSchema = Type.Object({
   action: Type.Optional(Type.Union([
@@ -118,4 +122,53 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
       return (executePassiveUiOp(toolCallId, params, signal, onUpdate, ctx) as any);
     },
   });
+
+  // Register /quickinfo command: displays full session metrics breakdown and toggles detailed footer
+  if (typeof pi.registerCommand === 'function') {
+    pi.registerCommand('quickinfo', {
+      description: 'Toggle or display full session metrics (tokens, context %, spend, duration)',
+      handler: async (_args: string, ctx: any) => {
+      const isDetailed = toggleDetailedStatusline();
+      const state = ctx?.session?.state;
+      let totalInput = 0;
+      let totalOutput = 0;
+      let totalCacheRead = 0;
+      let totalCacheWrite = 0;
+      let totalCost = 0;
+
+      const entries = ctx?.session?.sessionManager?.getEntries?.() || [];
+      for (const entry of entries) {
+        if (entry.type === 'message' && entry.message.role === 'assistant') {
+          totalInput += entry.message.usage?.input || 0;
+          totalOutput += entry.message.usage?.output || 0;
+          totalCacheRead += entry.message.usage?.cacheRead || 0;
+          totalCacheWrite += entry.message.usage?.cacheWrite || 0;
+          totalCost += entry.message.usage?.cost?.total || 0;
+        }
+      }
+
+      const contextUsage = ctx?.session?.getContextUsage?.();
+      const contextWindow = contextUsage?.contextWindow ?? state?.model?.contextWindow ?? 0;
+      const pct = contextUsage?.percent !== null && contextUsage?.percent !== undefined
+        ? `${contextUsage.percent.toFixed(1)}%`
+        : '?';
+
+      const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+      const summary = [
+        `[Quick Info] Detailed footer: ${isDetailed ? 'ON' : 'OFF'}`,
+        `• Model: ${state?.model?.id ?? 'default'} (${state?.model?.provider ?? 'unknown'}) • Thinking: ${state?.thinkingLevel ?? 'off'}`,
+        `• Context: ${pct} (${fmtK(contextWindow)} window)`,
+        `• Tokens: ↑${fmtK(totalInput)} in · ↓${fmtK(totalOutput)} out · R${fmtK(totalCacheRead)} read · W${fmtK(totalCacheWrite)} write`,
+        `• Cost: $${totalCost.toFixed(4)}`,
+      ].join('\n');
+
+      if (ctx?.ui?.notify) {
+        ctx.ui.notify(summary, 'info');
+      }
+    },
+    });
+  }
 }
+
+
