@@ -42,6 +42,7 @@ const HELPER_FILES = new Set([
   'test-helpers.ts',
   'toon.ts',
   'turn-cap.ts',
+  'turn-transition.ts',
   'unified.ts',
   'watchdog.ts',
   'write-guard.ts',
