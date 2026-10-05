@@ -124,7 +124,7 @@ export function recordEpisode(
       JSON.stringify(record.discoveries),
       JSON.stringify(record.nextSteps),
       JSON.stringify(record.relevantFiles),
-      record.tokensScrubbed,
+      record.tokensScrubbed ?? 0,
     );
     db.close();
   } catch {
