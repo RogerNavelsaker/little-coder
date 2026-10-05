@@ -117,6 +117,22 @@ const TOOL_OVERRIDE_PATCH = {
     "        }",
 };
 
+const NEUTRAL_TOOL_BG_PATCH = {
+  rel: "dist/modes/interactive/components/tool-execution.js",
+  applied: "little-coder patch: neutral tool card background (codex/agy style)",
+  find:
+    "    updateDisplay() {\n" +
+    "        const bgFn = this.isPartial\n" +
+    '            ? (text) => theme.bg("toolPendingBg", text)\n' +
+    "            : this.result?.isError\n" +
+    '                ? (text) => theme.bg("toolErrorBg", text)\n' +
+    '                : (text) => theme.bg("toolSuccessBg", text);',
+  replace:
+    "    // little-coder patch: neutral tool card background (codex/agy style)\n" +
+    "    updateDisplay() {\n" +
+    "        const bgFn = (text) => text;",
+};
+
 /**
  * Escape raw CR / LF / TAB that appear INSIDE JSON string literals, leaving
  * structural whitespace between tokens untouched.
@@ -274,6 +290,7 @@ export const PATCHES = [
   BOX_RENDER_PATCH,
   TOOL_EXECUTION_SPACER_PATCH,
   TOOL_OVERRIDE_PATCH,
+  NEUTRAL_TOOL_BG_PATCH,
   EDIT_REPAIR_PATCH,
   AUTH_STORAGE_OAUTH_CHECK_PATCH,
   MODEL_RESOLVER_EMPTY_PATTERN_PATCH,

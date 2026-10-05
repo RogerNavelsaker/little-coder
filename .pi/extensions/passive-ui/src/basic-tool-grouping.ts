@@ -297,11 +297,11 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
           const range = files.length === 1 ? ` [${to}]` : ` [${files.length} files]`;
           styled = `${glyph}${icon} ${theme.fg('toolTitle', 'read')} (${theme.fg('accent', p)})${theme.fg('dim', range)}`;
         } else if (toolName === 'edit') {
-          const edits = args?.edits ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
-          const first = edits[0];
-          const p = first?.path ?? '';
+          const edits = Array.isArray(args?.edits) ? args.edits : (Array.isArray(args?.ops) ? args.ops : []);
+          const p = (typeof args?.path === 'string' ? args.path : (typeof args?.file_path === 'string' ? args.file_path : edits[0]?.path)) ?? '';
+          const shortPath = p.replace(/^\/home\/[^\/]+\//, '~/');
           const count = edits.length > 1 ? ` [${edits.length} edits]` : '';
-          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'edit')} (${theme.fg('accent', p)})${theme.fg('dim', count)}`;
+          styled = `${glyph}${icon} ${theme.fg('toolTitle', 'edit')} (${theme.fg('accent', shortPath || 'unknown')})${theme.fg('dim', count)}`;
         } else if (toolName === 'write') {
           const writes = args?.files ?? args?.ops ?? (args?.path ? [{ path: args.path }] : []);
           const first = writes[0];

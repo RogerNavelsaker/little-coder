@@ -104,6 +104,22 @@ export function patchToolExecutionComponent(): void {
     return origGetResultRenderer.call(this);
   };
 
+  const origUpdateDisplay = proto.updateDisplay;
+  proto.updateDisplay = function () {
+    if (origUpdateDisplay) {
+      origUpdateDisplay.call(this);
+    }
+    // Neutralize loud tool card backgrounds: Codex and AGY use clean, neutral, un-tinted tool rows.
+    // Replace aggressive red/green/dark-grey full-width background box styling with neutral/transparent styling.
+    if (this.contentBox && typeof this.contentBox.setBgFn === 'function') {
+      this.contentBox.setBgFn((text: string) => text);
+      this.contentBox.paddingY = 0;
+    }
+    if (this.contentText && typeof this.contentText.setCustomBgFn === 'function') {
+      this.contentText.setCustomBgFn((text: string) => text);
+    }
+  };
+
   proto.__littleCoderPatched = true;
 }
 
