@@ -125,11 +125,28 @@ describe("tool-execution-patch", () => {
     expect(line).not.toContain("↑12k");
 
     // With detailed statusline enabled (e.g. via /quickinfo):
-    const { toggleDetailedStatusline } = require("./tool-execution-patch.js");
+    const { toggleDetailedStatusline, setStatuslineMode, setStatuslineItems } = require("./tool-execution-patch.js");
     toggleDetailedStatusline(true);
     const detailedLines = footer.render(160);
     toggleDetailedStatusline(false);
     expect(detailedLines[0]).toContain("↑12k ↓800 R50k");
     expect(detailedLines[0]).toContain("$0.005 (sub)");
+
+    // With custom statusline: select only context and model (Codex minimal format)
+    setStatuslineMode("custom");
+    setStatuslineItems({
+      cwd: false,
+      model: true,
+      context: true,
+      tokens: false,
+      cost: false,
+      extension_status: false,
+    });
+    const codexLines = footer.render(120);
+    expect(codexLines.length).toBe(1);
+    expect(codexLines[0]).toContain("Context 25.5% used");
+    expect(codexLines[0]).toContain("openai-codex • gpt-6-luna • low");
+    expect(codexLines[0]).not.toContain("nix-repos");
+    setStatuslineMode("minimal");
   });
 });

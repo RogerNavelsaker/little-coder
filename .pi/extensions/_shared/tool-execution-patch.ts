@@ -16,9 +16,29 @@ declare global {
   var __littleCoderToolOverrides: Map<string, any> | undefined;
   // eslint-disable-next-line no-var
   var __littleCoderStatuslineMode: StatuslineMode | undefined;
+  // eslint-disable-next-line no-var
+  var __littleCoderStatuslineItems: StatuslineItems | undefined;
 }
 
-export type StatuslineMode = 'minimal' | 'standard' | 'full' | 'off';
+export type StatuslineMode = 'minimal' | 'standard' | 'full' | 'custom' | 'off';
+
+export interface StatuslineItems {
+  cwd: boolean;
+  model: boolean;
+  context: boolean;
+  tokens: boolean;
+  cost: boolean;
+  extension_status: boolean;
+}
+
+export const DEFAULT_STATUSLINE_ITEMS: StatuslineItems = {
+  cwd: true,
+  model: true,
+  context: true,
+  tokens: false,
+  cost: false,
+  extension_status: true,
+};
 
 /**
  * Get the current statusline mode.
@@ -31,6 +51,9 @@ export function getStatuslineMode(): StatuslineMode {
   try {
     const cfg = loadLittleCoderSettings();
     globalThis.__littleCoderStatuslineMode = cfg.statusline;
+    if (cfg.statusline_items) {
+      globalThis.__littleCoderStatuslineItems = { ...DEFAULT_STATUSLINE_ITEMS, ...cfg.statusline_items };
+    }
   } catch {
     globalThis.__littleCoderStatuslineMode = 'minimal';
   }
@@ -38,10 +61,37 @@ export function getStatuslineMode(): StatuslineMode {
 }
 
 /**
- * Set the statusline mode ('minimal' | 'standard' | 'full' | 'off').
+ * Get the current statusline items for custom mode.
+ */
+export function getStatuslineItems(): StatuslineItems {
+  if (globalThis.__littleCoderStatuslineItems) {
+    return globalThis.__littleCoderStatuslineItems;
+  }
+  try {
+    const cfg = loadLittleCoderSettings();
+    if (cfg.statusline_items) {
+      globalThis.__littleCoderStatuslineItems = { ...DEFAULT_STATUSLINE_ITEMS, ...cfg.statusline_items };
+    } else {
+      globalThis.__littleCoderStatuslineItems = { ...DEFAULT_STATUSLINE_ITEMS };
+    }
+  } catch {
+    globalThis.__littleCoderStatuslineItems = { ...DEFAULT_STATUSLINE_ITEMS };
+  }
+  return globalThis.__littleCoderStatuslineItems;
+}
+
+/**
+ * Set the statusline mode ('minimal' | 'standard' | 'full' | 'custom' | 'off').
  */
 export function setStatuslineMode(mode: StatuslineMode): void {
   globalThis.__littleCoderStatuslineMode = mode;
+}
+
+/**
+ * Set the statusline items.
+ */
+export function setStatuslineItems(items: StatuslineItems): void {
+  globalThis.__littleCoderStatuslineItems = { ...items };
 }
 
 /**
@@ -291,8 +341,20 @@ export function patchFooterComponent(): void {
     // minimal:  [pwd, model, context%]
     // standard: [pwd, model, context%, tokens]
     // full:     [pwd, model, context%, tokens, cost]
+    // custom:   individual toggles via getStatuslineItems()
     let activeSegments: string[];
-    if (mode === 'full' || width >= 160) {
+    let showExtStatus = true;
+
+    if (mode === 'custom') {
+      const items = getStatuslineItems();
+      activeSegments = [];
+      if (items.cwd) activeSegments.push(pwdSegment);
+      if (items.context) activeSegments.push(ctxSegment);
+      if (items.tokens && tokenSegment) activeSegments.push(tokenSegment);
+      if (items.cost && costSegment) activeSegments.push(costSegment);
+      if (items.model) activeSegments.push(modelSegment);
+      showExtStatus = items.extension_status;
+    } else if (mode === 'full' || width >= 160) {
       activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment, costSegment].filter(Boolean);
     } else if (mode === 'standard') {
       activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment].filter(Boolean);
@@ -300,12 +362,30 @@ export function patchFooterComponent(): void {
       // minimal (default)
       activeSegments = [pwdSegment, modelSegment, ctxSegment].filter(Boolean);
     }
+
+    // Special layout check: if custom mode selected only (context, model), we can render the exact Codex layout:
+    // "Context X% used" on left, "provider • model • thinking" on right
+    if (mode === 'custom') {
+      const items = getStatuslineItems();
+      if (!items.cwd && items.context && items.model && !items.tokens && !items.cost) {
+        const leftSide = `${ctxColor}Context ${contextPercent}% used\x1b[0m`;
+        const providerName = state.model?.provider || 'openai-codex';
+        const rightSide = `\x1b[38;2;184;152;50m${providerName} • ${modelName}${thinkingLevel}\x1b[0m`;
+        const leftWidth = visibleWidth(leftSide);
+        const rightWidth = visibleWidth(rightSide);
+        if (leftWidth + rightWidth + 2 <= width) {
+          const pad = ' '.repeat(width - leftWidth - rightWidth);
+          return [leftSide + pad + rightSide];
+        }
+      }
+    }
+
     let leftText = activeSegments.join(dot);
 
     // Right side: extension statuses if any
     let rightText = '';
     const extensionStatuses = this.footerData?.getExtensionStatuses();
-    if (extensionStatuses && extensionStatuses.size > 0) {
+    if (showExtStatus && extensionStatuses && extensionStatuses.size > 0) {
       const entries = Array.from(extensionStatuses.entries()) as [string, any][];
       const sorted = entries
         .sort(([a], [b]) => a.localeCompare(b))

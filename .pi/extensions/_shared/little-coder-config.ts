@@ -43,7 +43,15 @@ export interface LittleCoderSettings {
     async_grace_ms: number;
     semi_async: boolean;
   };
-  statusline: "minimal" | "standard" | "full" | "off";
+  statusline: "minimal" | "standard" | "full" | "custom" | "off";
+  statusline_items?: {
+    cwd?: boolean;
+    model?: boolean;
+    context?: boolean;
+    tokens?: boolean;
+    cost?: boolean;
+    extension_status?: boolean;
+  };
   fixed_model: boolean;
 }
 
@@ -79,6 +87,14 @@ export const DEFAULT_LITTLE_CODER_SETTINGS: LittleCoderSettings = {
     semi_async: true,
   },
   statusline: "minimal",
+  statusline_items: {
+    cwd: true,
+    model: true,
+    context: true,
+    tokens: false,
+    cost: false,
+    extension_status: true,
+  },
   fixed_model: false,
 };
 
@@ -115,7 +131,18 @@ export function loadLittleCoderSettings(workspaceDir: string = process.cwd()): L
   return result;
 }
 
-export function saveStatuslineSetting(mode: "minimal" | "standard" | "full" | "off", workspaceDir: string = process.cwd()): boolean {
+export function saveStatuslineSetting(
+  mode: "minimal" | "standard" | "full" | "custom" | "off",
+  items?: {
+    cwd?: boolean;
+    model?: boolean;
+    context?: boolean;
+    tokens?: boolean;
+    cost?: boolean;
+    extension_status?: boolean;
+  },
+  workspaceDir: string = process.cwd()
+): boolean {
   try {
     const wsSettingsPath = join(workspaceDir, ".pi", "settings.json");
     let wsSettings: any = {};
@@ -126,6 +153,9 @@ export function saveStatuslineSetting(mode: "minimal" | "standard" | "full" | "o
       wsSettings.little_coder = {};
     }
     wsSettings.little_coder.statusline = mode;
+    if (items) {
+      wsSettings.little_coder.statusline_items = items;
+    }
     writeFileSync(wsSettingsPath, JSON.stringify(wsSettings, null, 2) + "\n", "utf-8");
     return true;
   } catch {
@@ -172,8 +202,19 @@ function applyJsonConfig(target: LittleCoderSettings, src: any): void {
     if (typeof src.shell.semi_async === "boolean") target.shell.semi_async = src.shell.semi_async;
   }
 
-  if (typeof src.statusline === "string" && ["minimal", "standard", "full", "off"].includes(src.statusline)) {
-    target.statusline = src.statusline;
+  if (typeof src.statusline === "string" && ["minimal", "standard", "full", "custom", "off"].includes(src.statusline)) {
+    target.statusline = src.statusline as any;
+  }
+
+  if (src.statusline_items && typeof src.statusline_items === "object") {
+    target.statusline_items = {
+      cwd: typeof src.statusline_items.cwd === "boolean" ? src.statusline_items.cwd : target.statusline_items?.cwd ?? true,
+      model: typeof src.statusline_items.model === "boolean" ? src.statusline_items.model : target.statusline_items?.model ?? true,
+      context: typeof src.statusline_items.context === "boolean" ? src.statusline_items.context : target.statusline_items?.context ?? true,
+      tokens: typeof src.statusline_items.tokens === "boolean" ? src.statusline_items.tokens : target.statusline_items?.tokens ?? false,
+      cost: typeof src.statusline_items.cost === "boolean" ? src.statusline_items.cost : target.statusline_items?.cost ?? false,
+      extension_status: typeof src.statusline_items.extension_status === "boolean" ? src.statusline_items.extension_status : target.statusline_items?.extension_status ?? true,
+    };
   }
 
   if (typeof src.fixed_model === "boolean") {
@@ -243,7 +284,7 @@ function applyEnvOverrides(target: LittleCoderSettings): void {
   }
 
   // Statusline
-  if (env.LITTLE_CODER_STATUSLINE && ["minimal", "standard", "full", "off"].includes(env.LITTLE_CODER_STATUSLINE)) {
+  if (env.LITTLE_CODER_STATUSLINE && ["minimal", "standard", "full", "custom", "off"].includes(env.LITTLE_CODER_STATUSLINE)) {
     target.statusline = env.LITTLE_CODER_STATUSLINE as any;
   }
 

@@ -25,7 +25,10 @@ import {
   isDetailedStatusline,
   getStatuslineMode,
   setStatuslineMode,
+  getStatuslineItems,
+  setStatuslineItems,
   type StatuslineMode,
+  type StatuslineItems,
 } from '../../_shared/tool-execution-patch.js';
 import { saveStatuslineSetting } from '../../_shared/little-coder-config.js';
 
@@ -133,24 +136,49 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
       description: 'Configure statusline preset or toggle elements: /statusline [minimal|standard|full|off]',
       handler: async (args: string, ctx: any) => {
         const target = (args || '').trim().toLowerCase();
-        if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'off') {
+        if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'custom' || target === 'off') {
           setStatuslineMode(target as StatuslineMode);
-          saveStatuslineSetting(target as StatuslineMode, ctx?.cwd || process.cwd());
+          saveStatuslineSetting(target as StatuslineMode, getStatuslineItems(), ctx?.cwd || process.cwd());
           if (ctx?.ui?.notify) {
             ctx.ui.notify(`Statusline mode set and saved to: ${target}`, 'info');
           }
           return;
         }
 
-        // If called without arguments (or with menu/select), open an interactive selector modal
-        const options: Array<{ id: StatuslineMode; title: string; desc: string }> = [
+        // TUI interactive selector modal:
+        // Section 1: Presets (Minimal, Standard, Full, Custom, Off)
+        // Section 2: Toggleable components (when Custom or modifying custom)
+        const presets: Array<{ id: StatuslineMode; title: string; desc: string }> = [
           { id: 'minimal', title: 'Minimal (Default)', desc: '…/repo (branch) · model · Context X%' },
           { id: 'standard', title: 'Standard', desc: '…/repo (branch) · model · Context X% · ↑↓ tokens' },
           { id: 'full', title: 'Full (Detailed)', desc: '…/repo (branch) · model · Context X% · ↑↓ tokens · $cost' },
+          { id: 'custom', title: 'Custom (Configured below)', desc: 'Toggle individual elements below' },
           { id: 'off', title: 'Off', desc: 'Disable statusline completely' },
         ];
 
-        let selectedIndex = Math.max(0, options.findIndex(o => o.id === getStatuslineMode()));
+        const itemDefs: Array<{ key: keyof StatuslineItems; label: string; desc: string }> = [
+          { key: 'cwd', label: 'current-dir & git-branch', desc: 'Working directory path and current git branch' },
+          { key: 'model', label: 'model-with-reasoning', desc: 'Current model name, provider, and thinking level' },
+          { key: 'context', label: 'context-used', desc: 'Percentage of context window used and token total' },
+          { key: 'tokens', label: 'traffic-tokens', desc: 'Total input, output, and cache read/write tokens' },
+          { key: 'cost', label: 'estimated-cost', desc: 'Total estimated session cost in USD or subscription indicator' },
+          { key: 'extension_status', label: 'extension-statuses', desc: 'Right-aligned active extension states' },
+        ];
+
+        // Flat list of rows for the menu
+        type MenuRow =
+          | { type: 'preset'; preset: (typeof presets)[number] }
+          | { type: 'item'; item: (typeof itemDefs)[number] };
+
+        const rows: MenuRow[] = [
+          ...presets.map(p => ({ type: 'preset' as const, preset: p })),
+          ...itemDefs.map(i => ({ type: 'item' as const, item: i })),
+        ];
+
+        let currentMode = getStatuslineMode();
+        let currentItems = { ...getStatuslineItems() };
+        let selectedIndex = presets.findIndex(p => p.id === currentMode);
+        if (selectedIndex === -1) selectedIndex = 0;
 
         if (typeof ctx?.ui?.custom === 'function') {
           try {
@@ -158,35 +186,55 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
               const comp: any = new Text('', 0, 0);
 
               const updateText = () => {
-                const currentMode = getStatuslineMode();
                 const lines = [
-                  '╭─────────────────── Statusline Configuration ───────────────────╮',
-                  '│ Select preset: (Use ↑/↓ or j/k to navigate, Enter to choose)    │',
-                  '├─────────────────────────────────────────────────────────────────┤',
+                  '╭──────────────────────── Configure Status Line ────────────────────────╮',
+                  '│ Select preset or press Space to toggle items. Enter to save.          │',
+                  '├───────────────────────────────────────────────────────────────────────┤',
                 ];
 
-                for (let i = 0; i < options.length; i++) {
-                  const opt = options[i];
+                for (let i = 0; i < rows.length; i++) {
+                  const row = rows[i];
                   const isCursor = i === selectedIndex;
-                  const isActive = opt.id === currentMode;
                   const cursorGlyph = isCursor ? '❯' : ' ';
-                  const activeTag = isActive ? ' [Active]' : '';
-                  const lineTitle = `${cursorGlyph} ${opt.title}${activeTag}`;
-                  const paddedTitle = lineTitle.padEnd(63);
-                  const paddedDesc = `    ${opt.desc}`.padEnd(63);
 
-                  if (isCursor) {
-                    lines.push(`│ ${theme.fg('accent', paddedTitle)} │`);
-                    lines.push(`│ ${theme.fg('muted', paddedDesc)} │`);
+                  if (i === presets.length) {
+                    lines.push('├─ Toggle Components (Space to toggle) ─────────────────────────────────┤');
+                  }
+
+                  if (row.type === 'preset') {
+                    const isActive = row.preset.id === currentMode;
+                    const check = isActive ? '[●]' : '[○]';
+                    const titleText = `${cursorGlyph} ${check} ${row.preset.title}`;
+                    const paddedTitle = titleText.padEnd(71);
+                    const paddedDesc = `      ${row.preset.desc}`.padEnd(71);
+
+                    if (isCursor) {
+                      lines.push(`│ ${theme.fg('accent', paddedTitle)} │`);
+                      lines.push(`│ ${theme.fg('muted', paddedDesc)} │`);
+                    } else {
+                      lines.push(`│ ${theme.fg(isActive ? 'success' : 'white', paddedTitle)} │`);
+                      lines.push(`│ ${theme.fg('dim', paddedDesc)} │`);
+                    }
                   } else {
-                    lines.push(`│ ${theme.fg(isActive ? 'success' : 'white', paddedTitle)} │`);
-                    lines.push(`│ ${theme.fg('dim', paddedDesc)} │`);
+                    const isChecked = Boolean(currentItems[row.item.key]);
+                    const check = isChecked ? '[x]' : '[ ]';
+                    const titleText = `${cursorGlyph} ${check} ${row.item.label}`;
+                    const paddedTitle = titleText.padEnd(71);
+                    const paddedDesc = `      ${row.item.desc}`.padEnd(71);
+
+                    if (isCursor) {
+                      lines.push(`│ ${theme.fg('accent', paddedTitle)} │`);
+                      lines.push(`│ ${theme.fg('muted', paddedDesc)} │`);
+                    } else {
+                      lines.push(`│ ${theme.fg(isChecked ? 'white' : 'dim', paddedTitle)} │`);
+                      lines.push(`│ ${theme.fg('dim', paddedDesc)} │`);
+                    }
                   }
                 }
 
-                lines.push('├─────────────────────────────────────────────────────────────────┤');
-                lines.push('│ Press Esc or q to cancel. Changes are saved automatically.       │');
-                lines.push('╰─────────────────────────────────────────────────────────────────╯');
+                lines.push('├───────────────────────────────────────────────────────────────────────┤');
+                lines.push('│ Space: Toggle element · Enter: Save & Close · Esc/q: Cancel           │');
+                lines.push('╰───────────────────────────────────────────────────────────────────────╯');
 
                 comp.text = lines.join('\n');
               };
@@ -195,21 +243,44 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
 
               comp.handleInput = (key: string) => {
                 if (key === 'up' || key === 'k') {
-                  selectedIndex = (selectedIndex - 1 + options.length) % options.length;
+                  selectedIndex = (selectedIndex - 1 + rows.length) % rows.length;
                   updateText();
                   return true;
                 }
                 if (key === 'down' || key === 'j') {
-                  selectedIndex = (selectedIndex + 1) % options.length;
+                  selectedIndex = (selectedIndex + 1) % rows.length;
                   updateText();
                   return true;
                 }
+                if (key === 'space') {
+                  const row = rows[selectedIndex];
+                  if (row.type === 'item') {
+                    currentItems[row.item.key] = !currentItems[row.item.key];
+                    currentMode = 'custom';
+                    setStatuslineItems(currentItems);
+                    setStatuslineMode('custom');
+                    updateText();
+                    return true;
+                  }
+                  if (row.type === 'preset') {
+                    currentMode = row.preset.id;
+                    setStatuslineMode(currentMode);
+                    updateText();
+                    return true;
+                  }
+                }
                 if (key === 'return' || key === 'enter') {
-                  const chosen = options[selectedIndex];
-                  setStatuslineMode(chosen.id);
-                  saveStatuslineSetting(chosen.id, ctx?.cwd || process.cwd());
+                  const row = rows[selectedIndex];
+                  if (row.type === 'preset') {
+                    currentMode = row.preset.id;
+                  } else {
+                    currentMode = 'custom';
+                  }
+                  setStatuslineMode(currentMode);
+                  setStatuslineItems(currentItems);
+                  saveStatuslineSetting(currentMode, currentItems, ctx?.cwd || process.cwd());
                   if (ctx?.ui?.notify) {
-                    ctx.ui.notify(`Statusline mode set and saved to: ${chosen.id}`, 'info');
+                    ctx.ui.notify(`Statusline updated: ${currentMode}`, 'info');
                   }
                   done(true);
                   return true;
@@ -230,13 +301,18 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
         }
 
         const current = getStatuslineMode();
+        const items = getStatuslineItems();
         const msg = [
           `Current statusline mode: ${current}`,
-          `Options:`,
-          `  /statusline minimal   - Clean: repo · model · context% (default)`,
-          `  /statusline standard  - repo · model · context% · token metrics`,
-          `  /statusline full      - repo · model · context% · token metrics · cost`,
-          `  /statusline off       - Disable statusline entirely`,
+          `Components:`,
+          `  cwd:              ${items.cwd ? 'enabled' : 'disabled'}`,
+          `  model:            ${items.model ? 'enabled' : 'disabled'}`,
+          `  context:          ${items.context ? 'enabled' : 'disabled'}`,
+          `  tokens:           ${items.tokens ? 'enabled' : 'disabled'}`,
+          `  cost:             ${items.cost ? 'enabled' : 'disabled'}`,
+          `  extension_status: ${items.extension_status ? 'enabled' : 'disabled'}`,
+          ``,
+          `Presets: /statusline [minimal|standard|full|custom|off]`,
         ].join('\n');
 
         if (ctx?.ui?.notify) {
