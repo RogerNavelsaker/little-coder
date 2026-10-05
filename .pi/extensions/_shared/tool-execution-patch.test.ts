@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
-import { ToolExecutionComponent, initTheme } from "@earendil-works/pi-coding-agent";
+import { ToolExecutionComponent, FooterComponent, initTheme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
   registerToolDefinitionOverride,
   getToolDefinitionOverride,
   clearToolDefinitionOverrides,
   patchToolExecutionComponent,
+  patchFooterComponent,
 } from "./tool-execution-patch.js";
 
 describe("tool-execution-patch", () => {
@@ -83,5 +84,45 @@ describe("tool-execution-patch", () => {
     expect(callRenderer).toBeDefined();
     const rendered = callRenderer?.({}, {}, {});
     expect((rendered as any)?.text).toBe("OVERRIDDEN CALL");
+  });
+
+  it("formats single-line colored statusline with Codex data segments", () => {
+    patchFooterComponent();
+    const fakeSession = {
+      state: {
+        model: { id: "gpt-6-luna", provider: "openai-codex" },
+        thinkingLevel: "low",
+      },
+      sessionManager: {
+        getEntries: () => [
+          { type: "message", message: { role: "assistant", usage: { input: 12000, output: 800, cacheRead: 50000, cacheWrite: 0, cost: { total: 0.005 } } } },
+        ],
+        getCwd: () => "/home/rona/Repositories/RogerNavelsaker/nix-repos",
+        getSessionName: () => undefined,
+      },
+      getContextUsage: () => ({ percent: 25.5, contextWindow: 200000 }),
+      modelRegistry: { isUsingOAuth: () => true },
+    };
+
+    const fakeFooterData = {
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+      getExtensionStatuses: () => new Map([["agent-status", "idle"]]),
+    };
+
+    const footer = Object.create(FooterComponent.prototype);
+    footer.session = fakeSession;
+    footer.footerData = fakeFooterData;
+    footer.autoCompactEnabled = true;
+
+    const lines = footer.render(140);
+    expect(lines.length).toBe(1);
+    const line = lines[0];
+    expect(line).toContain("nix-repos (main)");
+    expect(line).toContain("gpt-6-luna (openai-codex) • low");
+    expect(line).toContain("Context 25.5%/200k (auto)");
+    expect(line).toContain("↑12k ↓800 R50k");
+    expect(line).toContain("$0.005 (sub)");
+    expect(line).toContain("idle");
   });
 });

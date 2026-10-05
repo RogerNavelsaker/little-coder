@@ -96,6 +96,26 @@ Finally I will apply the patch.`;
     }
   });
 
+  it("renders Codex-style turn duration status badge when present on assistant message", () => {
+    patchAssistantMessageComponent();
+    try {
+      const component = new AssistantMessageComponent();
+      const message = {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "Completed implementation." }],
+        turnDurationBadge: "  \x1b[2mWorked for 37s • 9:42 AM\x1b[0m",
+      };
+
+      component.updateContent(message as any);
+      const rendered = component.render(80);
+      const fullText = rendered.join("\n");
+      expect(fullText).toContain("Completed implementation.");
+      expect(fullText).toContain("Worked for 37s • 9:42 AM");
+    } finally {
+      unpatchAssistantMessageComponent();
+    }
+  });
+
   it("executes executeThinkingStepsOp for single and ops[] batch", async () => {
     // Single
     const res1 = await executeThinkingStepsOp("call_1", {

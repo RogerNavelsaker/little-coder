@@ -15,7 +15,7 @@ import { Type } from '@sinclair/typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
 import { registerToolDefinitionOverride } from '../../_shared/tool-execution-patch.js';
-import { highlightShellCommand } from '../../_shared/display.js';
+import { highlightShellCommand, formatTurnStatus } from '../../_shared/display.js';
 
 export const STRUCTURAL_TOOL_ICONS: Record<string, string> = {
   // Precision filesystem / editor tools
@@ -86,12 +86,27 @@ export class ToolGroupingTracker {
   private consecutiveStructuralCount = 0;
   private firstToolIdInGroup: string | null = null;
   private toolCallMap = new Map<string, GroupedToolInfo>();
+  private turnStartTime: number = Date.now();
+  private agentStartTime: number = Date.now();
 
   reset(): void {
     this.currentTurnTools = [];
     this.consecutiveStructuralCount = 0;
     this.firstToolIdInGroup = null;
     this.toolCallMap.clear();
+  }
+
+  setAgentStart(time: number = Date.now()): void {
+    this.agentStartTime = time;
+    this.turnStartTime = time;
+  }
+
+  setTurnStart(time: number = Date.now()): void {
+    this.turnStartTime = time;
+  }
+
+  getTurnDuration(now: number = Date.now()): number {
+    return Math.max(0, now - this.agentStartTime);
   }
 
   recordToolStart(toolCallId: string, toolName: string): GroupedToolInfo {
@@ -233,8 +248,13 @@ export async function executeBasicToolGroupingOp(
 }
 
 export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupingTracker = defaultTracker): void {
-  // Hook lifecycle events to maintain grouping state
+  // Hook lifecycle events to maintain grouping state and turn timing
+  pi.on('agent_start', () => {
+    tracker.setAgentStart(Date.now());
+  });
+
   pi.on('turn_start', () => {
+    tracker.setTurnStart(Date.now());
     tracker.reset();
   });
 
@@ -252,6 +272,33 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
 
   pi.on('turn_end', () => {
     tracker.reset();
+  });
+
+  pi.on('agent_end', (event: any, ctx: any) => {
+    const elapsed = tracker.getTurnDuration();
+    // Only display "Worked for Xs • HH:MM" if work took non-trivial time (>500ms) or multiple turns/tools
+    const statusLine = formatTurnStatus(elapsed, new Date());
+
+    // 1. If AssistantMessageComponent was patched and there are assistant messages in event,
+    // attach turnDurationBadge so it renders directly beneath the final assistant response
+    try {
+      const messages = event?.messages || [];
+      const lastAssistantMsg = [...messages].reverse().find((m: any) => m.role === 'assistant');
+      if (lastAssistantMsg) {
+        lastAssistantMsg.turnDurationBadge = statusLine;
+      }
+    } catch {
+      // non-fatal
+    }
+
+    // 2. Also notify status line via ctx.ui.setStatus if available for fallback visibility
+    if (ctx?.ui?.setStatus) {
+      try {
+        ctx.ui.setStatus('turn-worked', statusLine.trim());
+      } catch {
+        // non-fatal
+      }
+    }
   });
 
   // Register tool definition overrides for structural tools to inject grouping styling and suppress spacers

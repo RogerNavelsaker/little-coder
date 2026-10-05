@@ -7,7 +7,8 @@
  *    via registerToolDefinitionOverride(toolName, definition).
  */
 
-import { ToolExecutionComponent } from '@earendil-works/pi-coding-agent';
+import { FooterComponent, ToolExecutionComponent } from '@earendil-works/pi-coding-agent';
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -136,5 +137,153 @@ export function patchToolExecutionComponent(): void {
   proto.__littleCoderPatched = true;
 }
 
-// Automatically apply runtime patch when imported
+/**
+ * Patch FooterComponent to format statusline nicely like Codex:
+ * Single line, distinct colored segments, clear chosen data:
+ * `~/repo (main) · GPT-6-Luna (openai-codex) · 57.4% (auto) · ↑4.9M ↓410k R68M · $0.000 (sub)`
+ */
+export function patchFooterComponent(): void {
+  const proto = FooterComponent.prototype as any;
+  if (proto.__littleCoderFooterPatched) return;
+
+  const origRender = proto.render;
+  proto.render = function (width: number) {
+    const rawLines: string[] = origRender.call(this, width);
+    if (!rawLines || rawLines.length === 0) return rawLines;
+
+    const state = this.session?.state;
+    if (!state) return rawLines;
+
+    const theme = (this as any).theme || {
+      fg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+
+    // Calculate usage from all entries
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalCacheRead = 0;
+    let totalCacheWrite = 0;
+    let totalCost = 0;
+    for (const entry of this.session.sessionManager.getEntries()) {
+      if (entry.type === 'message' && entry.message.role === 'assistant') {
+        totalInput += entry.message.usage?.input || 0;
+        totalOutput += entry.message.usage?.output || 0;
+        totalCacheRead += entry.message.usage?.cacheRead || 0;
+        totalCacheWrite += entry.message.usage?.cacheWrite || 0;
+        totalCost += entry.message.usage?.cost?.total || 0;
+      }
+    }
+
+    const fmtTokens = (count: number) => {
+      if (count < 1000) return count.toString();
+      if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+      if (count < 1000000) return `${Math.round(count / 1000)}k`;
+      if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
+      return `${Math.round(count / 1000000)}M`;
+    };
+
+    // Context usage
+    const contextUsage = this.session.getContextUsage();
+    const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
+    const contextPercentValue = contextUsage?.percent ?? 0;
+    const contextPercent = contextUsage?.percent !== null && contextUsage?.percent !== undefined
+      ? contextPercentValue.toFixed(1)
+      : '?';
+
+    // 1. Path & Git (shorten long paths to `.../basename (branch)` if long)
+    let pwd = rawLines[0]?.replace(/\x1b\[[0-9;]*m/g, '').trim() || '~';
+    if (pwd.length > 28) {
+      const branchMatch = pwd.match(/\s*\([^)]+\)$/);
+      const branch = branchMatch ? branchMatch[0] : '';
+      const pathPart = branchMatch ? pwd.slice(0, branchMatch.index).trim() : pwd;
+      const parts = pathPart.split('/').filter(Boolean);
+      if (parts.length > 2) {
+        pwd = `…/${parts.slice(-2).join('/')}${branch}`;
+      }
+    }
+    const pwdSegment = `\x1b[38;2;138;190;183m${pwd}\x1b[0m`;
+
+    // 2. Model & Role
+    const modelName = state.model?.id || 'no-model';
+    const provider = state.model?.provider ? ` (${state.model.provider})` : '';
+    const thinkingLevel = state.thinkingLevel && state.thinkingLevel !== 'off' ? ` • ${state.thinkingLevel}` : '';
+    const modelSegment = `\x1b[38;2;184;152;50m${modelName}${provider}${thinkingLevel}\x1b[0m`;
+
+    // 3. Context % with threshold colors
+    let ctxColor = '\x1b[38;2;149;152;203m'; // muted purple/blue like Codex
+    if (contextPercentValue > 90) ctxColor = '\x1b[31m';
+    else if (contextPercentValue > 70) ctxColor = '\x1b[33m';
+    const autoIndicator = this.autoCompactEnabled ? ' (auto)' : '';
+    const ctxSegment = `${ctxColor}Context ${contextPercent}%/${fmtTokens(contextWindow)}${autoIndicator}\x1b[0m`;
+
+    // 4. Token metrics (cyan / muted)
+    const tokenParts: string[] = [];
+    if (totalInput) tokenParts.push(`↑${fmtTokens(totalInput)}`);
+    if (totalOutput) tokenParts.push(`↓${fmtTokens(totalOutput)}`);
+    if (totalCacheRead) tokenParts.push(`R${fmtTokens(totalCacheRead)}`);
+    if (totalCacheWrite) tokenParts.push(`W${fmtTokens(totalCacheWrite)}`);
+    const tokenSegment = tokenParts.length > 0
+      ? `\x1b[38;2;129;162;190m${tokenParts.join(' ')}\x1b[0m`
+      : '';
+
+    // 5. Cost
+    const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
+    let costSegment = '';
+    if (totalCost || usingSubscription) {
+      costSegment = `\x1b[38;2;181;189;104m$${totalCost.toFixed(3)}${usingSubscription ? ' (sub)' : ''}\x1b[0m`;
+    }
+
+    const dot = ' \x1b[38;2;102;102;102m·\x1b[0m ';
+
+    // Progressively fit segments to width: [pwd, model, ctx, tokens, cost]
+    // If width is constrained, drop/abbreviate least critical segments first
+    let activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment, costSegment].filter(Boolean);
+    let leftText = activeSegments.join(dot);
+
+    // Right side: extension statuses if any
+    let rightText = '';
+    const extensionStatuses = this.footerData?.getExtensionStatuses();
+    if (extensionStatuses && extensionStatuses.size > 0) {
+      const entries = Array.from(extensionStatuses.entries()) as [string, any][];
+      const sorted = entries
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, t]) => String(t).replace(/[\r\n\t]/g, ' ').trim());
+      rightText = `\x1b[38;2;150;156;167m${sorted.join(' ')}\x1b[0m`;
+    }
+
+    let leftLen = visibleWidth(leftText);
+    let rightLen = visibleWidth(rightText);
+
+    // If too wide for terminal, try dropping extension status first
+    if (leftLen + (rightLen ? rightLen + 2 : 0) > width && rightLen > 0) {
+      rightText = '';
+      rightLen = 0;
+    }
+
+    // If still too wide, drop cost, then tokens
+    if (leftLen > width && costSegment) {
+      activeSegments = [pwdSegment, modelSegment, ctxSegment, tokenSegment].filter(Boolean);
+      leftText = activeSegments.join(dot);
+      leftLen = visibleWidth(leftText);
+    }
+    if (leftLen > width && tokenSegment) {
+      activeSegments = [pwdSegment, modelSegment, ctxSegment].filter(Boolean);
+      leftText = activeSegments.join(dot);
+      leftLen = visibleWidth(leftText);
+    }
+
+    if (leftLen + (rightLen ? rightLen + 2 : 0) <= width) {
+      const pad = ' '.repeat(Math.max(1, width - leftLen - rightLen));
+      return [leftText + (rightText ? pad + rightText : '')];
+    }
+
+    return [truncateToWidth(leftText, width, '...')];
+  };
+
+  proto.__littleCoderFooterPatched = true;
+}
+
+// Automatically apply runtime patches when imported
 patchToolExecutionComponent();
+patchFooterComponent();

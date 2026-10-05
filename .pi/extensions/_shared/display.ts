@@ -641,3 +641,41 @@ export function highlightShellCommand(command: string): string {
 
   return command;
 }
+
+// ---- Turn Completion Status Badge (Codex style) ----
+
+/**
+ * Format duration in seconds/minutes (e.g. "37s", "2m 5s").
+ */
+export function formatTurnDuration(ms: number): string {
+  if (ms < 1000) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remSecs = secs % 60;
+  if (remSecs === 0) return `${mins}m`;
+  return `${mins}m ${remSecs}s`;
+}
+
+/**
+ * Format local time as "H:MM AM/PM" (e.g. "9:42 AM").
+ */
+export function formatTime(d: Date = new Date()): string {
+  let hours = d.getHours();
+  const mins = d.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${mins} ${ampm}`;
+}
+
+/**
+ * Format Codex-style turn completion status line:
+ * `  Worked for 37s • 9:42 AM`
+ */
+export function formatTurnStatus(durationMs: number, timestamp: Date = new Date()): string {
+  const durStr = formatTurnDuration(durationMs);
+  const timeStr = formatTime(timestamp);
+  return `  \x1b[2mWorked for ${durStr} • ${timeStr}\x1b[0m`;
+}
+

@@ -11,9 +11,11 @@
 import { Type } from '@sinclair/typebox';
 import { AssistantMessageComponent, getMarkdownTheme, initTheme } from '@earendil-works/pi-coding-agent';
 import { Markdown, Spacer, Text } from '@earendil-works/pi-tui';
+import { formatTurnStatus } from '../../_shared/display.js';
 
 export const THINKING_STEPS_REF_COUNT = Symbol.for('little-coder.thinking-steps.refCount');
 export const THINKING_STEPS_ORIG_UPDATE = Symbol.for('little-coder.thinking-steps.origUpdateContent');
+export const THINKING_STEPS_ORIG_RENDER = Symbol.for('little-coder.thinking-steps.origRender');
 
 /**
  * Splits raw thinking trace text into logical thinking steps.
@@ -124,6 +126,21 @@ export function patchAssistantMessageComponent(): number {
     }
   };
 
+  // Store and patch render to support Codex-style turn duration status badge
+  proto[THINKING_STEPS_ORIG_RENDER] = proto.render;
+  proto.render = function (width: number) {
+    const origRenderFn = proto[THINKING_STEPS_ORIG_RENDER] || Object.getPrototypeOf(proto).render;
+    const lines = origRenderFn.call(this, width);
+    const badge = this.turnDurationBadge || this.lastMessage?.turnDurationBadge;
+    if (badge) {
+      if (lines.length === 0) {
+        return ['', badge];
+      }
+      return [...lines, '', badge];
+    }
+    return lines;
+  };
+
   proto[THINKING_STEPS_REF_COUNT] = 1;
   return 1;
 }
@@ -139,6 +156,10 @@ export function unpatchAssistantMessageComponent(): number {
     if (proto[THINKING_STEPS_ORIG_UPDATE]) {
       proto.updateContent = proto[THINKING_STEPS_ORIG_UPDATE];
       delete proto[THINKING_STEPS_ORIG_UPDATE];
+    }
+    if (proto[THINKING_STEPS_ORIG_RENDER]) {
+      proto.render = proto[THINKING_STEPS_ORIG_RENDER];
+      delete proto[THINKING_STEPS_ORIG_RENDER];
     }
     proto[THINKING_STEPS_REF_COUNT] = 0;
     return 0;
