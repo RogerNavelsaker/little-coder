@@ -58,10 +58,15 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
       }
 
       const { classifyTurnIntent } = await import("./src/effort.ts");
+      const { getTriModelConfig } = await import("./src/model-router.ts");
+      const triCfg = getTriModelConfig();
       const detectedTask = classifyTurnIntent(lastText);
-      const envRole = (process.env.LITTLE_CODER_ROLE || "coder") as ThinkingRole;
+      const activeRole = triCfg.activeRole || ((process.env.LITTLE_CODER_ROLE as ThinkingRole) || "hands");
 
-      const modifiedPayload = injectThinkingEffort(payload, detectedTask || envRole);
+      // If active role is "voice", force thinking off (0 tokens) regardless of prompt
+      // Otherwise apply task-specific intent or fallback to role budget
+      const steeringTarget = activeRole === "voice" ? "voice" : (detectedTask || activeRole);
+      const modifiedPayload = injectThinkingEffort(payload, steeringTarget);
       return modifiedPayload;
     } catch {
       // Non-blocking fallback

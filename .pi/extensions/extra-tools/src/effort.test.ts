@@ -84,5 +84,22 @@ describe("injectThinkingEffort", () => {
       const res = injectThinkingEffort(rawPayload, "test_run");
       expect(res.thinking).toBeUndefined();
     });
+
+    it("respects voice (off), mind (high: 8k), and hands (low: 1k) roles", () => {
+      const payload = {
+        model: "claude-3-7-sonnet-20250219",
+        messages: [{ role: "user", content: "hello" }],
+        thinking: { type: "enabled", budget_tokens: 2048 },
+      };
+
+      const resVoice = injectThinkingEffort(payload, "voice");
+      expect(resVoice.thinking).toBeUndefined();
+
+      const resMind = injectThinkingEffort(payload, "mind");
+      expect(resMind.thinking.budget_tokens).toBe(8192);
+
+      const resHands = injectThinkingEffort(payload, "hands");
+      expect(resHands.thinking.budget_tokens).toBe(1024);
+    });
   });
 });

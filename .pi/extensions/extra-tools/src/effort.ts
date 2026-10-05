@@ -10,7 +10,7 @@
  *   (coordinator=high, coder=medium, reviewer=low, watchdog=off).
  */
 
-export type ThinkingRole = "coordinator" | "coder" | "reviewer" | "watchdog";
+export type ThinkingRole = "voice" | "mind" | "hands" | "coordinator" | "coder" | "reviewer" | "watchdog";
 
 export type TaskType = "quick_fix" | "test_run" | "refactor" | "feature" | "architecture" | "debug";
 
@@ -21,6 +21,11 @@ export interface EffortConfig {
 
 export const DEFAULT_EFFORT_CONFIG: EffortConfig = {
   roleBudgets: {
+    // Tri-tier architecture roles
+    voice: { level: "off", tokens: 0 },         // "Dumb" communicator: 0 thinking tokens
+    mind: { level: "high", tokens: 8192 },       // "Smart" thinker: deep reasoning
+    hands: { level: "low", tokens: 1024 },       // "Dumb" but dynamic executor: minimal/focused
+    // Legacy / specialization aliases
     coordinator: { level: "high", tokens: 4096 },
     coder: { level: "medium", tokens: 2048 },
     reviewer: { level: "low", tokens: 1024 },

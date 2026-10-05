@@ -1,45 +1,85 @@
 /**
- * `model_route` tool & dual-model split router (Volition / Abe pattern).
+ * `model_route` tool & tri-tier model split router (`voice` / `mind` / `hands`).
  *
- * Implements an asymmetric dual-model architecture:
- * - `plan-model`: High-capacity frontier or local reasoning model (Sonnet, o3, Qwen 35B high CoT).
+ * Implements an asymmetric three-tier model architecture:
+ * - `voice`: Fast, low-latency, "dumb" communicator (Flash, Haiku, small local model).
+ *   Used for conversational responses, status updates, TUI narration (`recap`), and social interactions.
+ *   Operates with 0 thinking tokens and read-only / non-destructive posture.
+ * - `mind`: High-capacity frontier or local reasoning model (Sonnet 3.7, o3, Qwen-35B high-CoT).
  *   Used for architectural design, task decomposition, complex debugging, and compaction summaries.
- * - `action-model`: Fast, low-latency, deterministic execution model (Qwen 27B/35B minimal CoT, Haiku, 4o-mini).
- *   Used for mechanical shell execution, linehash edits, file reads, and test loops.
+ *   Operates with high thinking tokens (8k–16k).
+ * - `hands`: Fast, deterministic, instruction-following executor (4o-mini, Qwen-27B, Haiku).
+ *   Used for precision linehash edits, mechanical shell runs, file reads, and verification loops.
+ *   Operates with dynamic action-based thinking tokens (0 for tests/commands, minimal for diffs).
+ *
+ * Backward-compatible aliases: `plan` -> `mind`, `action` -> `hands`.
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export interface DualModelConfig {
-  planModel?: string;
-  actionModel?: string;
-  activeRole: "plan" | "action";
+export type ModelTierRole = "voice" | "mind" | "hands" | "plan" | "action";
+
+export interface TriTierModelConfig {
+  voiceModel?: string;
+  mindModel?: string;
+  handsModel?: string;
+  activeRole: "voice" | "mind" | "hands";
 }
 
-let dualConfig: DualModelConfig = {
-  planModel: process.env.LITTLE_CODER_PLAN_MODEL,
-  actionModel: process.env.LITTLE_CODER_ACTION_MODEL,
-  activeRole: "action",
+export function normalizeRole(role?: string): "voice" | "mind" | "hands" {
+  if (!role) return "hands";
+  const lower = role.toLowerCase().trim();
+  if (lower === "mind" || lower === "plan") return "mind";
+  if (lower === "voice") return "voice";
+  return "hands";
+}
+
+let triConfig: TriTierModelConfig = {
+  voiceModel: process.env.LITTLE_CODER_VOICE_MODEL,
+  mindModel: process.env.LITTLE_CODER_MIND_MODEL || process.env.LITTLE_CODER_PLAN_MODEL,
+  handsModel: process.env.LITTLE_CODER_HANDS_MODEL || process.env.LITTLE_CODER_ACTION_MODEL,
+  activeRole: normalizeRole(process.env.LITTLE_CODER_ROLE),
 };
 
-export function getDualModelConfig(): DualModelConfig {
-  return { ...dualConfig };
+export function getTriModelConfig(): TriTierModelConfig {
+  return { ...triConfig };
 }
 
-export function setDualModelConfig(update: Partial<DualModelConfig>): void {
-  dualConfig = { ...dualConfig, ...update };
+// Backward-compatible export
+export function getDualModelConfig() {
+  return {
+    planModel: triConfig.mindModel,
+    actionModel: triConfig.handsModel,
+    activeRole: triConfig.activeRole === "mind" ? "plan" : "action",
+  };
+}
+
+export function setTriModelConfig(update: Partial<TriTierModelConfig>): void {
+  triConfig = {
+    ...triConfig,
+    ...update,
+    ...(update.activeRole ? { activeRole: normalizeRole(update.activeRole) } : {}),
+  };
 }
 
 export const modelRouteItemSchema = Type.Object({
   role: Type.Optional(
     Type.Union([
-      Type.Literal("plan", { description: "Switch to high-capacity plan-model for design/decomposition" }),
-      Type.Literal("action", { description: "Switch to lean action-model for tool execution & editing" }),
+      Type.Literal("voice", { description: "Switch to 'dumb' fast communicator for conversation & recap" }),
+      Type.Literal("mind", { description: "Switch to 'smart' frontier reasoner for architecture & decomposition" }),
+      Type.Literal("hands", { description: "Switch to 'dumb' but dynamic executor for tool execution & editing" }),
+      // Compatibility aliases
+      Type.Literal("plan", { description: "Alias for 'mind'" }),
+      Type.Literal("action", { description: "Alias for 'hands'" }),
     ]),
   ),
-  plan_model: Type.Optional(Type.String({ description: "Configure plan-model (provider/id or id)" })),
-  action_model: Type.Optional(Type.String({ description: "Configure action-model (provider/id or id)" })),
+  voice_model: Type.Optional(Type.String({ description: "Configure voice-model (communicator)" })),
+  mind_model: Type.Optional(Type.String({ description: "Configure mind-model (thinker)" })),
+  hands_model: Type.Optional(Type.String({ description: "Configure hands-model (executor)" })),
+  // Compatibility params
+  plan_model: Type.Optional(Type.String({ description: "Alias for mind_model" })),
+  action_model: Type.Optional(Type.String({ description: "Alias for hands_model" })),
 });
 
 export const modelRouteSchema = Type.Object({
@@ -48,12 +88,18 @@ export const modelRouteSchema = Type.Object({
   ),
   role: Type.Optional(
     Type.Union([
-      Type.Literal("plan", { description: "Switch to high-capacity plan-model for design/decomposition" }),
-      Type.Literal("action", { description: "Switch to lean action-model for tool execution & editing" }),
+      Type.Literal("voice", { description: "Switch to 'dumb' fast communicator for conversation & recap" }),
+      Type.Literal("mind", { description: "Switch to 'smart' frontier reasoner for architecture & decomposition" }),
+      Type.Literal("hands", { description: "Switch to 'dumb' but dynamic executor for tool execution & editing" }),
+      Type.Literal("plan", { description: "Alias for 'mind'" }),
+      Type.Literal("action", { description: "Alias for 'hands'" }),
     ]),
   ),
-  plan_model: Type.Optional(Type.String({ description: "Configure plan-model (provider/id or id)" })),
-  action_model: Type.Optional(Type.String({ description: "Configure action-model (provider/id or id)" })),
+  voice_model: Type.Optional(Type.String({ description: "Configure voice-model (communicator)" })),
+  mind_model: Type.Optional(Type.String({ description: "Configure mind-model (thinker)" })),
+  hands_model: Type.Optional(Type.String({ description: "Configure hands-model (executor)" })),
+  plan_model: Type.Optional(Type.String({ description: "Alias for mind_model" })),
+  action_model: Type.Optional(Type.String({ description: "Alias for hands_model" })),
 });
 
 export async function executeModelRouterOp(
@@ -80,20 +126,28 @@ export async function executeModelRouterOp(
     };
   }
 
-  if (params.plan_model) dualConfig.planModel = params.plan_model;
-  if (params.action_model) dualConfig.actionModel = params.action_model;
-  if (params.role) {
-    dualConfig.activeRole = params.role;
+  if (params.voice_model) triConfig.voiceModel = params.voice_model;
+  if (params.mind_model || params.plan_model) triConfig.mindModel = params.mind_model || params.plan_model;
+  if (params.hands_model || params.action_model) triConfig.handsModel = params.hands_model || params.action_model;
 
-    // If session provides setModel, switch immediately
-    const targetModel = params.role === "plan" ? dualConfig.planModel : dualConfig.actionModel;
+  if (params.role) {
+    const targetRole = normalizeRole(params.role);
+    triConfig.activeRole = targetRole;
+
+    const targetModel =
+      targetRole === "voice"
+        ? triConfig.voiceModel
+        : targetRole === "mind"
+          ? triConfig.mindModel
+          : triConfig.handsModel;
+
     if (targetModel && ctx?.session?.setModel) {
       try {
         await ctx.session.setModel(targetModel);
       } catch (e: any) {
         return {
-          content: [{ type: "text" as const, text: `Active role updated to ${params.role}, but setModel failed: ${e.message}` }],
-          details: { config: dualConfig, error: e.message },
+          content: [{ type: "text" as const, text: `Active role updated to ${targetRole}, but setModel failed: ${e.message}` }],
+          details: { config: triConfig, error: e.message },
           isError: true,
         };
       }
@@ -104,10 +158,10 @@ export async function executeModelRouterOp(
     content: [
       {
         type: "text" as const,
-        text: `Dual-model route: role=${dualConfig.activeRole} | planModel=${dualConfig.planModel || "default"} | actionModel=${dualConfig.actionModel || "default"}`,
+        text: `Model route: role=${triConfig.activeRole} | voice=${triConfig.voiceModel || "default"} | mind=${triConfig.mindModel || "default"} | hands=${triConfig.handsModel || "default"}`,
       },
     ],
-    details: { config: dualConfig },
+    details: { config: triConfig },
     isError: false,
   };
 }
@@ -116,10 +170,9 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "model_route",
     label: "Model Route",
-    description: "Inspect or configure the asymmetric dual-model split (plan-model vs action-model).",
+    description: "Inspect or configure the tri-tier model split (voice=communicator, mind=thinker, hands=executor).",
     parameters: modelRouteSchema,
     execute: (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) =>
       executeModelRouterOp(_toolCallId, params, _signal, _onUpdate, ctx) as any,
   });
 }
-
