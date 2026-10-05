@@ -53,12 +53,17 @@ export function normalizeRole(role?: string): "voice" | "mind" | "hands" {
   return "hands";
 }
 
-let triConfig: TriTierModelConfig = {
-  voiceModel: process.env.LITTLE_CODER_VOICE_MODEL,
-  mindModel: process.env.LITTLE_CODER_MIND_MODEL || process.env.LITTLE_CODER_PLAN_MODEL,
-  handsModel: process.env.LITTLE_CODER_HANDS_MODEL || process.env.LITTLE_CODER_ACTION_MODEL,
-  activeRole: normalizeRole(process.env.LITTLE_CODER_ROLE),
-};
+import { loadLittleCoderSettings } from "../../_shared/little-coder-config.ts";
+
+let triConfig: TriTierModelConfig = (() => {
+  const settings = loadLittleCoderSettings();
+  return {
+    voiceModel: settings.roles.voice_model,
+    mindModel: settings.roles.mind_model,
+    handsModel: settings.roles.hands_model,
+    activeRole: settings.roles.default_role,
+  };
+})();
 
 export function getTriModelConfig(): TriTierModelConfig {
   return { ...triConfig };
@@ -198,4 +203,52 @@ export function registerModelRouteTool(pi: ExtensionAPI): void {
     execute: (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) =>
       executeModelRouterOp(_toolCallId, params, _signal, _onUpdate, ctx) as any,
   });
+
+  // Slash command: /role [voice|mind|hands]
+  pi.registerCommand?.("role", {
+    description: "Inspect or switch active tri-tier role: /role [voice|mind|hands]",
+    handler: async (args: string, ctx: any) => {
+      const target = args.trim().toLowerCase();
+      if (!target || target === "status") {
+        const locked = isModelSwitchLocked() ? " (locked in container)" : "";
+        const m = target === "voice" ? triConfig.voiceModel : target === "mind" ? triConfig.mindModel : triConfig.handsModel;
+        ctx.ui?.notify?.(
+          `Active role: ${triConfig.activeRole} | Model: ${m || "default"}${locked}\nRoles: voice (fast/0 thinking), mind (deep/8k thinking), hands (executor/1k thinking)`,
+          "info",
+        );
+        return;
+      }
+      if (["voice", "mind", "hands", "plan", "action"].includes(target)) {
+        const res = await executeModelRouterOp("slash-role", { role: target }, undefined, undefined, ctx);
+        ctx.ui?.notify?.(res.content[0].text, res.isError ? "error" : "info");
+      } else {
+        ctx.ui?.notify?.("Usage: /role [voice|mind|hands]", "warning");
+      }
+    },
+  });
+
+  // Slash command: /model-route [voice|mind|hands] <model-id>
+  pi.registerCommand?.("model-route", {
+    description: "Configure role-specific models: /model-route <role> <model-id>",
+    handler: async (args: string, ctx: any) => {
+      const parts = args.trim().split(/\s+/);
+      const role = parts[0]?.toLowerCase();
+      const model = parts.slice(1).join(" ");
+      if (!role || !model || !["voice", "mind", "hands"].includes(role)) {
+        ctx.ui?.notify?.(
+          `Configured models:\nvoice: ${triConfig.voiceModel || "default"}\nmind: ${triConfig.mindModel || "default"}\nhands: ${triConfig.handsModel || "default"}\n\nUsage: /model-route <voice|mind|hands> <model-id>`,
+          "info",
+        );
+        return;
+      }
+      const params: any = {};
+      if (role === "voice") params.voice_model = model;
+      if (role === "mind") params.mind_model = model;
+      if (role === "hands") params.hands_model = model;
+
+      const res = await executeModelRouterOp("slash-model-route", params, undefined, undefined, ctx);
+      ctx.ui?.notify?.(res.content[0].text, res.isError ? "error" : "info");
+    },
+  });
 }
+

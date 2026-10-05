@@ -19,7 +19,7 @@ import { registerRepoMapTool } from "./src/repo-map.ts";
 import { registerOutlineTool } from "./src/outline.ts";
 import { registerSessionTool } from "./src/session.ts";
 import { registerModelRouteTool } from "./src/model-router.ts";
-import { injectThinkingEffort, type ThinkingRole } from "./src/effort.ts";
+import { registerEffortCommands, injectThinkingEffort, getEffortOverride, getEffortConfig, type ThinkingRole } from "./src/effort.ts";
 
 export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerScratchpadTool(pi);
@@ -27,6 +27,7 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
   registerOutlineTool(pi);
   registerSessionTool(pi);
   registerModelRouteTool(pi);
+  registerEffortCommands(pi);
 
   const dedupe = makeDedupe();
 
@@ -47,6 +48,16 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
       const payload = event?.payload;
       if (!payload) return;
 
+      const effortOverride = getEffortOverride();
+      if (effortOverride) {
+        return injectThinkingEffort(
+          payload,
+          effortOverride.level,
+          effortOverride.tokens,
+          getEffortConfig(),
+        );
+      }
+
       // Check intent from last message if available
       const messages = payload?.messages || ctx?.session?.messages || [];
       const lastMsg = messages[messages.length - 1];
@@ -66,7 +77,7 @@ export default function extraToolsExtension(pi: ExtensionAPI): void {
       // If active role is "voice", force thinking off (0 tokens) regardless of prompt
       // Otherwise apply task-specific intent or fallback to role budget
       const steeringTarget = activeRole === "voice" ? "voice" : (detectedTask || activeRole);
-      const modifiedPayload = injectThinkingEffort(payload, steeringTarget);
+      const modifiedPayload = injectThinkingEffort(payload, steeringTarget, undefined, getEffortConfig());
       return modifiedPayload;
     } catch {
       // Non-blocking fallback

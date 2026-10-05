@@ -102,4 +102,47 @@ describe("injectThinkingEffort", () => {
       expect(resHands.thinking.budget_tokens).toBe(1024);
     });
   });
+
+  describe("registerEffortCommands (/effort and /thinking)", () => {
+    it("registers commands and handles /effort and /thinking overrides", async () => {
+      const { registerEffortCommands, getEffortOverride, setEffortOverride } = require("./effort");
+      setEffortOverride(null);
+
+      const registeredCommands: Record<string, any> = {};
+      const mockPi = {
+        registerCommand: (name: string, cmd: any) => {
+          registeredCommands[name] = cmd;
+        },
+      };
+
+      registerEffortCommands(mockPi);
+      expect(registeredCommands.effort).toBeDefined();
+      expect(registeredCommands.thinking).toBeDefined();
+
+      let notifyMsg = "";
+      const mockCtx = {
+        ui: {
+          notify: (msg: string) => {
+            notifyMsg = msg;
+          },
+        },
+      };
+
+      // Test status
+      await registeredCommands.effort.handler("", mockCtx);
+      expect(notifyMsg).toContain("Thinking effort");
+
+      // Test setting token override
+      await registeredCommands.effort.handler("4096", mockCtx);
+      expect(getEffortOverride()?.tokens).toBe(4096);
+
+      // Test /thinking alias turning off
+      await registeredCommands.thinking.handler("off", mockCtx);
+      expect(getEffortOverride()?.level).toBe("off");
+
+      // Test reset
+      await registeredCommands.effort.handler("reset", mockCtx);
+      expect(getEffortOverride()).toBeNull();
+    });
+  });
 });

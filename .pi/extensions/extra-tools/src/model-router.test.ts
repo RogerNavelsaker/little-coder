@@ -124,4 +124,39 @@ describe("model-router (tri-tier model split)", () => {
       }
     }
   });
+
+  it("handles /role and /model-route slash commands properly", async () => {
+    const registeredCommands: Record<string, any> = {};
+    const mockPi = {
+      registerTool: () => {},
+      registerCommand: (name: string, cmd: any) => {
+        registeredCommands[name] = cmd;
+      },
+    };
+    registerModelRouteTool(mockPi as any);
+
+    expect(registeredCommands.role).toBeDefined();
+    expect(registeredCommands["model-route"]).toBeDefined();
+
+    let notification = "";
+    const mockCtx = {
+      ui: {
+        notify: (msg: string) => {
+          notification = msg;
+        },
+      },
+    };
+
+    // Test /role status
+    await registeredCommands.role.handler("", mockCtx);
+    expect(notification).toContain("Active role:");
+
+    // Test /role mind
+    await registeredCommands.role.handler("mind", mockCtx);
+    expect(getTriModelConfig().activeRole).toBe("mind");
+
+    // Test /model-route mind test-model
+    await registeredCommands["model-route"].handler("mind custom/o3", mockCtx);
+    expect(getTriModelConfig().mindModel).toBe("custom/o3");
+  });
 });

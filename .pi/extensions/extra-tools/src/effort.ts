@@ -19,6 +19,34 @@ export interface EffortConfig {
   taskBudgets: Record<TaskType, { level: "high" | "medium" | "low" | "off"; tokens: number }>;
 }
 
+import { loadLittleCoderSettings } from "../../_shared/little-coder-config.ts";
+
+export function getEffortConfig(): EffortConfig {
+  const s = loadLittleCoderSettings();
+  return {
+    roleBudgets: {
+      voice: { level: "off", tokens: s.effort.voice_budget },
+      mind: { level: "high", tokens: s.effort.mind_budget },
+      hands: { level: "low", tokens: s.effort.hands_budget },
+      coordinator: { level: "high", tokens: 4096 },
+      coder: { level: "medium", tokens: 2048 },
+      reviewer: { level: "low", tokens: 1024 },
+      watchdog: { level: "off", tokens: 0 },
+    },
+    taskBudgets: { ...DEFAULT_EFFORT_CONFIG.taskBudgets },
+  };
+}
+
+let activeEffortOverride: { level?: "high" | "medium" | "low" | "off"; tokens?: number } | null = null;
+
+export function setEffortOverride(override: { level?: "high" | "medium" | "low" | "off"; tokens?: number } | null): void {
+  activeEffortOverride = override;
+}
+
+export function getEffortOverride(): { level?: "high" | "medium" | "low" | "off"; tokens?: number } | null {
+  return activeEffortOverride;
+}
+
 export const DEFAULT_EFFORT_CONFIG: EffortConfig = {
   roleBudgets: {
     // Tri-tier architecture roles
@@ -124,3 +152,65 @@ export function injectThinkingEffort(
 
   return cloned;
 }
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export function registerEffortCommands(pi: ExtensionAPI): void {
+  const handler = async (args: string, ctx: any) => {
+    const raw = args.trim().toLowerCase();
+    const currentOverride = getEffortOverride();
+    const config = getEffortConfig();
+
+    if (!raw || raw === "status") {
+      const overrideStr = currentOverride
+        ? ` (override: ${currentOverride.level || currentOverride.tokens + " tokens"})`
+        : " (dynamic / default)";
+      ctx.ui?.notify?.(
+        `Thinking effort${overrideStr}:\n` +
+          `• voice: ${config.roleBudgets.voice.tokens} tokens (off)\n` +
+          `• mind: ${config.roleBudgets.mind.tokens} tokens (high)\n` +
+          `• hands: ${config.roleBudgets.hands.tokens} tokens (dynamic)\n\n` +
+          `Usage: /effort [off|low|medium|high|<tokens>|reset] (alias: /thinking)`,
+        "info",
+      );
+      return;
+    }
+
+    if (raw === "reset" || raw === "auto" || raw === "default") {
+      setEffortOverride(null);
+      ctx.ui?.notify?.("Thinking effort override cleared. Reverted to dynamic role/intent budgets.", "info");
+      return;
+    }
+
+    if (["off", "low", "medium", "high"].includes(raw)) {
+      setEffortOverride({ level: raw as any });
+      ctx.ui?.notify?.(`Thinking effort override set to: ${raw}`, "info");
+      return;
+    }
+
+    const tokens = parseInt(raw, 10);
+    if (!isNaN(tokens) && tokens >= 0) {
+      if (tokens === 0) {
+        setEffortOverride({ level: "off", tokens: 0 });
+        ctx.ui?.notify?.("Thinking effort turned off (0 tokens).", "info");
+      } else {
+        setEffortOverride({ tokens });
+        ctx.ui?.notify?.(`Thinking effort budget set to ${tokens} tokens.`, "info");
+      }
+      return;
+    }
+
+    ctx.ui?.notify?.("Usage: /effort [off|low|medium|high|<tokens>|reset] (alias: /thinking)", "warning");
+  };
+
+  pi.registerCommand?.("effort", {
+    description: "Inspect or configure thinking / reasoning effort: /effort [off|low|medium|high|<tokens>|reset]",
+    handler,
+  });
+
+  pi.registerCommand?.("thinking", {
+    description: "Alias for /effort: /thinking [off|low|medium|high|<tokens>|reset]",
+    handler,
+  });
+}
+

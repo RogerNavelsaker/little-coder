@@ -213,16 +213,53 @@ export function registerContextWatchdog(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("watchdog", {
-    description: "Show context watchdog status and token usage",
-    handler: async (_args: string, ctx: any) => {
-      const u = watchdogState.lastUsage;
-      const usageStr = u?.percent !== null && u?.percent !== undefined
-        ? `${Math.round(u.percent)}%`
-        : "unknown";
-      ctx.ui?.notify?.(
-        `Watchdog: ${watchdogState.paused ? "paused" : "active"} (threshold: ${watchdogState.threshold}%, usage: ${usageStr})`,
-        "info",
-      );
+    description: "Show or control context watchdog: /watchdog [compact|pause|resume|threshold <num>]",
+    handler: async (args: string, ctx: any) => {
+      const parts = args.trim().split(/\s+/);
+      const sub = parts[0]?.toLowerCase();
+
+      if (!sub || sub === "status") {
+        const u = watchdogState.lastUsage;
+        const usageStr = u?.percent !== null && u?.percent !== undefined
+          ? `${Math.round(u.percent)}%`
+          : "unknown";
+        ctx.ui?.notify?.(
+          `Watchdog: ${watchdogState.paused ? "paused" : "active"} (threshold: ${watchdogState.threshold}%, usage: ${usageStr})\nUsage: /watchdog [compact|pause|resume|threshold <1..99>]`,
+          "info",
+        );
+        return;
+      }
+
+      if (sub === "compact") {
+        const res = await executeContextWatchdogOp("slash-wd", { action: "compact" }, undefined, undefined, ctx);
+        ctx.ui?.notify?.(res.content[0].text, res.isError ? "error" : "info");
+        return;
+      }
+
+      if (sub === "pause") {
+        const res = await executeContextWatchdogOp("slash-wd", { action: "pause" }, undefined, undefined, ctx);
+        ctx.ui?.notify?.(res.content[0].text, "info");
+        return;
+      }
+
+      if (sub === "resume") {
+        const res = await executeContextWatchdogOp("slash-wd", { action: "resume" }, undefined, undefined, ctx);
+        ctx.ui?.notify?.(res.content[0].text, "info");
+        return;
+      }
+
+      if (sub === "threshold" || sub === "limit") {
+        const val = parseInt(parts[1], 10);
+        if (!isNaN(val) && val >= 1 && val <= 99) {
+          const res = await executeContextWatchdogOp("slash-wd", { threshold: val }, undefined, undefined, ctx);
+          ctx.ui?.notify?.(res.content[0].text, "info");
+        } else {
+          ctx.ui?.notify?.("Usage: /watchdog threshold <1..99>", "warning");
+        }
+        return;
+      }
+
+      ctx.ui?.notify?.("Usage: /watchdog [compact|pause|resume|threshold <1..99>]", "warning");
     },
   });
 
