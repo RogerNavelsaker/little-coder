@@ -288,8 +288,24 @@ export async function executeBasicToolGroupingOp(
 
 export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupingTracker = defaultTracker): void {
   // Hook lifecycle events to maintain grouping state and turn timing
-  pi.on('agent_start', () => {
+  pi.on('agent_start', (_event: any, ctx: any) => {
     tracker.setAgentStart(Date.now());
+    // Clear completion badge widget when agent begins working
+    if (ctx?.ui?.setWidget) {
+      try {
+        ctx.ui.setWidget('turn-worked', undefined);
+      } catch {
+        // non-fatal
+      }
+    }
+    // Clear any legacy statusline entry if present
+    if (ctx?.ui?.setStatus) {
+      try {
+        ctx.ui.setStatus('turn-worked', undefined);
+      } catch {
+        // non-fatal
+      }
+    }
   });
 
   pi.on('turn_start', () => {
@@ -330,10 +346,19 @@ export function registerBasicToolGrouping(pi: ExtensionAPI, tracker: ToolGroupin
       // non-fatal
     }
 
-    // 2. Also notify status line via ctx.ui.setStatus if available for fallback visibility
+    // 2. Place turn badge above user prompt area (where "Working..." was) using setWidget, NOT statusline!
+    if (ctx?.ui?.setWidget) {
+      try {
+        ctx.ui.setWidget('turn-worked', [statusLine.trim()], { placement: 'aboveEditor' });
+      } catch {
+        // non-fatal
+      }
+    }
+
+    // 3. Ensure footer/statusline is never polluted with turn badge
     if (ctx?.ui?.setStatus) {
       try {
-        ctx.ui.setStatus('turn-worked', statusLine.trim());
+        ctx.ui.setStatus('turn-worked', undefined);
       } catch {
         // non-fatal
       }

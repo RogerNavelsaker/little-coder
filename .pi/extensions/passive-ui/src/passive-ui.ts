@@ -9,7 +9,7 @@
 
 import { Type } from '@sinclair/typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
+import { Container, Text, matchesKey } from '@earendil-works/pi-tui';
 import {
   registerBasicToolGrouping,
   defaultTracker,
@@ -139,6 +139,9 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
         if (target === 'minimal' || target === 'standard' || target === 'full' || target === 'custom' || target === 'off') {
           setStatuslineMode(target as StatuslineMode);
           saveStatuslineSetting(target as StatuslineMode, getStatuslineItems(), ctx?.cwd || process.cwd());
+          if (typeof ctx?.ui?.requestRender === 'function') {
+            ctx.ui.requestRender();
+          }
           if (ctx?.ui?.notify) {
             ctx.ui.notify(`Statusline mode set and saved to: ${target}`, 'info');
           }
@@ -242,17 +245,17 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
               updateText();
 
               comp.handleInput = (key: string) => {
-                if (key === 'up' || key === 'k') {
+                if (key === 'up' || key === 'k' || matchesKey(key, 'up')) {
                   selectedIndex = (selectedIndex - 1 + rows.length) % rows.length;
                   updateText();
                   return true;
                 }
-                if (key === 'down' || key === 'j') {
+                if (key === 'down' || key === 'j' || matchesKey(key, 'down')) {
                   selectedIndex = (selectedIndex + 1) % rows.length;
                   updateText();
                   return true;
                 }
-                if (key === 'space') {
+                if (key === 'space' || key === ' ' || matchesKey(key, 'space')) {
                   const row = rows[selectedIndex];
                   if (row.type === 'item') {
                     currentItems[row.item.key] = !currentItems[row.item.key];
@@ -269,7 +272,7 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
                     return true;
                   }
                 }
-                if (key === 'return' || key === 'enter') {
+                if (key === 'return' || key === 'enter' || matchesKey(key, 'enter')) {
                   const row = rows[selectedIndex];
                   if (row.type === 'preset') {
                     currentMode = row.preset.id;
@@ -279,13 +282,16 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
                   setStatuslineMode(currentMode);
                   setStatuslineItems(currentItems);
                   saveStatuslineSetting(currentMode, currentItems, ctx?.cwd || process.cwd());
+                  if (typeof ctx?.ui?.requestRender === 'function') {
+                    ctx.ui.requestRender();
+                  }
                   if (ctx?.ui?.notify) {
                     ctx.ui.notify(`Statusline updated: ${currentMode}`, 'info');
                   }
                   done(true);
                   return true;
                 }
-                if (key === 'escape' || key === 'q') {
+                if (key === 'escape' || key === 'q' || matchesKey(key, 'escape')) {
                   done(false);
                   return true;
                 }
@@ -293,7 +299,7 @@ export function registerPassiveUi(pi: ExtensionAPI, tracker: ToolGroupingTracker
               };
 
               return comp;
-            }, { overlay: true });
+            });
             return;
           } catch {
             // fallback to notification

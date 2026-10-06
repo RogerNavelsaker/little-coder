@@ -2477,7 +2477,7 @@ __export(exports_type2, {
 var Type = exports_type2;
 
 // .pi/extensions/passive-ui/src/passive-ui.ts
-import { Text as Text3 } from "@earendil-works/pi-tui";
+import { Text as Text3, matchesKey } from "@earendil-works/pi-tui";
 
 // .pi/extensions/passive-ui/src/basic-tool-grouping.ts
 import { Text } from "@earendil-works/pi-tui";
@@ -3291,8 +3291,18 @@ var basicToolGroupingSchema = Type.Object({
   isFirst: Type.Optional(Type.Boolean({ description: "Whether tool is first in group" }))
 });
 function registerBasicToolGrouping(pi, tracker = defaultTracker) {
-  pi.on("agent_start", () => {
+  pi.on("agent_start", (_event, ctx) => {
     tracker.setAgentStart(Date.now());
+    if (ctx?.ui?.setWidget) {
+      try {
+        ctx.ui.setWidget("turn-worked", undefined);
+      } catch {}
+    }
+    if (ctx?.ui?.setStatus) {
+      try {
+        ctx.ui.setStatus("turn-worked", undefined);
+      } catch {}
+    }
   });
   pi.on("turn_start", () => {
     tracker.setTurnStart(Date.now());
@@ -3321,9 +3331,14 @@ function registerBasicToolGrouping(pi, tracker = defaultTracker) {
         lastAssistantMsg.turnDurationBadge = statusLine;
       }
     } catch {}
+    if (ctx?.ui?.setWidget) {
+      try {
+        ctx.ui.setWidget("turn-worked", [statusLine.trim()], { placement: "aboveEditor" });
+      } catch {}
+    }
     if (ctx?.ui?.setStatus) {
       try {
-        ctx.ui.setStatus("turn-worked", statusLine.trim());
+        ctx.ui.setStatus("turn-worked", undefined);
       } catch {}
     }
   });
@@ -3628,6 +3643,9 @@ function registerPassiveUi(pi, tracker = defaultTracker) {
         if (target === "minimal" || target === "standard" || target === "full" || target === "custom" || target === "off") {
           setStatuslineMode(target);
           saveStatuslineSetting(target, getStatuslineItems(), ctx?.cwd || process.cwd());
+          if (typeof ctx?.ui?.requestRender === "function") {
+            ctx.ui.requestRender();
+          }
           if (ctx?.ui?.notify) {
             ctx.ui.notify(`Statusline mode set and saved to: ${target}`, "info");
           }
@@ -3710,17 +3728,17 @@ function registerPassiveUi(pi, tracker = defaultTracker) {
               };
               updateText();
               comp.handleInput = (key) => {
-                if (key === "up" || key === "k") {
+                if (key === "up" || key === "k" || matchesKey(key, "up")) {
                   selectedIndex = (selectedIndex - 1 + rows.length) % rows.length;
                   updateText();
                   return true;
                 }
-                if (key === "down" || key === "j") {
+                if (key === "down" || key === "j" || matchesKey(key, "down")) {
                   selectedIndex = (selectedIndex + 1) % rows.length;
                   updateText();
                   return true;
                 }
-                if (key === "space") {
+                if (key === "space" || key === " " || matchesKey(key, "space")) {
                   const row = rows[selectedIndex];
                   if (row.type === "item") {
                     currentItems[row.item.key] = !currentItems[row.item.key];
@@ -3737,7 +3755,7 @@ function registerPassiveUi(pi, tracker = defaultTracker) {
                     return true;
                   }
                 }
-                if (key === "return" || key === "enter") {
+                if (key === "return" || key === "enter" || matchesKey(key, "enter")) {
                   const row = rows[selectedIndex];
                   if (row.type === "preset") {
                     currentMode = row.preset.id;
@@ -3747,20 +3765,23 @@ function registerPassiveUi(pi, tracker = defaultTracker) {
                   setStatuslineMode(currentMode);
                   setStatuslineItems(currentItems);
                   saveStatuslineSetting(currentMode, currentItems, ctx?.cwd || process.cwd());
+                  if (typeof ctx?.ui?.requestRender === "function") {
+                    ctx.ui.requestRender();
+                  }
                   if (ctx?.ui?.notify) {
                     ctx.ui.notify(`Statusline updated: ${currentMode}`, "info");
                   }
                   done(true);
                   return true;
                 }
-                if (key === "escape" || key === "q") {
+                if (key === "escape" || key === "q" || matchesKey(key, "escape")) {
                   done(false);
                   return true;
                 }
                 return false;
               };
               return comp;
-            }, { overlay: true });
+            });
             return;
           } catch {}
         }
