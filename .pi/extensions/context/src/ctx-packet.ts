@@ -206,7 +206,10 @@ export async function executeCtxPacketOp(
   const piContextDir = resolvePiContextDir(repoRoot);
   
   if (!piContextDir) {
-    return { content: [{ type: 'text', text: 'No .pi-context directory found.' }] };
+    return {
+      content: [{ type: 'text', text: 'No .pi-context directory found.' }],
+      details: { found: false, repoRoot, path: null },
+    };
   }
 
   const eventsPath = join(piContextDir, 'events.jsonl');
