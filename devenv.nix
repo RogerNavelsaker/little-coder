@@ -11,6 +11,9 @@ in
     nushell
     ddgr
     curl
+    ripgrep
+    fd
+    ast-grep
     aria2
     yt-dlp
     inputs.flyscrape.packages.${system}.default
