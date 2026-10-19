@@ -93,14 +93,17 @@ Instead of bloated JSON tool registries, extensions deliver domain capabilities 
 | **`extra-tools`** | `little-coder-cbcc` | **Completed**: Workspace tools: `repo_map`, `scratchpad` ([ACTIVE_CLIPBOARD]), `session` (herdr-backed), `outline` (lines:N-M). |
 | **`project-context`** | `little-coder-78a9` | **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` injection + baked-in `@filepath` prompt expansion. |
 | **`context-watchdog`**| `little-coder-b2be` | Mid-run token compaction watchdog for autonomous Warren runs before context window overflow (#59, #68, #128). |
-| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser`, `write-guard`, `read-guard` (with Volition disk overflow), `read-guard-edit`, `quality-monitor` (mtime & compaction aware), `output-machete` (`little-coder-f705`), `governor` (`little-coder-03cd`). |
-| **`turn-cap`** | `little-coder-071c` | Runaway loop guard: safety turn cap + 5-turn finalize warning before budget exhaustion. |
+| **`quality-stack`** | `little-coder-c0da` | Guardrails: `output-parser`, `write-guard`, `read-guard` (with Volition disk overflow), `read-guard-edit`, `quality-monitor` (mtime & compaction aware, thrashing loop detection with `thrashing_loop` type + role-switch recommendation), `focus` (burst detection & cooldown suspension), `output-machete` (`little-coder-f705`), `governor` (`little-coder-03cd`). |
 | **`effort`** | `little-coder-dcee` | **Completed**: Dynamic thinking-budget injection per sub-goal (`/effort` & `/thinking` commands, `voice`/`mind`/`hands` budgets). |
-| **`model-router`** | `little-coder-fbd5` | **Completed**: Asymmetric tri-tier model router (`/role`, `/model-route`, container lock guard). |
 | **`web-tools`** | `little-coder-6ebe` | Read-only web utilities: `fetch`, `search`, `control` CLIs (flyscrape / browser-cli). |
 | **`docs-tools`** | `little-coder-5030` | Document processing: `doc_read`, `doc_ocr`, `doc_extract` via docling CLI. |
 | **`grove`** | `little-coder-bd7f` | Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs. |
-| **`orientation`** | `little-coder-af1b` | Session resume orientation block (elapsed sleep time, git HEAD status, external file changes). |
+| **`autonomous`** | — | Autonomous session management and auto-resume. |
+| **`command-history`** | — | Persistent command history across sessions. |
+| **`passive-ui`** | — | TUI rendering engine: tree connectors, tool compaction, turn badge, thinking step indicators. |
+| **`recap`** | — | Session recap and summary generation. |
+| **`scheduler`** | — | Scheduled task execution and cron-like triggers. |
+| **`skill-inject`** | — | Dynamic skill injection into agent context. |
 
 ### Multi-Agent Coordination Policy (Minimalist Substrate)
 
@@ -150,7 +153,7 @@ The launcher detects its mode from `process.argv[1]`:
 Skills provide high-level workflows and specialized capability guides:
 
 - **Protocols** (`skills/protocols/`): `task_decomposition.md`, `grilling.md` (`/grill-me`), `grill-with-docs.md` (`/grill-with-docs`), `systematic-debugging.md` (`/debug`).
-- **Tools Reference** (`skills/tools/`): `nu.md`, `edit.md`, `read.md`, `write.md`, `grep.md`, `glob.md`, `shell_session.md`.
+- **Tools Reference** (`skills/tools/`): `bash.md`, `edit.md`, `glob.md`, `grep.md`, `nu.md`, `read.md`, `shell_session.md`, `webfetch.md`, `write.md`.
 - **Web Skills & CLI Suite** (`skills/web/`):
   - **`web-search` (`ddgr`)**: Fast, low-token search via DuckDuckGo CLI (`ddgr`).
     - *Override*: Set `SEARXNG_URL` (default: `""`, disabled) to query a SearXNG meta-search instance first with `ddgr` fallback.

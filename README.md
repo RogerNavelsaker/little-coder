@@ -76,8 +76,7 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 - **`extra-tools`** (`little-coder-cbcc`): `repo_map`, `scratchpad`, `session` (herdr-backed), `outline` as workspace CLIs.
 - **`project-context`** (`little-coder-78a9`): **Completed**: Workspace `AGENTS.md`/`CLAUDE.md` loader + baked-in `@filepath` reference expansion.
 - **`context-watchdog`** (`little-coder-b2be`): Mid-run token compaction watchdog for autonomous Warren container runs (#59, #68, #128).
-- **`quality-stack`** (`little-coder-c0da`): `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path rewrites), `output-parser` (fenced tool recovery).
-- **`turn-cap`** (`little-coder-071c`): Safety turn limits + 5-turn finalize warning before budget exhaustion.
+- **`quality-stack`** (`little-coder-c0da`): `read-guard` (50% window cap), `read-guard-edit`, `write-guard` (Windows reserved names, root path rewrites), `output-parser` (fenced tool recovery), `quality-monitor` (mtime & compaction aware, thrashing loop detection), `focus` (burst detection & cooldown suspension).
 - **`effort`** (`little-coder-dcee`): Dynamic thinking-budget injection per sub-goal.
 - **`web-tools`** (`little-coder-6ebe`): Web research CLIs:
   - `ddgr`: Low-token search API querying (optional override: `SEARXNG_URL`, default: `""`).
@@ -86,6 +85,12 @@ Rather than registering a bloated registry of bespoke JSON-RPC tools that exhaus
 - **`docs-tools`** (`little-coder-5030`): Document processing CLI (`docling.nu`):
   - Converts PDF, DOCX, PPTX, XLSX, scanned documents to Markdown/JSON via `DOCLING_URL` (default: `""`, set to your Docling Serve instance). Supports `--vlm` for local VLM acceleration.
 - **`grove`** (`little-coder-bd7f`): Direct environment integration with `sd`, `ml`, `tl`, and `cn` CLIs.
+- **`autonomous`**: Autonomous session management and auto-resume.
+- **`command-history`**: Persistent command history across sessions.
+- **`passive-ui`**: TUI rendering engine: tree connectors, tool compaction, turn badge, thinking step indicators.
+- **`recap`**: Session recap and summary generation.
+- **`scheduler`**: Scheduled task execution and cron-like triggers.
+- **`skill-inject`**: Dynamic skill injection into agent context.
 
 ### Source layout
 
@@ -97,9 +102,21 @@ little-coder/
 │   ├── settings.json
 │   └── extensions/
 │       ├── _shared/          # shared TypeScript helpers across extensions
-│       ├── basic-tools/      # universal Op[] schema (sh, read, edit, write, grep, find, ls)
+│       ├── autonomous/       # autonomous session management
+│       ├── basic-tools/      # universal Op[] schema (sh, read, edit, write, grep, find, ls, ast_search)
+│       ├── command-history/  # persistent command history
 │       ├── context/          # context scratchpad tools
-│       └── project-context/  # workspace AGENTS.md/CLAUDE.md loader + @filepath expansion
+│       ├── context-watchdog/ # token compaction watchdog
+│       ├── docs-tools/       # document processing
+│       ├── extra-tools/      # workspace CLIs (repo_map, scratchpad, session, outline)
+│       ├── grove/            # seeds/mulch/trellis/canopy integration
+│       ├── passive-ui/       # TUI rendering engine
+│       ├── project-context/  # workspace AGENTS.md/CLAUDE.md loader + @filepath expansion
+│       ├── quality-stack/    # guardrails & quality monitors
+│       ├── recap/            # session recap
+│       ├── scheduler/        # scheduled task execution
+│       ├── skill-inject/     # dynamic skill injection
+│       └── web-tools/        # web research CLIs
 ├── rules/                    # behavioral standards (caveman, token-economy, defense-in-depth, etc.)
 ├── skills/                   # skills suite (protocols, tools, web-fetch, web-search, web-download)
 ├── flake.nix                 # Nix package and distroless container image
