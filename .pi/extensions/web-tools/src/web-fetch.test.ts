@@ -15,7 +15,9 @@ describe("web-tools/web_fetch", () => {
     });
 
     expect(res.success).toBe(true);
-    expect(res.output).toContain("documentation examples");
+    // example.com's body copy has changed over the years; match the one
+    // stable word that every revision of the page contains.
+    expect(res.output).toContain("domain");
   });
 
   it("registers web_fetch tool with pi", () => {

@@ -22,6 +22,10 @@ describe("orientation", () => {
     const now = Date.now();
     const result = computeOrientation(now - 75_000, process.cwd(), now);
     expect(result.elapsedIdleMs).toBe(75_000);
-    expect(result.gitBranch).toBeDefined();
+    // CI checkouts (and warren workspaces) run with a detached HEAD,
+    // where `git branch --show-current` is empty; the commit is always
+    // available in a repo.
+    expect(result.gitCommit).toBeDefined();
+    expect(result.gitDirtyCount).toBeGreaterThanOrEqual(0);
   });
 });

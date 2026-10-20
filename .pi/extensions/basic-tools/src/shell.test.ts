@@ -7,7 +7,7 @@ import {
   formatStarshipHeader,
   formatStarshipPrompt,
 } from "./display.js";
-import { invokeTool, contentText, FIXTURE } from "./test-helpers.js";
+import { invokeTool, contentText, FIXTURE, CWD } from "./test-helpers.js";
 
 const DIRENV_FIXTURE = `/tmp/pi-shell-test-direnv-${process.pid}`;
 
@@ -125,13 +125,21 @@ describe("shell tool", () => {
   // ---- Env modes ----
   describe("env modes", () => {
     test("env:current passes through ambient env", async () => {
-      const { result } = await invokeTool(registerShellTool, {
-        commands: ["echo $env.USER"],
-        env: "current",
-      });
-      expect(result.details.exitCode).toBe(0);
-      expect(result.details.envResolved).toContain("current");
-      expect(result.details.stdout).toContain("rona");
+      const user = "envcurrent-pass-through";
+      const origUser = process.env.USER;
+      process.env.USER = user;
+      try {
+        const { result } = await invokeTool(registerShellTool, {
+          commands: ["echo $env.USER"],
+          env: "current",
+        });
+        expect(result.details.exitCode).toBe(0);
+        expect(result.details.envResolved).toContain("current");
+        expect(result.details.stdout).toContain(user);
+      } finally {
+        if (origUser === undefined) delete process.env.USER;
+        else process.env.USER = origUser;
+      }
     });
 
     test("env:clean returns a minimal environment", async () => {
@@ -300,7 +308,7 @@ describe("shell tool", () => {
     test("long command detaches to background session after grace window expires", async () => {
       const messages: string[] = [];
       const mockCtx = {
-        cwd: process.cwd(),
+        cwd: CWD,
         sendUserMessage: (msg: string) => messages.push(msg),
       };
 
@@ -332,7 +340,7 @@ describe("shell tool", () => {
     test("wake_on regex match triggers notification when pattern appears in background log", async () => {
       const messages: string[] = [];
       const mockCtx = {
-        cwd: process.cwd(),
+        cwd: CWD,
         sendUserMessage: (msg: string) => messages.push(msg),
       };
 
