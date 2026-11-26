@@ -1,6 +1,7 @@
 # Node / TypeScript
 node_modules/
 .devenv/
+.direnv/
 .DS_Store
 
 # Pi session + auth state (local to each user)

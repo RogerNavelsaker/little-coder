@@ -4,6 +4,8 @@ let
   system = pkgs.stdenv.hostPlatform.system;
 in
 {
+  imports = [ /workspace/common/main/devenv.nix ];
+
   packages = with pkgs; [
     bun
     bubblewrap
@@ -34,9 +36,5 @@ in
 
   scripts.little-coder.exec = ''
     exec bun "$DEVENV_ROOT/bin/little-coder.ts" "$@"
-  '';
-
-  enterShell = ''
-    export PATH="/home/rona/Repositories/scripts:$PATH"
   '';
 }
